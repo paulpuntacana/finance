@@ -73,8 +73,6 @@ function CreateOrgModal({ accountantId, onClose, onCreated }) {
       .select()
       .single()
     if (err) { setError(err.message); setLoading(false); return }
-    // Create org_data row for this org
-    await supabase.from('org_data').upsert({ org_id: org.id, updated_at: new Date().toISOString() })
     setLoading(false)
     onCreated()
     onClose()

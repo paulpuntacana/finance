@@ -19,53 +19,69 @@ export const OrgDataProvider = ({ orgId, readOnly, children }) => (
   </OrgDataContext.Provider>
 )
 
+// Mapping: storage key → Supabase tabel + modus
+const TABLE_CONFIG = {
+  settings:          { table: 'user_settings',    mode: 'single' },
+  clients:           { table: 'clients',           mode: 'array'  },
+  invoices:          { table: 'invoices',          mode: 'array'  },
+  expenses:          { table: 'expenses',          mode: 'array'  },
+  entities:          { table: 'entities',          mode: 'array'  },
+  quotes:            { table: 'quotes',            mode: 'array'  },
+  horizonData:       { table: 'horizon_data',      mode: 'single' },
+  boek_assets:       { table: 'boek_assets',       mode: 'array'  },
+  boek_entries:      { table: 'boek_entries',      mode: 'array'  },
+  purchase_invoices: { table: 'purchase_invoices', mode: 'array'  },
+}
+
 // Cloud-synced storage hook
-// — When inside OrgDataProvider: uses org_data table (shared between accountant + org members)
-// — Otherwise: uses user_data table (personal, keyed by user.id)
+// — Elke sleutel heeft nu zijn eigen Supabase-tabel
+// — Inside OrgDataProvider: filtert op org_id (gedeelde data voor accountant)
+// — Otherwise: filtert op user_id (persoonlijke data)
 export const useCloudStorage = (key, defaultValue) => {
   const { user } = useContext(AuthContext) || {}
   const { orgId, readOnly } = useContext(OrgDataContext) || {}
 
-  // Local cache key
   const storageKey = orgId ? `org_${orgId}_${key}` : user ? `${user.id}_${key}` : key
-
   const [value, setValue] = useState(defaultValue)
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     const load = async () => {
-      if (isSupabaseConfigured && (user || orgId)) {
+      const cfg = TABLE_CONFIG[key]
+      if (isSupabaseConfigured && cfg && (user || orgId)) {
         try {
-          if (orgId) {
-            // Org-level shared data
-            const { data } = await supabase
-              .from('org_data')
-              .select(key)
-              .eq('org_id', orgId)
-              .single()
-            if (data && data[key] !== null && data[key] !== undefined) {
-              setValue(data[key])
-              try { localStorage.setItem(storageKey, JSON.stringify(data[key])) } catch {}
+          const idField = orgId ? 'org_id' : 'user_id'
+          const idValue = orgId || user.id
+
+          if (cfg.mode === 'single') {
+            const { data: row } = await supabase
+              .from(cfg.table)
+              .select('data')
+              .eq(idField, idValue)
+              .maybeSingle()
+            if (row?.data != null) {
+              setValue(row.data)
+              try { localStorage.setItem(storageKey, JSON.stringify(row.data)) } catch {}
               setLoaded(true)
               return
             }
-          } else if (user) {
-            // Personal user data
-            const { data } = await supabase
-              .from('user_data')
-              .select(key)
-              .eq('user_id', user.id)
-              .single()
-            if (data && data[key] !== null && data[key] !== undefined) {
-              setValue(data[key])
-              try { localStorage.setItem(storageKey, JSON.stringify(data[key])) } catch {}
+          } else {
+            const { data: rows } = await supabase
+              .from(cfg.table)
+              .select('data')
+              .eq(idField, idValue)
+              .order('created_at', { ascending: true })
+            if (rows) {
+              const arr = rows.map(r => r.data)
+              setValue(arr)
+              try { localStorage.setItem(storageKey, JSON.stringify(arr)) } catch {}
               setLoaded(true)
               return
             }
           }
         } catch {}
       }
-      // Fall back to localStorage
+      // Fallback: localStorage
       try {
         const raw = localStorage.getItem(storageKey)
         if (raw) setValue(JSON.parse(raw))
@@ -76,28 +92,52 @@ export const useCloudStorage = (key, defaultValue) => {
   }, [user?.id, orgId, key]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async (newValue) => {
-    if (readOnly) return // meekijk accounts cannot write
+    if (readOnly) return
     const resolved = typeof newValue === 'function' ? newValue(value) : newValue
     setValue(resolved)
     try { localStorage.setItem(storageKey, JSON.stringify(resolved)) } catch {}
-    if (isSupabaseConfigured && (user || orgId)) {
-      try {
-        if (orgId) {
-          await supabase.from('org_data').upsert({
-            org_id: orgId,
-            [key]: resolved,
+
+    const cfg = TABLE_CONFIG[key]
+    if (!isSupabaseConfigured || !cfg || (!user && !orgId)) return
+
+    const idField = orgId ? 'org_id' : 'user_id'
+    const idValue = orgId || user.id
+
+    try {
+      if (cfg.mode === 'single') {
+        await supabase.from(cfg.table).upsert(
+          { [idField]: idValue, data: resolved, updated_at: new Date().toISOString() },
+          { onConflict: idField }
+        )
+      } else {
+        const arr = Array.isArray(resolved) ? resolved : []
+
+        // Upsert alle huidige items
+        if (arr.length > 0) {
+          const rows = arr.map(item => ({
+            id: item.id,
+            [idField]: idValue,
+            entity_id: item.entityId || null,
+            status: item.status || null,
+            item_date: item.date || item.invoiceDate || item.quoteDate || null,
+            total: item.total ?? item.totalAmount ?? item.amount ?? null,
+            data: item,
             updated_at: new Date().toISOString(),
-          })
-        } else if (user) {
-          await supabase.from('user_data').upsert({
-            user_id: user.id,
-            [key]: resolved,
-            updated_at: new Date().toISOString(),
-          })
+          }))
+          await supabase.from(cfg.table).upsert(rows, { onConflict: 'id' })
         }
-      } catch (e) {
-        console.warn('Supabase sync failed:', e.message)
+
+        // Verwijder items die niet meer in de array zitten
+        const keepIds = arr.map(i => i?.id).filter(Boolean)
+        const { data: existing } = await supabase
+          .from(cfg.table).select('id').eq(idField, idValue)
+        const toDelete = (existing || []).map(r => r.id).filter(id => !keepIds.includes(id))
+        if (toDelete.length > 0) {
+          await supabase.from(cfg.table).delete().in('id', toDelete)
+        }
       }
+    } catch (e) {
+      console.warn('Supabase sync failed:', e.message)
     }
   }
 
