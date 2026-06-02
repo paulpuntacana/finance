@@ -673,6 +673,35 @@ const JURISDICTIONS = {
       'saldo': 'Saldo te betalen',
     },
   },
+  EE: {
+    code: 'EE',
+    name: 'Estland',
+    flag: '🇪🇪',
+    baseCurrency: 'EUR',
+    salesTax: { name: 'KM', rates: [0, 9, 22], standard: 22 },
+    filingPeriod: 'monthly',
+    filingDeadlines: [
+      { period: 'Maandelijks', deadline: 'Voor de 20e van de volgende maand', months: 'all' },
+    ],
+    rules: [
+      { label: 'KM standaard', value: '22% (per 1 jan 2024)' },
+      { label: 'KM verlaagd', value: '9% (accommodatie, pers, medicijnen)' },
+      { label: 'KM vrijgesteld', value: '0% (export, intracommunautair)' },
+      { label: 'Aangiftefrequentie', value: 'Maandelijks (Form KMD)' },
+      { label: 'Vennootschapsbelasting', value: '0% op ingehouden winst; 22% bij uitkering' },
+      { label: 'Registratiegrens', value: '€ 40.000 omzet/jaar' },
+      { label: 'Bewaarplicht', value: '7 jaar' },
+      { label: 'Registrikood', value: 'Verplicht op iedere factuur' },
+    ],
+    rubrieken: {
+      'myyk_22': 'Belastbare omzet 22%',
+      'myyk_9': 'Belastbare omzet 9%',
+      'myyk_0': 'Vrijgesteld / export 0%',
+      'km_sisend': 'Sisendkäibemaks (input KM)',
+      'km_valja': 'Väljundkäibemaks (output KM)',
+      'saldo': 'KM saldo te betalen/terug',
+    },
+  },
   CUSTOM: {
     code: 'CUSTOM',
     name: 'Handmatig instellen',
@@ -1289,7 +1318,7 @@ const EntitySwitcher = ({ activeEntity, entities, onSwitch, onManage }) => {
 // ============================================================================
 // SIDEBAR / NAV
 // ============================================================================
-const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, onSwitchEntity, user, profile, onSignOut, theme, onToggleTheme }) => {
+const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, onSwitchEntity, user, profile, onSignOut, theme, onToggleTheme, onGoToProfile }) => {
   const mainItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'invoices', label: 'Facturen', icon: FileText },
@@ -1414,20 +1443,38 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
         </nav>
 
         {/* User footer */}
-        <div style={{ padding: '10px 10px', borderTop: '1px solid var(--border)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 9px', borderRadius: '9px', background: 'var(--surface-2)' }}>
-            <div style={{
-              width: '28px', height: '28px', borderRadius: '50%', flexShrink: 0,
-              background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '11px', fontWeight: '700', color: 'var(--accent)',
-            }}>
-              {displayName[0].toUpperCase()}
+        <div style={{ padding: '10px', borderTop: '1px solid var(--border)' }}>
+          <div
+            style={{
+              display: 'flex', alignItems: 'center', gap: '10px',
+              padding: '9px 10px', borderRadius: '10px',
+              background: 'var(--surface-2)', transition: 'background 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--border)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-2)'}
+          >
+            {/* Clickable profile area */}
+            <div
+              onClick={onGoToProfile}
+              title="Profiel bewerken"
+              style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0, cursor: 'pointer' }}
+            >
+              <div style={{
+                width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0,
+                background: 'linear-gradient(135deg, #4f46e5, #818cf8)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '13px', fontWeight: '700', color: '#fff',
+                boxShadow: '0 2px 6px rgba(79,70,229,0.35)',
+              }}>
+                {displayName[0].toUpperCase()}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>{displayName}</div>
+                <div style={{ fontSize: '10.5px', color: 'var(--text-3)', marginTop: '1px' }}>{roleLabel}</div>
+              </div>
             </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</div>
-              <div style={{ fontSize: '10px', color: 'var(--text-3)' }}>{roleLabel}</div>
-            </div>
-            <div style={{ display: 'flex', gap: '1px' }}>
+            {/* Action buttons */}
+            <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
               {onToggleTheme && (
                 <button onClick={onToggleTheme} title={theme === 'dark' ? 'Light mode' : 'Dark mode'} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px', borderRadius: '6px', color: 'var(--text-3)', display: 'flex' }}>
                   {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
@@ -5406,10 +5453,22 @@ ${buildContext()}`;
 // ============================================================================
 // SETTINGS VIEW
 // ============================================================================
-const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntities, clients }) => {
-  const [section, setSection] = useState('jurisdiction');
+const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntities, clients, initialSection, updateProfile, profile, user }) => {
+  const [section, setSection] = useState(initialSection || 'jurisdiction');
   const [draft, setDraft] = useState(settings);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [profileName, setProfileName] = useState(profile?.full_name || '');
+  const [profileSaved, setProfileSaved] = useState(false);
+
+  useEffect(() => {
+    if (initialSection) setSection(initialSection);
+  }, [initialSection]);
+
+  const saveProfileName = async () => {
+    if (updateProfile) await updateProfile({ full_name: profileName });
+    setProfileSaved(true);
+    setTimeout(() => setProfileSaved(false), 2000);
+  };
 
   useEffect(() => setDraft(settings), [settings]);
 
@@ -5429,6 +5488,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
   };
 
   const sections = [
+    { id: 'profile', label: 'Mijn Profiel' },
     { id: 'jurisdiction', label: 'Land & Valuta' },
     { id: 'templates', label: 'Factuur Templates' },
     { id: 'reminders', label: 'Herinneringen' },
@@ -5468,6 +5528,62 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
           ))}
         </div>
       </Card>
+
+      {section === 'profile' && (
+        <div className="space-y-5">
+          <Card className="p-6 space-y-5">
+            <h3 className="font-display text-lg font-medium">Mijn profiel</h3>
+            <div className="flex items-center gap-4">
+              <div style={{
+                width: '56px', height: '56px', borderRadius: '50%', flexShrink: 0,
+                background: 'linear-gradient(135deg, #4f46e5, #818cf8)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '22px', fontWeight: '700', color: '#fff',
+                boxShadow: '0 4px 12px rgba(79,70,229,0.35)',
+              }}>
+                {(profileName || profile?.full_name || user?.email || 'G')[0].toUpperCase()}
+              </div>
+              <div>
+                <div className="font-semibold" style={{ color: 'var(--text)' }}>{profileName || 'Naam niet ingesteld'}</div>
+                <div className="text-sm" style={{ color: 'var(--muted)' }}>{user?.email || ''}</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input
+                label="Volledige naam"
+                value={profileName}
+                onChange={e => setProfileName(e.target.value)}
+                placeholder="Jan de Vries"
+              />
+              <Input
+                label="E-mailadres"
+                value={user?.email || ''}
+                disabled
+                style={{ opacity: 0.6, cursor: 'not-allowed' }}
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <Button onClick={saveProfileName}>
+                {profileSaved ? <><Check size={14} /> Opgeslagen</> : <><Save size={14} /> Naam opslaan</>}
+              </Button>
+              <span className="text-xs" style={{ color: 'var(--muted)' }}>E-mailadres kan niet worden gewijzigd</span>
+            </div>
+          </Card>
+          <Card className="p-6 space-y-3">
+            <h3 className="font-display text-base font-medium">Account info</h3>
+            <div className="grid grid-cols-2 gap-y-2 text-sm">
+              <span style={{ color: 'var(--muted)' }}>Rol</span>
+              <span style={{ color: 'var(--text)', fontWeight: 500 }}>
+                {profile?.role === 'platform_admin' ? 'Platform Admin' : profile?.role === 'org_owner' ? 'Eigenaar' : profile?.role === 'accountant' ? 'Accountant' : 'Medewerker'}
+              </span>
+              {profile?.organization_id && <>
+                <span style={{ color: 'var(--muted)' }}>Organisatie ID</span>
+                <span style={{ color: 'var(--text)', fontFamily: 'monospace', fontSize: '11px' }}>{profile.organization_id}</span>
+              </>}
+            </div>
+          </Card>
+        </div>
+      )}
 
       {section === 'jurisdiction' && (
         <div className="space-y-5">
@@ -6194,8 +6310,9 @@ const LinksView = () => {
 // ============================================================================
 
 export default function App({ signToken, accountantMode, onAccountantBack }) {
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, signOut, updateProfile } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [settingsOpenSection, setSettingsOpenSection] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem('dhs_theme') || 'dark');
   const [settings, setSettings, settingsLoaded] = useCloudStorage('settings', DEFAULT_SETTINGS);
 
@@ -6314,6 +6431,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
         onSignOut={signOut}
         theme={theme}
         onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+        onGoToProfile={() => { setSettingsOpenSection('profile'); setActiveTab('settings'); }}
       />
       <main className="flex-1 min-w-0">
         <div className="max-w-6xl mx-auto p-5 md:p-8 pb-20 lg:pb-8">
@@ -6399,7 +6517,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
             <LinksView />
           )}
           {activeTab === 'settings' && (
-            <SettingsView settings={settings} setSettings={setSettings} activeEntity={activeEntity} entities={entities} setEntities={setEntities} clients={clients} />
+            <SettingsView settings={settings} setSettings={setSettings} activeEntity={activeEntity} entities={entities} setEntities={setEntities} clients={clients} initialSection={settingsOpenSection} updateProfile={updateProfile} profile={profile} user={user} />
           )}
         </div>
       </main>

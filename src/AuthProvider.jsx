@@ -448,8 +448,6 @@ export const useCloudStorage = (key, defaultValue) => {
   return [value, save, loaded]
 }
 
-const QUICK_LOGIN_KEY = 'dhs_quick_login'
-
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -458,36 +456,24 @@ export const AuthProvider = ({ children }) => {
   const fetchProfile = async (userId) => {
     if (!isSupabaseConfigured) return
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single()
-      setProfile(data)
-    } catch {}
+      if (error) {
+        console.warn('[fetchProfile] Supabase error:', error.message)
+        return
+      }
+      if (data) setProfile(data)
+    } catch (e) {
+      console.warn('[fetchProfile] Exception:', e.message)
+    }
   }
 
   useEffect(() => {
-    // Check for quick-login bypass (local demo user)
-    const quickRaw = localStorage.getItem(QUICK_LOGIN_KEY)
-    if (quickRaw) {
-      try {
-        const quickUser = JSON.parse(quickRaw)
-        // Synthetic user object (mimics Supabase user shape)
-        const syntheticUser = { id: 'local_admin', email: quickUser.email, isLocal: true }
-        const syntheticProfile = {
-          id: 'local_admin', email: quickUser.email,
-          full_name: quickUser.name, role: quickUser.role,
-          organization_id: null,
-        }
-        setUser(syntheticUser)
-        setProfile(syntheticProfile)
-        setLoading(false)
-        return
-      } catch {
-        localStorage.removeItem(QUICK_LOGIN_KEY)
-      }
-    }
+    // Verwijder eventuele oude quick-login sessie
+    localStorage.removeItem('dhs_quick_login')
 
     if (!isSupabaseConfigured) {
       setLoading(false)
@@ -500,10 +486,14 @@ export const AuthProvider = ({ children }) => {
       setLoading(false)
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null)
       if (session?.user) {
-        fetchProfile(session.user.id)
+        // Only re-fetch profile on actual sign-in events, not on token refreshes.
+        // Token refreshes would overwrite local profile state (incl. organization_id) with DB data.
+        if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+          fetchProfile(session.user.id)
+        }
       } else {
         setProfile(null)
         setLoading(false)
@@ -549,25 +539,10 @@ export const AuthProvider = ({ children }) => {
     return { data, error }
   }
 
-  const quickLogin = (userData) => {
-    const syntheticUser = { id: 'local_admin', email: userData.email, isLocal: true }
-    const syntheticProfile = {
-      id: 'local_admin', email: userData.email,
-      full_name: userData.name, role: userData.role,
-      organization_id: null,
-    }
-    try { localStorage.setItem(QUICK_LOGIN_KEY, JSON.stringify(userData)) } catch {}
-    setUser(syntheticUser)
-    setProfile(syntheticProfile)
-    setLoading(false)
-  }
-
   const signOut = async () => {
-    localStorage.removeItem(QUICK_LOGIN_KEY)
-    if (supabase && !user?.isLocal) await supabase.auth.signOut()
+    if (supabase) await supabase.auth.signOut({ scope: 'local' })
     setUser(null)
     setProfile(null)
-    window.location.href = '/'
   }
 
   const updateProfile = async (updates) => {
@@ -602,7 +577,7 @@ export const AuthProvider = ({ children }) => {
   return (
     <AuthContext.Provider value={{
       user, profile, loading,
-      signIn, signUp, signOut, quickLogin, updateProfile, createOrg,
+      signIn, signUp, signOut, updateProfile, createOrg,
       isPlatformAdmin, isOrgOwner, isAccountant, isEmployee, isReadOnly,
       isConfigured: isSupabaseConfigured,
     }}>

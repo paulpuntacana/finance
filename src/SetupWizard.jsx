@@ -1,119 +1,112 @@
 import { useState } from 'react'
 import { useAuth } from './AuthProvider'
-import { Building2, ArrowRight, AlertCircle } from 'lucide-react'
+import { Building2, Loader2, ArrowRight, LogOut } from 'lucide-react'
 
 export default function SetupWizard() {
-  const { user, profile, createOrg, signOut } = useAuth()
-  const [name, setName] = useState('')
+  const { createOrg, signOut, user, profile } = useAuth()
+  const [orgName, setOrgName] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
+  const [tab, setTab] = useState('create')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const handleSubmit = async (e) => {
+  const handleCreate = async (e) => {
     e.preventDefault()
-    if (!name.trim()) { setError('Bedrijfsnaam is verplicht'); return }
-    setLoading(true); setError('')
-    const { error: err } = await createOrg(name)
-    if (err) { setError(err.message); setLoading(false); return }
-    window.location.href = '/'
+    if (!orgName.trim()) { setError('Bedrijfsnaam is verplicht'); return }
+    setError('')
+    setLoading(true)
+    const { error } = await createOrg(orgName.trim())
+    setLoading(false)
+    if (error) setError(error.message)
   }
 
-  return (
-    <div style={{
-      minHeight: '100vh', background: '#060b15', display: 'flex',
-      alignItems: 'center', justifyContent: 'center', padding: 20,
-      fontFamily: 'Inter, -apple-system, sans-serif',
-    }}>
-      <div style={{ width: '100%', maxWidth: 420 }}>
+  const handleJoin = async (e) => {
+    e.preventDefault()
+    if (!inviteCode.trim()) { setError('Uitnodigingscode is verplicht'); return }
+    setError('')
+    setLoading(true)
+    const { supabase } = await import('./supabase')
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('id')
+      .eq('invite_code', inviteCode.trim().toUpperCase())
+      .single()
+    if (!org) { setLoading(false); setError('Onbekende uitnodigingscode'); return }
+    const { error } = await supabase
+      .from('profiles')
+      .update({ organization_id: org.id, role: 'employee' })
+      .eq('id', user.id)
+    setLoading(false)
+    if (error) setError(error.message)
+    else window.location.reload()
+  }
 
-        {/* Header */}
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{
-            width: 52, height: 52, borderRadius: 14,
-            background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 14px', boxShadow: '0 4px 20px rgba(59,130,246,0.35)',
-          }}>
-            <Building2 size={24} color="#fff" />
+  const inp = { width: '100%', padding: '11px 14px', fontSize: '14px', borderRadius: '10px', border: '1.5px solid #E2E8F0', background: '#fff', color: '#1E293B', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' }
+  const btn = { background: '#3B82F6', border: 'none', borderRadius: '10px', padding: '12px', color: '#fff', fontSize: '14px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontFamily: 'inherit', width: '100%', boxShadow: '0 2px 10px rgba(59,130,246,0.28)' }
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Inter', sans-serif", padding: '24px' }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <div style={{ width: '100%', maxWidth: '420px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '36px' }}>
+          <div style={{ width: '38px', height: '38px', background: 'linear-gradient(135deg, #3B82F6, #1D4ED8)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ fontWeight: '800', fontSize: '12px', color: '#fff' }}>DH</span>
           </div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: '#dce8ff', letterSpacing: '-0.02em' }}>
-            Welkom bij DHS Finance
-          </div>
-          <div style={{ fontSize: 13, color: '#3d5c80', marginTop: 6 }}>
-            Maak je organisatie aan om te beginnen
-          </div>
+          <span style={{ fontWeight: '700', fontSize: '15px', color: '#0F172A' }}>DHS Finance</span>
         </div>
 
-        {/* Card */}
-        <div style={{
-          background: '#0e1628', border: '1px solid rgba(59,130,246,0.25)',
-          borderRadius: 16, padding: '32px 28px', boxShadow: '0 24px 60px rgba(0,0,0,0.4)',
-        }}>
-          <div style={{ fontSize: 12, color: '#3d5c80', marginBottom: 22 }}>
-            Ingelogd als{' '}
-            <strong style={{ color: '#7a9cc8' }}>{profile?.full_name || user?.email}</strong>
+        <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #E2E8F0', padding: '32px', boxShadow: '0 4px 24px rgba(0,0,0,0.06)' }}>
+          <div style={{ width: '48px', height: '48px', background: '#EFF6FF', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
+            <Building2 size={22} style={{ color: '#3B82F6' }} />
+          </div>
+          <h1 style={{ fontSize: '22px', fontWeight: '700', color: '#0F172A', margin: '0 0 8px', letterSpacing: '-0.02em' }}>Organisatie instellen</h1>
+          <p style={{ color: '#64748B', fontSize: '14px', margin: '0 0 24px', lineHeight: 1.6 }}>
+            Welkom{profile?.full_name ? `, ${profile.full_name}` : ''}! Maak een organisatie aan of sluit je aan bij een bestaande via een uitnodigingscode.
+          </p>
+
+          <div style={{ display: 'flex', gap: '2px', background: '#F8FAFC', borderRadius: '10px', padding: '3px', marginBottom: '24px', border: '1px solid #F1F5F9' }}>
+            {[['create', 'Nieuwe organisatie'], ['join', 'Aansluiten']].map(([t, label]) => (
+              <button key={t} onClick={() => { setTab(t); setError('') }}
+                style={{ flex: 1, padding: '7px 0', borderRadius: '7px', fontSize: '13px', fontWeight: '600', border: 'none', cursor: 'pointer', fontFamily: 'inherit', background: tab === t ? '#fff' : 'transparent', color: tab === t ? '#1E293B' : '#94A3B8', boxShadow: tab === t ? '0 1px 4px rgba(0,0,0,0.07)' : 'none' }}>
+                {label}
+              </button>
+            ))}
           </div>
 
           {error && (
-            <div style={{
-              background: 'rgba(239,68,68,0.12)', border: '1px solid #ef4444',
-              borderRadius: 8, padding: '10px 12px', color: '#ef4444', fontSize: 12,
-              marginBottom: 18, display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              <AlertCircle size={14} /> {error}
+            <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', color: '#DC2626', fontSize: '13px' }}>
+              {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div>
-              <label style={{
-                display: 'block', fontSize: 11, fontWeight: 600,
-                textTransform: 'uppercase', letterSpacing: '0.07em',
-                color: '#7a9cc8', marginBottom: 6,
-              }}>
-                Bedrijfsnaam
-              </label>
-              <input
-                style={{
-                  background: '#131e32', border: '1px solid rgba(59,130,246,0.25)',
-                  borderRadius: 8, color: '#dce8ff', padding: '11px 13px',
-                  fontSize: 14, width: '100%', outline: 'none', boxSizing: 'border-box',
-                }}
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="Jouw Bedrijf BV"
-                autoFocus
-              />
-            </div>
+          {tab === 'create' && (
+            <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#475569', marginBottom: '7px' }}>Bedrijfsnaam</label>
+                <input type="text" required value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="Future Marketing B.V." style={inp} />
+              </div>
+              <button type="submit" disabled={loading} style={{ ...btn, opacity: loading ? 0.7 : 1 }}>
+                {loading ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Aanmaken…</> : <>Organisatie aanmaken <ArrowRight size={15} /></>}
+              </button>
+            </form>
+          )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              style={{
-                background: '#3b82f6', border: 'none', borderRadius: 9,
-                padding: '12px', color: '#fff', fontSize: 14, fontWeight: 600,
-                cursor: loading ? 'not-allowed' : 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                gap: 8, opacity: loading ? 0.7 : 1,
-              }}
-            >
-              {loading ? 'Aanmaken…' : <><span>Organisatie aanmaken</span><ArrowRight size={15} /></>}
-            </button>
-          </form>
-
-          <div style={{
-            marginTop: 20, paddingTop: 16,
-            borderTop: '1px solid rgba(59,130,246,0.1)',
-            textAlign: 'center', fontSize: 11, color: '#3d5c80',
-          }}>
-            Verkeerd account?{' '}
-            <button
-              onClick={signOut}
-              style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', fontSize: 11, padding: 0 }}
-            >
-              Uitloggen
-            </button>
-          </div>
+          {tab === 'join' && (
+            <form onSubmit={handleJoin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#475569', marginBottom: '7px' }}>Uitnodigingscode</label>
+                <input type="text" required value={inviteCode} onChange={e => setInviteCode(e.target.value.toUpperCase())} placeholder="DHS2026" style={{ ...inp, letterSpacing: '0.05em', fontWeight: '600' }} />
+              </div>
+              <button type="submit" disabled={loading} style={{ ...btn, opacity: loading ? 0.7 : 1 }}>
+                {loading ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Aansluiten…</> : <>Aansluiten <ArrowRight size={15} /></>}
+              </button>
+            </form>
+          )}
         </div>
+
+        <button onClick={signOut} style={{ marginTop: '16px', background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', fontFamily: 'inherit' }}>
+          <LogOut size={13} /> Uitloggen
+        </button>
       </div>
     </div>
   )

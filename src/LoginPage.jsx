@@ -2,14 +2,6 @@ import { useState } from 'react'
 import { useAuth } from './AuthProvider'
 import { Eye, EyeOff, Loader2, ArrowRight, Check, Shield, TrendingUp, BarChart3 } from 'lucide-react'
 
-const QUICK_LOGIN_KEY = 'dhs_quick_login'
-const QUICK_USER = {
-  email: 'paul@denhartoghsolutions.nl',
-  name: 'Paul den Hartogh',
-  role: 'platform_admin',
-  company: 'Den Hartogh Solutions'
-}
-
 function FinanceIllustration() {
   return (
     <svg viewBox="0 0 500 400" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: '100%', maxWidth: '460px' }}>
@@ -154,7 +146,7 @@ function FinanceIllustration() {
 }
 
 export default function LoginPage() {
-  const { signIn, signUp, quickLogin, isConfigured } = useAuth()
+  const { signIn, signUp, isConfigured } = useAuth()
   const [tab, setTab] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -162,7 +154,6 @@ export default function LoginPage() {
   const [inviteCode, setInviteCode] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [quickLoading, setQuickLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
@@ -185,11 +176,6 @@ export default function LoginPage() {
     setLoading(false)
     if (error) setError(error.message)
     else setSuccess('Check je e-mail voor de bevestigingslink!')
-  }
-
-  const handleQuickLogin = () => {
-    setQuickLoading(true)
-    quickLogin(QUICK_USER)
   }
 
   return (
@@ -237,26 +223,6 @@ export default function LoginPage() {
         .lp-btn-primary:hover { background: #2563EB; box-shadow: 0 4px 16px rgba(59,130,246,0.35); }
         .lp-btn-primary:active { transform: scale(0.99); }
         .lp-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
-
-        .lp-quick-btn {
-          background: #F8FAFC;
-          border: 1.5px solid #E2E8F0;
-          border-radius: 12px;
-          padding: 12px 16px;
-          cursor: pointer;
-          width: 100%;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          transition: background 0.14s, border-color 0.14s, box-shadow 0.14s;
-          font-family: 'Inter', sans-serif;
-        }
-        .lp-quick-btn:hover {
-          background: #EFF6FF;
-          border-color: #BFDBFE;
-          box-shadow: 0 2px 10px rgba(59,130,246,0.08);
-        }
 
         .lp-tab-btn {
           flex: 1;
@@ -326,39 +292,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Quick login */}
-        <div style={{ marginBottom: '22px' }}>
-          <button onClick={handleQuickLogin} disabled={quickLoading} className="lp-quick-btn">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '11px' }}>
-              <div style={{
-                width: '36px', height: '36px', borderRadius: '10px',
-                background: 'linear-gradient(135deg, #3B82F6, #1D4ED8)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                flexShrink: 0, boxShadow: '0 2px 8px rgba(59,130,246,0.25)',
-              }}>
-                <span style={{ fontSize: '11px', fontWeight: '800', color: '#fff', letterSpacing: '-0.05em' }}>DH</span>
-              </div>
-              <div>
-                <div style={{ fontSize: '13.5px', fontWeight: '600', color: '#0F172A', textAlign: 'left' }}>
-                  {quickLoading ? 'Inloggen…' : 'Den Hartogh Solutions'}
-                </div>
-                <div style={{ fontSize: '11px', color: '#94A3B8', textAlign: 'left', marginTop: '1px' }}>Platform Admin · Snel inloggen</div>
-              </div>
-            </div>
-            {quickLoading
-              ? <Loader2 size={15} style={{ color: '#3B82F6', animation: 'spin 1s linear infinite', flexShrink: 0 }} />
-              : <ArrowRight size={15} style={{ color: '#CBD5E1', flexShrink: 0 }} />
-            }
-          </button>
-        </div>
-
-        {/* Divider */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-          <div style={{ flex: 1, height: '1px', background: '#F1F5F9' }} />
-          <span style={{ fontSize: '11px', color: '#CBD5E1', fontWeight: '500', letterSpacing: '0.04em' }}>of gebruik e-mail</span>
-          <div style={{ flex: 1, height: '1px', background: '#F1F5F9' }} />
-        </div>
-
         {/* Tab switcher */}
         <div style={{ display: 'flex', gap: '3px', background: '#F8FAFC', borderRadius: '11px', padding: '3px', marginBottom: '20px', border: '1px solid #F1F5F9' }}>
           {[['login', 'Inloggen'], ['register', 'Registreren']].map(([t, label]) => (
@@ -391,7 +324,7 @@ export default function LoginPage() {
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div>
               <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>E-mailadres</label>
-              <input className="lp-inp" type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="paul@bedrijf.nl" />
+              <input className="lp-inp" type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="naam@bedrijf.nl" />
             </div>
             <div>
               <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>Wachtwoord</label>
@@ -450,7 +383,7 @@ export default function LoginPage() {
 
         {!isConfigured && (
           <div style={{ marginTop: '16px', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '10px', padding: '10px 14px', color: '#92400E', fontSize: '12px' }}>
-            Supabase niet geconfigureerd — gebruik de snelle inlog hierboven.
+            Supabase niet geconfigureerd — controleer je .env.local bestand.
           </div>
         )}
 
