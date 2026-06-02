@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+/* ── Global CSS Variables (Dark default, Light override) ───────────────────── */
+:root {
+  --bg: #060b15;
+  --bg-alt: #0a1120;
+  --surface: #0e1628;
+  --surface-2: #131e32;
+  --surface-3: #19273f;
+  --border: rgba(59,130,246,0.1);
+  --border-2: rgba(59,130,246,0.18);
+  --border-3: rgba(59,130,246,0.32);
+  --border-strong: rgba(59,130,246,0.18);
+  --text: #dce8ff;
+  --text-2: #7a9cc8;
+  --text-3: #3d5c80;
+  --accent: #3b82f6;
+  --accent-2: #60a5fa;
+  --accent-hover: #2563eb;
+  --accent-soft: rgba(59,130,246,0.13);
+  --accent-glow: rgba(59,130,246,0.25);
+  --success: #10b981;
+  --success-soft: rgba(16,185,129,0.12);
+  --warning: #f59e0b;
+  --warning-soft: rgba(245,158,11,0.12);
+  --danger: #ef4444;
+  --danger-soft: rgba(239,68,68,0.12);
+  --info: #06b6d4;
+  --info-soft: rgba(6,182,212,0.12);
+  --ink: var(--text);
+  --ink-2: var(--text-2);
+  --muted: var(--text-3);
+  --muted-2: #1a2f4a;
+}
+
+[data-theme="light"] {
+  --bg: #f3f7ff;
+  --bg-alt: #e8effc;
+  --surface: #ffffff;
+  --surface-2: #eef3ff;
+  --surface-3: #e3ecfd;
+  --border: rgba(30,64,175,0.08);
+  --border-2: rgba(30,64,175,0.15);
+  --border-3: rgba(30,64,175,0.28);
+  --border-strong: rgba(30,64,175,0.15);
+  --text: #071432;
+  --text-2: #395a90;
+  --text-3: #7a9cc8;
+  --accent: #2563eb;
+  --accent-2: #3b82f6;
+  --accent-hover: #1d4ed8;
+  --accent-soft: rgba(37,99,235,0.09);
+  --accent-glow: rgba(37,99,235,0.18);
+  --success: #059669;
+  --success-soft: rgba(5,150,105,0.1);
+  --warning: #d97706;
+  --warning-soft: rgba(217,119,6,0.1);
+  --danger: #dc2626;
+  --danger-soft: rgba(220,38,38,0.1);
+  --info: #0891b2;
+  --info-soft: rgba(8,145,178,0.1);
+  --ink: var(--text);
+  --ink-2: var(--text-2);
+  --muted: var(--text-3);
+  --muted-2: #c0d4f4;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+body, html { background: var(--bg); color: var(--text); margin: 0; padding: 0; }
+* { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+input, textarea, select {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border-color: var(--border-2) !important;
+}
+input::placeholder, textarea::placeholder { color: var(--text-3) !important; }
+select option { background: var(--surface); color: var(--text); }
+input:focus, textarea:focus, select:focus {
+  outline: none !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-soft) !important;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
