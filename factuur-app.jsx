@@ -2677,6 +2677,11 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
     await setInvoices(allInv.map(i => i.id === id ? { ...i, status: newStatus, ...extra } : i));
   };
 
+  const handleUpdateInvoice = async (id, fields) => {
+    const allInv = allInvoices || invoices;
+    await setInvoices(allInv.map(i => i.id === id ? { ...i, ...fields } : i));
+  };
+
   const handleDuplicate = (inv) => {
     const newInv = {
       ...inv,
@@ -2751,6 +2756,7 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
       onSendReminder={onSendReminder}
       onCreateCreditNote={handleCreateCreditNote}
       onRegisterPayment={handleRegisterPayment}
+      onUpdateInvoice={handleUpdateInvoice}
     />;
   }
 
@@ -2997,7 +3003,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                   <th className="text-right py-2 font-medium w-28">Prijs</th>
                   <th className="text-right py-2 font-medium w-20">{taxName}</th>
                   <th className="text-right py-2 font-medium w-28">Totaal</th>
-                  <th className="w-8"></th>
+                  <th className="w-24"></th>
                 </tr>
               </thead>
               <tbody className="divide-y" style={{ borderColor: 'var(--border)' }}>
@@ -3050,14 +3056,15 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                           {fmtEUR(line.net)}
                           {line.discount > 0 && <div className="text-[10px] line-through" style={{ color: 'var(--muted)' }}>{fmtEUR(line.base)}</div>}
                         </td>
-                        <td className="py-2">
-                          <div className="flex gap-0.5">
+                        <td className="py-2 pl-2">
+                          <div className="flex items-center gap-1">
                             <button
                               onClick={() => toggleDiscount(idx)}
-                              className="p-1 rounded hover:bg-stone-100"
+                              className={`text-[11px] font-medium rounded px-1.5 py-0.5 whitespace-nowrap transition-colors ${hasDiscount ? 'hover:bg-red-50' : 'hover:bg-stone-100'}`}
+                              style={{ color: hasDiscount ? 'var(--accent)' : 'var(--muted)' }}
                               title={hasDiscount ? 'Korting verwijderen' : 'Korting toevoegen'}
                             >
-                              <Percent size={13} style={{ color: hasDiscount ? 'var(--accent)' : 'var(--muted)' }} />
+                              {hasDiscount ? '× korting' : '+ korting'}
                             </button>
                             {form.items.length > 1 && (
                               <button onClick={() => removeItem(idx)} className="p-1 rounded hover:bg-red-50">
@@ -3158,7 +3165,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
 // ============================================================================
 // INVOICE DETAIL VIEW (with PDF preview)
 // ============================================================================
-const InvoiceDetail = ({ invoice, clients, settings, activeEntity, entities, onClose, onEdit, onDelete, onStatusChange, onDuplicate, onSendReminder, onCreateCreditNote, onRegisterPayment }) => {
+const InvoiceDetail = ({ invoice, clients, settings, activeEntity, entities, onClose, onEdit, onDelete, onStatusChange, onDuplicate, onSendReminder, onCreateCreditNote, onRegisterPayment, onUpdateInvoice }) => {
   const [showSendModal, setShowSendModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const client = clients.find(c => c.id === invoice.clientId);
@@ -3175,39 +3182,69 @@ const InvoiceDetail = ({ invoice, clients, settings, activeEntity, entities, onC
   const invoiceParentEntity = invoiceEntity?.parentId
     ? entities?.find(e => e.id === invoiceEntity.parentId)
     : null;
+  // Legal entity (same logic as InvoiceFooter) used to check IBAN for QR
+  const qrLegalEntity = (invoiceEntity?.type === 'label' && invoiceParentEntity) ? invoiceParentEntity : invoiceEntity;
+  const qrMissingIban = !qrLegalEntity?.iban;
 
-  const handlePrint = () => {
-    // Open dedicated print window with only the invoice — browser shows "Save as PDF"
+  const handlePrint = async () => {
     const el = document.querySelector('.invoice-printable')
     if (!el) { window.print(); return }
+
+    // Clone and convert external images (QR, logo) to data URLs so they print reliably
+    const clone = el.cloneNode(true)
+    await Promise.all(Array.from(clone.querySelectorAll('img[src^="http"]')).map(img => new Promise(resolve => {
+      const proxy = new Image()
+      proxy.crossOrigin = 'anonymous'
+      proxy.onload = () => {
+        try {
+          const c = document.createElement('canvas')
+          c.width = proxy.naturalWidth; c.height = proxy.naturalHeight
+          c.getContext('2d').drawImage(proxy, 0, 0)
+          img.src = c.toDataURL('image/png')
+        } catch (_) {}
+        resolve()
+      }
+      proxy.onerror = resolve
+      proxy.src = img.src
+    })))
+
     const w = window.open('', '_blank', 'width=900,height=1200')
     w.document.write(`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>Factuur ${invoice.number || ''}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,400;9..144,600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"><\/script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
-    body { margin: 0; padding: 0; background: #fff; color: #000; }
-    @media print { @page { size: A4; margin: 10mm; } body { margin: 0; } }
+    body { margin: 0; padding: 0; background: #fff; }
     :root {
-      --text: #000; --text-2: #333; --text-3: #666;
-      --surface: #fff; --surface-2: #f5f5f5; --surface-3: #eee;
-      --border: rgba(0,0,0,0.1); --border-2: rgba(0,0,0,0.15); --border-3: rgba(0,0,0,0.25);
+      --text: #1a1a1a; --text-2: #4a4a4a; --text-3: #888;
+      --surface: #fff; --surface-2: #f9fafb; --surface-3: #f3f4f6;
+      --border: #e5e7eb; --border-2: #d1d5db; --border-3: #9ca3af;
       --accent: #2563eb; --success: #059669; --danger: #dc2626; --warning: #d97706;
-      --muted: #666; --ink: #000; --ink-2: #333;
+      --muted: #888; --ink: #1a1a1a; --ink-2: #4a4a4a;
+    }
+    @media print {
+      @page { size: A4 portrait; margin: 0; }
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      tr { page-break-inside: avoid; }
     }
   </style>
 </head>
 <body>
-${el.innerHTML}
+${clone.innerHTML}
 <script>
   window.addEventListener('load', function() {
-    setTimeout(function() { window.print(); }, 600);
+    var imgs = Array.from(document.querySelectorAll('img')).filter(function(i) { return !i.complete; });
+    if (!imgs.length) { window.print(); return; }
+    var done = 0;
+    imgs.forEach(function(img) {
+      function fin() { if (++done >= imgs.length) window.print(); }
+      img.addEventListener('load', fin); img.addEventListener('error', fin);
+    });
+    setTimeout(function() { window.print(); }, 5000);
   });
 <\/script>
 </body>
@@ -3225,7 +3262,28 @@ ${el.innerHTML}
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" onClick={() => onDuplicate(invoice)}><Copy size={13} /> Dupliceren</Button>
           <Button size="sm" variant="secondary" onClick={handlePrint}><Download size={13} /> Download PDF</Button>
+          {onUpdateInvoice && (
+            <Button size="sm" variant="secondary"
+              onClick={() => onUpdateInvoice(invoice.id, { qrEnabled: invoice.qrEnabled === false ? undefined : invoice.qrEnabled ? false : true })}
+              title={
+                invoice.qrEnabled && qrMissingIban
+                  ? 'QR aan maar geen IBAN ingesteld — ga naar Instellingen › Entiteiten en voeg IBAN toe'
+                  : invoice.qrEnabled === false ? 'QR code verborgen' : invoice.qrEnabled ? 'QR code aan — klik om te verwijderen' : 'QR code volgt template instelling'
+              }
+              style={{ borderColor: invoice.qrEnabled ? (qrMissingIban ? 'var(--warning)' : 'var(--success)') : invoice.qrEnabled === false ? 'var(--danger)' : 'var(--border-2)', color: invoice.qrEnabled ? (qrMissingIban ? 'var(--warning)' : 'var(--success)') : invoice.qrEnabled === false ? 'var(--danger)' : 'var(--ink-2)' }}
+            >
+              <Hash size={13} /> {invoice.qrEnabled === false ? 'QR uit' : invoice.qrEnabled ? (qrMissingIban ? 'QR — geen IBAN' : 'QR aan') : 'QR code'}
+            </Button>
+          )}
           {status === 'draft' && <Button size="sm" variant="secondary" onClick={() => onEdit(invoice)}><Edit3 size={13} /> Bewerken</Button>}
+          {status === 'draft' && (
+            <Button size="sm" variant="secondary"
+              onClick={() => { if (window.confirm('Factuur markeren als handmatig verstuurd?')) onStatusChange(invoice.id, 'sent', { sentAt: new Date().toISOString() }); }}
+              title="Markeer als verstuurd zonder te versturen via de app"
+            >
+              <CheckCircle2 size={13} /> Handmatig verstuurd
+            </Button>
+          )}
           {(status === 'draft' || status === 'sent' || status === 'overdue' || status === 'partial') && (
             <Button size="sm" onClick={() => setShowSendModal(true)}><Send size={13} /> {status === 'draft' ? 'Versturen' : 'Opnieuw versturen'}</Button>
           )}
@@ -3488,7 +3546,23 @@ const SendInvoiceModal = ({ invoice, client, settings, onSend, onClose, mode = '
         )}
       </div>
 
-      <div className="px-6 py-4 border-t flex justify-end gap-2" style={{ borderColor: 'var(--border)' }}>
+      <div className="px-6 py-4 border-t flex items-center justify-between gap-2" style={{ borderColor: 'var(--border)' }}>
+        <div>
+          {channel === 'email' && (
+            <button
+              onClick={() => {
+                const to = client?.email || '';
+                const mailtoUrl = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                window.open(mailtoUrl, '_blank');
+              }}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-all"
+              style={{ borderColor: 'var(--border-2)', color: 'var(--ink-2)', background: 'var(--surface)', cursor: 'pointer' }}
+            >
+              <Mail size={13} /> Openen in Gmail / mail-app
+            </button>
+          )}
+        </div>
+        <div className="flex gap-2">
         <Button variant="secondary" onClick={onClose}>Annuleren</Button>
         {channel === 'email' && (
           <Button onClick={() => onSend(isReminder ? reminderLevel : undefined)}>
@@ -3501,6 +3575,7 @@ const SendInvoiceModal = ({ invoice, client, settings, onSend, onClose, mode = '
             <MessageSquare size={14} /> Verstuur via WhatsApp
           </button>
         )}
+        </div>
       </div>
     </Modal>
   );
@@ -4250,7 +4325,9 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
   const legalJur = (entity?.type === 'label' && parentEntity) ? JURISDICTIONS[parentEntity.jurisdiction || 'NL'] : jur;
   const opts = entity?.templateOptions || {};
 
-  const epcData = opts.showQrCode !== false ? buildEpcQr({
+  // Per-invoice override: invoice.qrEnabled = true (force on) | false (force off) | undefined (follow template)
+  const qrOn = invoice?.qrEnabled === true ? true : invoice?.qrEnabled === false ? false : opts.showQrCode !== false;
+  const epcData = qrOn ? buildEpcQr({
     iban: legalEntity.iban,
     bic: legalEntity.bicCode,
     name: legalEntity.name,
@@ -4262,7 +4339,7 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
     : null;
 
   return (
-    <div style={{ borderTop: '1px solid var(--border)', paddingTop: 20, marginTop: 8 }}>
+    <div className="invoice-footer" style={{ borderTop: '1px solid var(--border)', paddingTop: 20, marginTop: 8, pageBreakInside: 'avoid' }}>
       {entity?.type === 'label' && parentEntity && (
         <div className="text-[10px] mb-3 italic" style={{ color: 'var(--muted)' }}>
           {entity.name} is een handelsnaam van {parentEntity.name}.
