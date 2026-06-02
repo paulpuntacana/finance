@@ -451,8 +451,17 @@ export const useCloudStorage = (key, defaultValue) => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
+  const [organization, setOrganization] = useState(null)
   const [loading, setLoading] = useState(true)
   const [profileLoading, setProfileLoading] = useState(false)
+
+  const fetchOrg = async (orgId) => {
+    if (!isSupabaseConfigured || !orgId) return
+    try {
+      const { data } = await supabase.from('organizations').select('id, name, plan').eq('id', orgId).single()
+      if (data) setOrganization(data)
+    } catch {}
+  }
 
   const fetchProfile = async (userId) => {
     if (!isSupabaseConfigured) return
@@ -467,7 +476,10 @@ export const AuthProvider = ({ children }) => {
         console.warn('[fetchProfile] Supabase error:', error.message)
         return
       }
-      if (data) setProfile(data)
+      if (data) {
+        setProfile(data)
+        if (data.organization_id) fetchOrg(data.organization_id)
+      }
     } catch (e) {
       console.warn('[fetchProfile] Exception:', e.message)
     } finally {
@@ -547,6 +559,7 @@ export const AuthProvider = ({ children }) => {
     if (supabase) await supabase.auth.signOut({ scope: 'local' })
     setUser(null)
     setProfile(null)
+    setOrganization(null)
   }
 
   const updateProfile = async (updates) => {
@@ -568,8 +581,17 @@ export const AuthProvider = ({ children }) => {
       .from('profiles')
       .update({ organization_id: org.id, ...roleUpdate })
       .eq('id', user.id)
-    if (!profileErr) setProfile(p => ({ ...p, organization_id: org.id, ...roleUpdate }))
+    if (!profileErr) {
+      setProfile(p => ({ ...p, organization_id: org.id, ...roleUpdate }))
+      setOrganization(org)
+    }
     return { data: org, error: profileErr }
+  }
+
+  const updateOrganization = async (updates) => {
+    if (!isSupabaseConfigured || !organization?.id) return
+    await supabase.from('organizations').update(updates).eq('id', organization.id)
+    setOrganization(o => ({ ...o, ...updates }))
   }
 
   const isPlatformAdmin = profile?.role === 'platform_admin'
@@ -580,8 +602,8 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider value={{
-      user, profile, loading, profileLoading,
-      signIn, signUp, signOut, updateProfile, createOrg,
+      user, profile, organization, loading, profileLoading,
+      signIn, signUp, signOut, updateProfile, createOrg, updateOrganization,
       isPlatformAdmin, isOrgOwner, isAccountant, isEmployee, isReadOnly,
       isConfigured: isSupabaseConfigured,
     }}>
