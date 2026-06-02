@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from 'react';
 import {
   LayoutDashboard, Users, FileText, Receipt as ReceiptIcon, Settings as SettingsIcon,
   Plus, Search, Trash2, Edit3, Eye, Send, Check, Camera, Upload,
@@ -11,7 +11,7 @@ import {
   FileCheck2, ShieldCheck, LogOut, Moon, Sun, Paperclip, ShoppingCart,
 } from 'lucide-react';
 import { useAuth, useCloudStorage } from './src/AuthProvider';
-import AdminPanel from './src/AdminPanel';
+import OrgUsersView from './src/OrgUsersView';
 import QuotesView from './src/QuotesView';
 import HorizonPlanner from './src/HorizonPlanner';
 import CreditManagementView from './src/CreditManagementView';
@@ -19,6 +19,62 @@ import BoekhoudenView from './src/BoekhoudenView';
 import ImportView from './src/ImportView';
 import PurchaseInvoicesView from './src/PurchaseInvoicesView';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, Area, AreaChart } from 'recharts';
+
+// ============================================================================
+// INVOICE INLINE EDIT CONTEXT
+// ============================================================================
+const InvoiceEditContext = createContext({ editMode: false, editValues: {}, onEdit: null });
+
+// Contenteditable field for Word-like inline editing
+const EditableField = ({ value, onChange, className, style }) => {
+  const ref = useRef(null);
+  const [focused, setFocused] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const committedRef = useRef(value);
+
+  useEffect(() => {
+    if (ref.current && !focused && ref.current.textContent !== value) {
+      ref.current.textContent = value;
+      committedRef.current = value;
+    }
+  }, [value, focused]);
+
+  return (
+    <div
+      ref={ref}
+      contentEditable
+      suppressContentEditableWarning
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={e => {
+        setFocused(false);
+        const newVal = e.currentTarget.textContent;
+        if (newVal !== committedRef.current) {
+          committedRef.current = newVal;
+          onChange(newVal);
+        }
+      }}
+      className={className}
+      style={{
+        ...style,
+        outline: 'none',
+        cursor: 'text',
+        borderRadius: 3,
+        background: focused ? 'rgba(0,0,0,0.04)' : hovered ? 'rgba(0,0,0,0.02)' : 'transparent',
+        boxShadow: focused
+          ? '0 0 0 1.5px rgba(0,0,0,0.25)'
+          : hovered
+          ? '0 0 0 1px rgba(0,0,0,0.12)'
+          : 'none',
+        padding: '2px 4px',
+        margin: '-2px -4px',
+        transition: 'box-shadow 0.15s, background 0.15s',
+        minHeight: 18,
+      }}
+    />
+  );
+};
 
 // ============================================================================
 // THEME & STYLES
@@ -1254,7 +1310,7 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
   ];
   const accountItems = [
     { id: 'settings', label: 'Instellingen', icon: SettingsIcon },
-    ...(profile?.role === 'platform_admin' ? [{ id: 'admin', label: 'Gebruikers', icon: ShieldCheck }] : []),
+    ...(profile?.role === 'org_owner' ? [{ id: 'admin', label: 'Gebruikers', icon: Users }] : []),
   ];
   const mobileItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -3074,6 +3130,7 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
 
 // ── Shared: line items + totals table ────────────────────────────────────────
 const InvoiceLineItemsAndTotals = ({ invoice, totals, jur, accent, style = 'executive' }) => {
+  const editCtx = useContext(InvoiceEditContext);
   const isMinimal = style === 'atelier';
   const headerBg = style === 'studio' ? accent : 'transparent';
   const headerColor = style === 'studio' ? '#fff' : 'var(--ink)';
@@ -3149,10 +3206,19 @@ const InvoiceLineItemsAndTotals = ({ invoice, totals, jur, accent, style = 'exec
         </div>
       </div>
 
-      {invoice.notes && (
-        <div className="mb-8 p-4 rounded-md text-xs" style={{ background: '#f9f8f6', border: '1px solid var(--border)' }}>
+      {(invoice.notes || editCtx.editMode) && (
+        <div className="mb-8 p-4 rounded-md text-xs" style={{ background: '#f9f8f6', border: `1px solid ${editCtx.editMode ? 'rgba(0,0,0,0.12)' : 'var(--border)'}` }}>
           <div className="uppercase tracking-[0.12em] text-[9px] mb-1.5 font-semibold" style={{ color: 'var(--muted)' }}>Opmerkingen</div>
-          <div className="whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--ink-2)' }}>{invoice.notes}</div>
+          {editCtx.editMode ? (
+            <EditableField
+              value={editCtx.editValues.notes ?? invoice.notes ?? ''}
+              onChange={val => editCtx.onEdit('notes', val)}
+              className="whitespace-pre-wrap leading-relaxed"
+              style={{ color: 'var(--ink-2)' }}
+            />
+          ) : (
+            <div className="whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--ink-2)' }}>{invoice.notes}</div>
+          )}
         </div>
       )}
     </>
@@ -3180,6 +3246,7 @@ const buildEpcQr = ({ iban, bic, name, amount, reference }) => {
 };
 
 const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice, totals }) => {
+  const editCtx = useContext(InvoiceEditContext);
   const legalEntity = (entity?.type === 'label' && parentEntity) ? parentEntity : entity;
   const legalJur = (entity?.type === 'label' && parentEntity) ? JURISDICTIONS[parentEntity.jurisdiction || 'NL'] : jur;
   const opts = entity?.templateOptions || {};
@@ -3216,8 +3283,17 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
         </div>
       )}
 
-      {opts.showFooterText !== false && entity.footerText && (
-        <div className="text-xs mb-4" style={{ color: 'var(--ink-2)', fontStyle: 'italic' }}>{entity.footerText}</div>
+      {opts.showFooterText !== false && (editCtx.editMode || entity.footerText) && (
+        editCtx.editMode ? (
+          <EditableField
+            value={editCtx.editValues.footerText ?? entity.footerText ?? ''}
+            onChange={val => editCtx.onEdit('footerText', val)}
+            className="text-xs mb-4"
+            style={{ color: 'var(--ink-2)', fontStyle: 'italic', display: 'block' }}
+          />
+        ) : (
+          <div className="text-xs mb-4" style={{ color: 'var(--ink-2)', fontStyle: 'italic' }}>{entity.footerText}</div>
+        )
       )}
 
       {opts.showBankDetails !== false && (
@@ -3769,6 +3845,29 @@ const ACCENT_PRESETS = [
 const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
   const totals = computeInvoice(sampleInvoice.items);
   const accent = entity.accentColor || '#7C2D2D';
+  const [docEditMode, setDocEditMode] = useState(false);
+  const [editValues, setEditValues] = useState({});
+
+  const handleOpenEdit = () => {
+    setEditValues({
+      notes: sampleInvoice.notes ?? '',
+      footerText: entity.footerText ?? '',
+    });
+    setDocEditMode(true);
+  };
+
+  const handleEdit = (key, val) => setEditValues(prev => ({ ...prev, [key]: val }));
+
+  const handleSaveEdits = () => {
+    const updates = { ...entity };
+    if (editValues.footerText !== undefined) updates.footerText = editValues.footerText;
+    if (editValues.notes !== undefined) {
+      updates.templateOptions = { ...(entity.templateOptions || {}), defaultNotes: editValues.notes };
+    }
+    onUpdate(updates);
+    setDocEditMode(false);
+  };
+
   return (
     <div className="space-y-4">
       {/* Color picker */}
@@ -3922,12 +4021,57 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
       </Card>
 
       <Card className="p-4" style={{ background: 'var(--surface-2)' }}>
-        <div className="text-[10px] uppercase tracking-wider font-medium mb-3" style={{ color: 'var(--muted)' }}>Live preview</div>
-        <div className="rounded-lg overflow-hidden border shadow-sm" style={{ borderColor: 'var(--border)' }}>
-          <div style={{ transform: 'scale(0.65)', transformOrigin: 'top left', width: '154%', marginBottom: '-35%' }}>
-            {renderTemplate(entity.templateId, { invoice: sampleInvoice, entity, client: sampleClient, totals })}
-          </div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>Live preview</div>
+          {!docEditMode && (
+            <button
+              onClick={handleOpenEdit}
+              className="flex items-center gap-1.5 text-[10px] px-2.5 py-1.5 rounded-md border transition-all"
+              style={{ color: 'var(--ink-2)', borderColor: 'var(--border-2)', background: 'var(--surface)', cursor: 'pointer' }}
+            >
+              <Edit3 size={10} />
+              Tekst bewerken
+            </button>
+          )}
         </div>
+
+        {docEditMode ? (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5 text-[10px] px-1" style={{ color: 'var(--muted)' }}>
+                <Edit3 size={10} />
+                Klik op <strong style={{ color: 'var(--ink-2)' }}>opmerkingen</strong> of <strong style={{ color: 'var(--ink-2)' }}>voettekst</strong> om te bewerken
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={handleSaveEdits}
+                  className="flex items-center gap-1.5 text-[10px] px-3 py-1.5 rounded-md"
+                  style={{ background: 'var(--ink)', color: '#fff', border: 'none', cursor: 'pointer' }}
+                >
+                  <Save size={10} /> Opslaan
+                </button>
+                <button
+                  onClick={() => setDocEditMode(false)}
+                  className="flex items-center justify-center text-[10px] w-6 h-6 rounded-md border"
+                  style={{ color: 'var(--ink-2)', borderColor: 'var(--border-2)', background: 'transparent', cursor: 'pointer' }}
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            </div>
+            <div style={{ maxHeight: 640, overflowY: 'auto', borderRadius: 8, border: '1px solid var(--border)', background: '#fff' }}>
+              <InvoiceEditContext.Provider value={{ editMode: true, editValues, onEdit: handleEdit }}>
+                {renderTemplate(entity.templateId, { invoice: { ...sampleInvoice, notes: editValues.notes ?? sampleInvoice.notes }, entity, client: sampleClient, totals })}
+              </InvoiceEditContext.Provider>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-lg overflow-hidden border shadow-sm" style={{ borderColor: 'var(--border)' }}>
+            <div style={{ transform: 'scale(0.65)', transformOrigin: 'top left', width: '154%', marginBottom: '-35%' }}>
+              {renderTemplate(entity.templateId, { invoice: sampleInvoice, entity, client: sampleClient, totals })}
+            </div>
+          </div>
+        )}
       </Card>
     </div>
   );
@@ -5791,15 +5935,6 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                   failText="Geen WhatsApp-nummer — stel in via Email & WhatsApp"
                   action={!hasWhatsApp ? { label: 'Instellen', onClick: () => setSection('email') } : null}
                 />
-                <div className="flex items-center justify-between py-3" style={{ borderColor: 'var(--border)' }}>
-                  <div className="flex items-center gap-3">
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--success)', boxShadow: '0 0 6px var(--success)', flexShrink: 0 }} />
-                    <div>
-                      <div className="text-sm font-medium">Supabase</div>
-                      <div className="text-xs mt-0.5" style={{ color: 'var(--success)' }}>Verbonden</div>
-                    </div>
-                  </div>
-                </div>
               </div>
             </Card>
 
@@ -6190,8 +6325,8 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
               setHorizonData={setHorizonData}
             />
           )}
-          {activeTab === 'admin' && profile?.role === 'platform_admin' && (
-            <AdminPanel />
+          {activeTab === 'admin' && profile?.role === 'org_owner' && (
+            <OrgUsersView profile={profile} />
           )}
           {activeTab === 'credit' && (
             <CreditManagementView
