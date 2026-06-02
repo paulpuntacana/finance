@@ -8,7 +8,8 @@ import {
   CheckCircle2, CircleDashed, FileWarning, Wallet, Inbox,
   BookOpen, Sparkles, RefreshCw, Globe, Hash, ArrowRight, Zap, FileBarChart,
   Network, Briefcase, Percent, Tag, Lightbulb, Wand2, Brain, MessageSquare, Star,
-  FileCheck2, ShieldCheck, LogOut, Moon, Sun, Paperclip, ShoppingCart,
+  FileCheck2, ShieldCheck, LogOut, Moon, Sun, Paperclip, ShoppingCart, Calculator,
+  AlignLeft, AlignCenter, AlignRight,
 } from 'lucide-react';
 import { useAuth, useCloudStorage } from './src/AuthProvider';
 import OrgUsersView from './src/OrgUsersView';
@@ -263,9 +264,13 @@ const computeLine = (item) => {
 };
 
 const computeInvoiceStatus = (invoice) => {
-  if (invoice.status === 'paid' || invoice.status === 'draft') return invoice.status;
-  if (invoice.status === 'sent' && invoice.dueDate && new Date(invoice.dueDate) < new Date(todayISO())) {
-    return 'overdue';
+  if (invoice.status === 'paid' || invoice.status === 'draft' || invoice.status === 'credit_note') return invoice.status;
+  if (invoice.status === 'partial') return 'partial';
+  if (invoice.status === 'sent' && invoice.dueDate) {
+    // Compare at noon to avoid timezone-induced day-off issues
+    const due = new Date(invoice.dueDate + 'T12:00:00');
+    const today = new Date(todayISO() + 'T12:00:00');
+    if (due < today) return 'overdue';
   }
   return invoice.status;
 };
@@ -344,7 +349,7 @@ const DEFAULT_SETTINGS = {
     address: '',
     postal: '',
     city: '',
-    country: 'Dominican Republic',
+    country: 'Nederland',
     kvk: '',
     btw: '',
     iban: '',
@@ -383,6 +388,8 @@ const DEFAULT_SETTINGS = {
     whatsappMessage: 'Hallo {{contact}}, hierbij stuur ik je factuur {{number}} voor een bedrag van {{amount}} (vervaldatum {{dueDate}}). Graag op rekening {{iban}} onder vermelding van {{number}}. Bedankt! 🙏',
   },
   categories: ['Software/SaaS', 'Hosting & Infra', 'Kantoorartikelen', 'Reiskosten', 'Eten & Drinken', 'Marketing', 'Professionele diensten', 'Hardware', 'Overig'],
+  apiKey: '',          // Anthropic API key (sk-ant-...)
+  openaiApiKey: '',   // OpenAI API key (sk-...)
   creditManagement: {
     enabled: true,
     latePaymentThreshold: 3,
@@ -399,6 +406,386 @@ const DEFAULT_SETTINGS = {
     graydonApiKey: '',
   },
 };
+
+// ============================================================================
+// DEDUCTIBILITY GUIDE — NL / DR / EE
+// status: 'safe' | 'borderline' | 'risky' | 'no'
+// ============================================================================
+const DEDUCTIBILITY_GUIDE = {
+  NL: [
+    { category: 'Software & Abonnementen', icon: '💻', items: [
+      { name: 'Zakelijke software (Adobe, Figma, GitHub, etc.)', status: 'safe', pct: 100, tip: '"Software licentie [naam] — zakelijk gebruik [bedrijfsnaam]"', doc: 'Factuur op bedrijfsnaam/KvK' },
+      { name: 'AI API-kosten (Claude, ChatGPT, etc.)', status: 'safe', pct: 100, tip: '"AI API-kosten [provider] — zakelijk gebruik voor [dienst]"' },
+      { name: 'Hosting, VPS, CDN (Vercel, AWS, Cloudflare)', status: 'safe', pct: 100, tip: '"Hosting/infrastructuur [naam] — zakelijke applicatie"' },
+      { name: 'Domeinregistratie & SSL', status: 'safe', pct: 100, tip: '"Domeinregistratie [domeinnaam] — zakelijk"' },
+      { name: 'Communicatietools (Slack, Zoom, Loom)', status: 'safe', pct: 100, tip: '"Zakelijke communicatietool [naam]"' },
+    ]},
+    { category: 'Hardware & Apparatuur', icon: '🖥️', items: [
+      { name: 'Laptop / computer (< €450)', status: 'safe', pct: 100, tip: '"Laptop [merk/model] — kantoorbenodigdheid zakelijk gebruik"', doc: 'Aankoopbewijs; bij voorkeur zakelijke rekening' },
+      { name: 'Laptop / computer (> €450)', status: 'safe', pct: 100, tip: '"Bedrijfsmiddel: laptop [merk] — afschrijven 3 jaar"', doc: 'Serienummer noteren; op balans activeren', risk: 'Niet direct als kosten — afschrijven over minimaal 3 jaar (bijv. €600 = €200/jaar).' },
+      { name: 'Externe monitor, toetsenbord, muis', status: 'safe', pct: 100, tip: '"Kantoorbenodigdheid: [apparaat] — zakelijk gebruik"' },
+      { name: 'Telefoon (>90% zakelijk)', status: 'borderline', pct: 90, tip: '"Zakelijke telefoon — 90% zakelijk gebruik"', doc: 'Geen privéabonnement op zelfde nummer', risk: 'Belastingdienst kan privégebruik aanvechten. 75-80% is veiliger als je ook privé gebruikt. Bij twee toestellen: 100% verdedigbaar.' },
+      { name: 'Telefoon (gemengd gebruik)', status: 'borderline', pct: 75, tip: '"Telefoon — 75% zakelijk gebruik (gedocumenteerd)"', risk: 'Stel zakelijk gebruik vast. Wees consistent elk jaar.' },
+      { name: 'Camera / microfoon / headset (zakelijk)', status: 'safe', pct: 100, tip: '"Audio/videoapparatuur — zakelijke content/calls"' },
+    ]},
+    { category: 'Reiskosten', icon: '✈️', items: [
+      { name: 'Vliegticket zakelijke reis', status: 'safe', pct: 100, tip: '"Vliegticket [bestemming] — zakelijke reis voor [klant/project/event]"', doc: 'Bewaar agenda-afspraak of e-mail ter onderbouwing' },
+      { name: 'Hotel (zakelijke reis)', status: 'safe', pct: 100, tip: '"Hotelverblijf [stad] — zakelijke reis [datum]"', doc: 'Factuur op bedrijfsnaam; noteer doel reis' },
+      { name: 'Trein / OV / taxi (zakelijk)', status: 'safe', pct: 100, tip: '"OV/taxi [traject] — zakelijk bezoek [klant/locatie]"' },
+      { name: 'Vliegticket combi vakantie+werk', status: 'borderline', pct: 50, tip: '"Vliegticket [bestemming] — [X] dagen zakelijk van [Y] totaal; zakelijk aandeel X/Y × ticketprijs"', risk: 'Alleen zakelijke dagen aftrekbaar. Documenteer met agenda: meetings, klanten, events.' },
+      { name: 'Auto eigen (zakelijk km)', status: 'safe', pct: 100, tip: '"Kilometerverg. zakelijk — [traject]: X km × €0,23"', doc: 'Rittenadministratie: datum, doel, km' },
+      { name: 'Airbnb (deels zakelijk)', status: 'borderline', pct: 50, tip: '"Verblijfskosten [bestemming] — X van Y nachten zakelijk"', risk: 'Pro-rata: zakelijke nachten/totaal. Documenteer zakelijke activiteiten.' },
+    ]},
+    { category: 'Eten & Representatie', icon: '🍽️', items: [
+      { name: 'Zakelijk diner/lunch met klant', status: 'safe', pct: 80, tip: '"Zakelijk diner — [naam klant] re. [project], [datum]"', doc: 'Noteer op de bon wie erbij waren en het zakelijke doel. 80% aftrekbaar.' },
+      { name: 'Zakelijk event / netwerkevent', status: 'safe', pct: 80, tip: '"Netwerkevent [naam event] — zakelijke representatie"' },
+      { name: 'Koffie/lunch tijdens zakelijke werkdag', status: 'borderline', pct: 80, tip: '"Zakelijke maaltijd tijdens werkdag — representatiekosten"', risk: 'Alleen echte zakelijke maaltijden (niet gewone thuislunch). 80% aftrekbaar. BD is kritisch.' },
+      { name: 'Cadeau klant (< €227/persoon/jaar)', status: 'borderline', pct: 80, tip: '"Relatiegeschenk [naam klant] — zakelijke relatie onderhoud"', risk: 'Max €227 per persoon per jaar voor 80% aftrek. Daarboven: nihil.' },
+      { name: 'Eigen maaltijden (geen klant erbij)', status: 'risky', pct: 0, tip: 'In principe niet aftrekbaar. Uitzondering: ver van huis/zakelijke locatie.', risk: 'BD beschouwt dit als privé. Niet aanraden tenzij je aantoonbaar ver van huis werkt.' },
+    ]},
+    { category: 'Kleding', icon: '👔', items: [
+      { name: 'Kleding MET zichtbaar bedrijfslogo', status: 'safe', pct: 100, tip: '"Werkkleding met bedrijfslogo [bedrijfsnaam] — zakelijk representatiemateriaal"', doc: 'Logo moet duidelijk zichtbaar zijn; bewaar productfoto' },
+      { name: 'Pak / zakelijke kleding (geen logo)', status: 'no', pct: 0, tip: 'Niet aftrekbaar in NL, ook niet als je het "alleen voor werk" draagt.', risk: 'Harde NL-regel: kleding aftrekbaar als ongeschikt voor privé OF logo draagt. Een pak is privé draagbaar → niet aftrekbaar.' },
+      { name: 'Beschermkleding / veiligheidsschoenen', status: 'safe', pct: 100, tip: '"Beschermende werkkleding — verplicht voor beroepsuitoefening"' },
+    ]},
+    { category: 'Kantoor & Thuiskantoor', icon: '🏠', items: [
+      { name: 'Externe kantoorruimte / coworking', status: 'safe', pct: 100, tip: '"Huur kantoorruimte / coworking [naam] — zakelijke werkplek"', doc: 'Huurcontract op bedrijfsnaam' },
+      { name: 'Thuiskantoor (aparte kamer, exclusief zakelijk)', status: 'borderline', pct: 100, tip: '"Thuiskantoor — X% van woonoppervlak (Y m²), exclusief zakelijk gebruik"', doc: 'Kamer moet ECHT exclusief zakelijk zijn', risk: 'Heel streng in NL: kamer mag NIET gemengd zijn. Slaapcombinatie? Telt niet. Bewijs: plattegrond + foto.' },
+      { name: 'Thuiskantoor (hoek van woonkamer)', status: 'risky', pct: 0, tip: 'Vrijwel nooit aftrekbaar in NL.', risk: 'Hoge kans op afwijzing bij controle. Niet aanraden.' },
+      { name: 'Kantoorbenodigdheden / bureaumeubilair', status: 'safe', pct: 100, tip: '"Kantoorbenodigdheden/meubilair — zakelijk gebruik"' },
+    ]},
+    { category: 'Opleiding & Marketing', icon: '📚', items: [
+      { name: 'Online cursus / bootcamp (vakgerelateerd)', status: 'safe', pct: 100, tip: '"Online cursus [naam] — vakinhoudelijke opleiding voor [vak]"' },
+      { name: 'Vakliteratuur / boeken', status: 'safe', pct: 100, tip: '"Vakliteratuur: [titel] — zakelijk relevante kennis"' },
+      { name: 'Conferentie / congres', status: 'safe', pct: 100, tip: '"Congresticket [naam event] — vakinhoudelijke bijscholing"' },
+      { name: 'Google/Meta/LinkedIn Ads', status: 'safe', pct: 100, tip: '"Online advertentiekosten [platform] — zakelijke leadgeneratie"' },
+      { name: 'Website (bouw, design, hosting)', status: 'safe', pct: 100, tip: '"Website ontwikkeling/onderhoud — zakelijke online aanwezigheid"' },
+    ]},
+    { category: 'Bankkosten & Verzekeringen', icon: '💳', items: [
+      { name: 'Zakelijke rekening kosten', status: 'safe', pct: 100, tip: '"Bankkosten zakelijke rekening [bank]"' },
+      { name: 'Stripe / PayPal / Wise / Revolut fees', status: 'safe', pct: 100, tip: '"Betaaldienst transactiekosten [platform] — zakelijke betalingsverwerking"' },
+      { name: 'AOV / beroepsaansprakelijkheidsverzekering', status: 'safe', pct: 100, tip: '"AOV-premie / beroepsaansprakelijkheid — zakelijke verzekering"' },
+      { name: 'Internet thuis (gemengd)', status: 'borderline', pct: 50, tip: '"Internetabonnement — 50% zakelijk gebruik"', risk: '50% is gangbaar. Tot 80% verdedigbaar als je freelancer bent die thuis werkt.' },
+    ]},
+  ],
+
+  DR: [
+    { category: 'Software & Tecnología', icon: '💻', items: [
+      { name: 'Software / SaaS (Adobe, Figma, etc.)', status: 'safe', pct: 100, tip: '"Licencia de software [nombre] — uso empresarial"', doc: 'Factuur met NCF-nummer (B01 of B14)' },
+      { name: 'AI API costs', status: 'safe', pct: 100, tip: '"Costos API de IA [proveedor] — uso empresarial"' },
+      { name: 'Hosting / Cloud / Domein', status: 'safe', pct: 100, tip: '"Servicios de hosting/nube [proveedor] — infraestructura empresarial"' },
+    ]},
+    { category: 'Kleding / Vestimenta', icon: '👔', items: [
+      { name: 'Zakelijke kleding (meetings, presentaties)', status: 'safe', pct: 100, tip: '"Vestimenta profesional para presentaciones y reuniones de negocios — gasto necesario para producir renta"', doc: 'DR-regel: gastos necesarios para producir renta. Kleding zonder logo gewoon aftrekbaar!' },
+      { name: 'Pak, jurk, zakelijke schoenen', status: 'safe', pct: 100, tip: '"Ropa de trabajo — representación empresarial [RNC bedrijf]"' },
+      { name: 'Casual kleding (ook privé)', status: 'borderline', pct: 70, tip: '"Ropa de uso mixto — estimado 70% uso profesional"', risk: 'Verdedigbaar maar wees voorzichtig bij volledig privé-uitziende aankopen.' },
+    ]},
+    { category: 'Eten & Representatie', icon: '🍽️', items: [
+      { name: 'Restaurant (zakelijk diner/lunch met klant)', status: 'safe', pct: 100, tip: '"Gastos de representación — almuerzo/cena con [cliente] re. [proyecto], [fecha]"', doc: 'NCF-factuur van restaurant. Noteer namen en doel.' },
+      { name: 'Eigen maaltijden tijdens werkdag', status: 'safe', pct: 80, tip: '"Alimentación durante jornada laboral — gastos necesarios para producir renta"', doc: 'DR is veel soepeler dan NL — eigen maaltijden grotendeels aftrekbaar.' },
+      { name: 'Supermarkt (kantoor/thuiswerk)', status: 'borderline', pct: 50, tip: '"Alimentación y suministros de trabajo — 50% uso empresarial"' },
+    ]},
+    { category: 'Transport & Reizen', icon: '✈️', items: [
+      { name: 'Benzine / brandstof', status: 'safe', pct: 100, tip: '"Combustible — uso empresarial, visita a [cliente/lugar]"', doc: 'Simpel bon. DGII accepteert benzinebonnen.' },
+      { name: 'Vliegticket zakelijke reis', status: 'safe', pct: 100, tip: '"Boleto aéreo — viaje de negocios a [destino] para [propósito]"' },
+      { name: 'Hotel zakelijke reis', status: 'safe', pct: 100, tip: '"Alojamiento — viaje de negocios [ciudad], [fechas]"' },
+      { name: 'Auto (huur, onderhoud, benzine)', status: 'safe', pct: 100, tip: '"Alquiler/mantenimiento/combustible vehículo — uso empresarial"' },
+    ]},
+    { category: 'Kantoor & Thuiswerk', icon: '🏠', items: [
+      { name: 'Huur woning (pro-rata thuiskantoor)', status: 'safe', pct: 30, tip: '"Arrendamiento — 30% uso empresarial (home office)"', doc: 'DR staat pro-rata thuiskantoor toe. 25-35% is gangbaar.' },
+      { name: 'Elektriciteit / internet (zakelijk deel)', status: 'safe', pct: 30, tip: '"Electricidad/internet — 30% uso empresarial"' },
+      { name: 'Kantoorbenodigdheden', status: 'safe', pct: 100, tip: '"Útiles de oficina — uso empresarial"' },
+    ]},
+    { category: 'ITBIS-tip (BTW terughalen)', icon: '🔄', items: [
+      { name: 'ITBIS op zakelijke aankopen', status: 'safe', pct: 100, tip: 'Vraag ALTIJD om NCF-factuur (B01 voor bedrijven). Zonder NCF geen ITBIS-teruggave.', doc: 'NCF B01 of B14 vereist. Bewaar alle facturen 10 jaar.' },
+      { name: 'Aankopen zonder NCF', status: 'risky', pct: 0, tip: 'Geen ITBIS terugvordering mogelijk. Vraag altijd om NCF.', risk: 'Veelgemaakte fout: informele aankopen zonder NCF kunnen niet worden teruggevorderd.' },
+    ]},
+  ],
+
+  EE: [
+    { category: 'Software & Technology', icon: '💻', items: [
+      { name: 'Software / SaaS licenses', status: 'safe', pct: 100, tip: '"Software license [name] — business use, [OÜ name]"', doc: 'Invoice to OÜ name + registration code (registrikood)' },
+      { name: 'AI API costs', status: 'safe', pct: 100, tip: '"AI API costs [provider] — business operations"' },
+      { name: 'Hosting / cloud / domain', status: 'safe', pct: 100, tip: '"Cloud hosting [provider] — business infrastructure"' },
+    ]},
+    { category: 'Hardware', icon: '🖥️', items: [
+      { name: 'Laptop / computer', status: 'safe', pct: 100, tip: '"Business equipment: laptop [brand/model] — company asset, [OÜ name]"', doc: 'Invoice to OÜ. Book as company asset.' },
+      { name: 'Mixed-use equipment', status: 'borderline', pct: 75, tip: '"Equipment [name] — 75% business use, documented"', risk: 'Document business use %. Tax board may question high % if clearly also personal.' },
+    ]},
+    { category: 'Kleding / Clothing', icon: '👔', items: [
+      { name: 'Business clothing (meetings, client visits)', status: 'borderline', pct: 75, tip: '"Professional attire for client meetings — [OÜ name] business representation"', risk: 'EE is more lenient than NL. No logo required, but document the business context clearly.' },
+      { name: 'Company branded clothing', status: 'safe', pct: 100, tip: '"Company branded clothing — [OÜ name] marketing"' },
+      { name: 'Casual clothing without business purpose', status: 'risky', pct: 0, tip: 'General clothing not deductible in EE without clear business purpose.' },
+    ]},
+    { category: 'Travel', icon: '✈️', items: [
+      { name: 'Business travel (flights, hotel)', status: 'safe', pct: 100, tip: '"Business travel: [destination] — client meeting/conference [name]"', doc: 'Keep calendar invite, email confirmation of meeting.' },
+      { name: 'Combined business+leisure', status: 'borderline', pct: 50, tip: '"Travel [destination] — [X] business days of [Y] total days, X/Y ratio applied"', risk: 'Split strictly by day ratio. Document business activities.' },
+      { name: 'Client visits (transport)', status: 'safe', pct: 100, tip: '"Transport to client [name] — business meeting"' },
+    ]},
+    { category: 'Food & Entertainment', icon: '🍽️', items: [
+      { name: 'Business dinner with client', status: 'safe', pct: 100, tip: '"Business entertainment — dinner with [client] re. [project], [date]"', doc: 'Note attendees and purpose.' },
+      { name: 'Own meals while working', status: 'borderline', pct: 50, tip: '"Working meal — remote work day [date]"', risk: 'Allowed with documentation but scrutinized by tax board.' },
+    ]},
+    { category: 'Home Office', icon: '🏠', items: [
+      { name: 'Rent (home office portion)', status: 'safe', pct: 30, tip: '"Home office — [X]% of flat used for business, [OÜ name]"', doc: 'Rental contract. Document which room/m². 25-35% common.' },
+      { name: 'Internet (business)', status: 'safe', pct: 100, tip: '"Internet connection — business operations"' },
+      { name: 'Office furniture', status: 'safe', pct: 100, tip: '"Office furniture [item] — home office business use"' },
+    ]},
+    { category: 'OÜ Strategy', icon: '💰', items: [
+      { name: 'Retain profits in OÜ (geen uitkering)', status: 'safe', pct: 0, tip: 'Winst in OÜ laten staan = 0% belasting. Ideaal als je het geld niet privé nodig hebt.', doc: 'Geen actie nodig. Winst blijft automatisch belastingvrij in OÜ.' },
+      { name: 'Dividend uitkeren (22%)', status: 'safe', pct: 0, tip: '"Dividend payment [amount] — 22% CIT applies at OÜ level"', doc: 'Simpelste manier om geld op te nemen. 22% corporate tax, geen extra privébelasting in EE.' },
+      { name: 'Salaris uitkeren aan directeur', status: 'borderline', pct: 0, tip: '"Director salary [amount]/month"', risk: 'Salaris kost 33% social tax (werkgeversdeel) bovenop het salaris zelf. Vaak duurder dan dividend. Alleen nodig als je pensioenopbouw wilt of sociale zekerheid wil activeren.' },
+    ]},
+  ],
+  UAE: [
+    { category: 'Software & Technology', icon: '💻', items: [
+      { name: 'Software / SaaS (Adobe, Figma, GitHub)', status: 'safe', pct: 100, tip: '"Software license [name] — business use, [LLC/FZ name], TRN [number]"', doc: 'Invoice to company name + TRN number.' },
+      { name: 'AI API costs', status: 'safe', pct: 100, tip: '"AI API costs [provider] — business operations"' },
+      { name: 'Hosting / cloud / domain', status: 'safe', pct: 100, tip: '"Cloud hosting [provider] — business infrastructure"' },
+    ]},
+    { category: 'Hardware & Equipment', icon: '🖥️', items: [
+      { name: 'Laptop / computer', status: 'safe', pct: 100, tip: '"Business equipment: laptop [brand] — company asset, [company name]"', doc: 'Invoice to company. Can be expensed or depreciated.' },
+      { name: 'Phone (business use)', status: 'safe', pct: 100, tip: '"Business phone — company expense"' },
+    ]},
+    { category: 'Clothing', icon: '👔', items: [
+      { name: 'Business attire (meetings, presentations)', status: 'safe', pct: 100, tip: '"Professional attire for business meetings — company representation"', doc: 'UAE: geen logo-eis. Zakelijke kleding volledig aftrekbaar.' },
+      { name: 'Casual clothing (mixed use)', status: 'borderline', pct: 70, tip: '"Business casual — professional use [X]%"', risk: 'Documenteer zakelijk doel. UAE is liberaal maar houdt bonnen bij.' },
+    ]},
+    { category: 'Meals & Entertainment', icon: '🍽️', items: [
+      { name: 'Business dinner/lunch with client', status: 'safe', pct: 100, tip: '"Business entertainment — dinner with [client] re. [project], [date]"', doc: 'Receipt + note attendees and business purpose.' },
+      { name: 'Own meals during business day', status: 'safe', pct: 100, tip: '"Meal during business operations — [date]"', doc: 'UAE is very liberal on business meal deductions.' },
+    ]},
+    { category: 'Travel', icon: '✈️', items: [
+      { name: 'Business flights', status: 'safe', pct: 100, tip: '"Business travel: flights to [destination] — client/project [name]"' },
+      { name: 'Hotel (business trip)', status: 'safe', pct: 100, tip: '"Accommodation [city] — business trip [dates]"' },
+      { name: 'Car (company vehicle)', status: 'safe', pct: 100, tip: '"Vehicle expense — business use [company name]"' },
+    ]},
+    { category: 'Home Office / Kantoor', icon: '🏠', items: [
+      { name: 'Office rent / coworking', status: 'safe', pct: 100, tip: '"Office rent/coworking [name] — business premises"' },
+      { name: 'Home office (pro-rata)', status: 'borderline', pct: 30, tip: '"Home office — [X]% of rent, [company name]"', risk: 'Free zone companies may require a registered office address. Check your licence terms.' },
+      { name: 'Internet / utilities (business portion)', status: 'safe', pct: 100, tip: '"Internet/utility — business operations"' },
+    ]},
+    { category: 'VAT & Tax Tips', icon: '💡', items: [
+      { name: 'VAT (5%) on business purchases', status: 'safe', pct: 100, tip: 'Claim input VAT back via quarterly VAT201 return. Only if VAT registered (> AED 375k turnover).', doc: 'Tax invoice with your TRN number required.' },
+      { name: 'Corporate Tax: profit under AED 375k (~€102k)', status: 'safe', pct: 0, tip: '0% corporate tax under Small Business Relief (turnover < AED 3 million). No filing needed under threshold.', doc: 'Check eligibility annually at Federal Tax Authority portal.' },
+      { name: 'Free Zone: 0% corporate tax', status: 'safe', pct: 0, tip: '0% VPB in designated Free Zones zolang je geen mainland UAE activiteiten hebt.', doc: 'Check specifieke FZ-regels (DMCC, IFZA, etc.). Sommige vereisen fysiek kantoor.' },
+    ]},
+  ],
+
+  ES: [
+    { category: 'Software & Tecnología', icon: '💻', items: [
+      { name: 'Software / SaaS (Adobe, Figma, GitHub)', status: 'safe', pct: 100, tip: '"Licencia software [nombre] — actividad económica, NIF [número]"', doc: 'Factura con NIF/CIF. IVA (21%) recuperable en declaración trimestral.' },
+      { name: 'AI API costs', status: 'safe', pct: 100, tip: '"Costos API IA [proveedor] — uso profesional"' },
+      { name: 'Hosting / cloud / dominio', status: 'safe', pct: 100, tip: '"Hosting/infraestructura cloud [proveedor] — actividad profesional"' },
+    ]},
+    { category: 'Hardware & Equipo', icon: '🖥️', items: [
+      { name: 'Ordenador / portátil (100% profesional)', status: 'safe', pct: 100, tip: '"Equipo informático — amortización 3-5 años, uso profesional exclusivo"', doc: 'Factura con NIF. Amortizar al 25-33% anual (coeficiente tabla amortización).' },
+      { name: 'Teléfono (uso mixto)', status: 'borderline', pct: 50, tip: '"Teléfono móvil — 50% uso profesional documentado"', risk: 'Hacienda acepta 50% para uso mixto. Documenta el porcentaje de uso profesional.' },
+    ]},
+    { category: 'Ropa', icon: '👔', items: [
+      { name: 'Ropa de trabajo con logo empresarial', status: 'safe', pct: 100, tip: '"Ropa de trabajo — logo empresa visible, uso exclusivo profesional"', doc: 'Logo obligatorio. Idéntico al criterio holandés.' },
+      { name: 'Traje / ropa profesional sin logo', status: 'risky', pct: 0, tip: 'Hacienda NO admite ropa convencional aunque sea "solo para trabajar".', risk: 'DGT: si es apta para uso particular, no es deducible. Solo uniforme con logo.' },
+    ]},
+    { category: 'Comidas & Representación', icon: '🍽️', items: [
+      { name: 'Comida de negocios con cliente', status: 'safe', pct: 100, tip: '"Gastos de representación — comida con [cliente] re. [proyecto], [fecha]"', doc: 'Factura restaurante con NIF + nota de asistentes y motivo.', risk: 'Límite: gastos de atención a clientes no pueden superar el 1% del importe neto de la cifra de negocios.' },
+      { name: 'Manutención en desplazamiento (fuera municipio)', status: 'safe', pct: 100, tip: '"Manutención — desplazamiento profesional a [ciudad/país], [fecha]"', doc: 'Límite: €53,34/día sin pernocta en España; €91,35 en extranjero. Con pernocta: el doble.' },
+      { name: 'Comida propia (sin desplazamiento)', status: 'risky', pct: 0, tip: 'Solo deducible si estás desplazado fuera de tu municipio habitual. En tu ciudad: no deducible.', risk: 'Criterio estricto de Hacienda. No arriesgues comidas habituales en tu localidad.' },
+    ]},
+    { category: 'Viajes & Transporte', icon: '✈️', items: [
+      { name: 'Vuelo de negocios', status: 'safe', pct: 100, tip: '"Viaje de negocios — vuelo a [destino] para [cliente/evento]"', doc: 'Conservar confirmación de reunión/congreso/cliente.' },
+      { name: 'Hotel (viaje profesional)', status: 'safe', pct: 100, tip: '"Alojamiento — viaje de negocios [ciudad], [fechas]"' },
+      { name: 'Vehículo autónomo (uso mixto)', status: 'borderline', pct: 50, tip: '"Gastos vehículo — 50% uso profesional (criterio Hacienda)"', risk: 'Hacienda solo acepta 50% para uso mixto. 100% solo si demuestras uso exclusivo profesional (muy difícil para autónomos).' },
+      { name: 'Transporte público / taxi (profesional)', status: 'safe', pct: 100, tip: '"Transporte — [trayecto], visita a [cliente/reunión]"' },
+    ]},
+    { category: 'Oficina & Despacho en Casa', icon: '🏠', items: [
+      { name: 'Oficina / coworking', status: 'safe', pct: 100, tip: '"Alquiler oficina/coworking [nombre] — sede profesional"', doc: 'Contrato a nombre del autónomo o empresa.' },
+      { name: 'Despacho en casa (habitación exclusiva)', status: 'borderline', pct: 30, tip: '"Afectación vivienda habitual — [X]% superficie a actividad económica"', doc: 'Solo % de suministros (luz, agua, gas). NO el alquiler entero. Actividad debe estar en IAE con domicilio en casa.', risk: 'Hacienda es muy restrictiva. Solo IBI, comunidad, basura, amortización y suministros proporcionales.' },
+      { name: 'Internet (uso mixto)', status: 'borderline', pct: 50, tip: '"Internet — 50% uso profesional"', risk: 'Criterio habitual del 50%. Documenta el porcentaje profesional.' },
+    ]},
+    { category: 'Cuotas & Seguros', icon: '💳', items: [
+      { name: 'Cuota autónomos (Seguridad Social)', status: 'safe', pct: 100, tip: '"Cuota autónomos SS — [mes/año]"', doc: 'Gasto deducible 100%. Sistema de cotización por ingresos reales desde 2023.' },
+      { name: 'Seguro RC / responsabilidad civil profesional', status: 'safe', pct: 100, tip: '"Seguro RC profesional — [aseguradora], actividad [epígrafe IAE]"' },
+    ]},
+  ],
+
+  PT: [
+    { category: 'Software & Tecnologia', icon: '💻', items: [
+      { name: 'Software / SaaS (Adobe, Figma, GitHub)', status: 'safe', pct: 100, tip: '"Licença software [nome] — atividade profissional, NIF [número]"', doc: 'Fatura com NIF. In Regime Simplificado: inbegrepen in 25% forfaitaire aftrek.' },
+      { name: 'AI API costs', status: 'safe', pct: 100, tip: '"Custos API IA [fornecedor] — uso profissional"' },
+      { name: 'Hosting / cloud / domínio', status: 'safe', pct: 100, tip: '"Hosting/cloud [fornecedor] — infraestrutura profissional"' },
+    ]},
+    { category: 'Regime Simplificado vs. Contabilidade Organizada', icon: '📊', items: [
+      { name: 'Regime Simplificado (< €200k omzet)', status: 'safe', pct: 25, tip: 'AT past automatisch 75%-coëfficiënt toe op omzet voor diensten. 25% is forfaitaire aftrek — GEEN bonnen nodig voor dit voordeel.', doc: 'Geen actie nodig. Automatisch bij IRS-aangifte via Portal das Finanças.' },
+      { name: 'Contabilidade Organizada', status: 'borderline', pct: 100, tip: 'Alle werkelijke kosten aftrekbaar. Vereist certified accountant (TOC/contabilista certificado). Interessant bij > €25k-30k jaarkosten.', doc: 'Verplicht een TOC in te schakelen. Kan gunstiger zijn bij hoge kosten of lage marges.' },
+    ]},
+    { category: 'Kleding', icon: '👔', items: [
+      { name: 'Fardamento / uniform met logo', status: 'safe', pct: 100, tip: '"Fardamento profissional com logótipo — [nome empresa/NIF]"', doc: 'Logo of vereist uniform. Zonder logo: zelfde strenge lijn als NL en ES.' },
+      { name: 'Zakelijke kleding zonder logo', status: 'risky', pct: 0, tip: 'AT accepteert gewone kleding niet als beroepskosten, ook niet als je het "alleen voor werk" draagt.', risk: 'Beschouwd als privékosten. Alleen uniform of kleding met logo is veilig.' },
+    ]},
+    { category: 'Refeições & Representação', icon: '🍽️', items: [
+      { name: 'Zakelijk diner/lunch met klant', status: 'safe', pct: 100, tip: '"Despesas de representação — jantar com [cliente] re. [projeto], [data]"', doc: 'Fatura restaurante met NIF. Noteer aanwezigen en zakelijk doel.', risk: 'Let op: despesas de representação boven 2% van omzet zijn onderhevig aan 35% aanvullende belasting (Tributação Autónoma).' },
+      { name: 'Subsídio de refeição (eigen maaltijden)', status: 'borderline', pct: 50, tip: '"Subsídio de refeição — deslocação profissional, [data]"', risk: 'Alleen bij aantoonbare zakelijke verplaatsing. Thuis werken: niet aftrekbaar.' },
+    ]},
+    { category: 'Viagens & Transporte', icon: '✈️', items: [
+      { name: 'Vlucht zakelijke reis', status: 'safe', pct: 100, tip: '"Viagem de negócios — voo para [destino], reunião com [cliente/evento]"' },
+      { name: 'Hotel zakelijke reis', status: 'safe', pct: 100, tip: '"Alojamento — viagem profissional, [cidade], [datas]"' },
+      { name: 'Veiculo (auto, gemengd gebruik)', status: 'borderline', pct: 50, tip: '"Viaturas — 50% uso profissional documentado"', risk: 'AT accepteert typisch 50% voor gemengd gebruik. Tributação Autónoma van 10-35% op voertuigkosten van toepassing.' },
+      { name: 'Openbaar vervoer / taxi (zakelijk)', status: 'safe', pct: 100, tip: '"Transporte profissional — [trajeto], visita a [cliente]"' },
+    ]},
+    { category: 'Escritório & Home Office', icon: '🏠', items: [
+      { name: 'Kantoor / coworking', status: 'safe', pct: 100, tip: '"Arrendamento escritório/cowork [nome] — instalações profissionais"', doc: 'Contrato op naam van de onderneming/ENI.' },
+      { name: 'Home office (pro-rata, Contab. Organizada)', status: 'borderline', pct: 25, tip: '"Home office — [X]% do imóvel dedicado à atividade profissional"', risk: 'In Regime Simplificado: al inbegrepen in 25% forfaitaire aftrek. In Contabilidade Organizada: expliciet documenteren.' },
+      { name: 'Internet / telefone', status: 'safe', pct: 50, tip: '"Internet/telefone — 50% uso profissional"', doc: 'Fatura op naam. 50% gangbaar bij gemengd gebruik.' },
+    ]},
+    { category: 'NHR — Non-Habitual Resident (IFICI)', icon: '🌟', items: [
+      { name: 'NHR 2.0 (IFICI) — kwalificerende activiteiten', status: 'safe', pct: 0, tip: '20% flat rate IRS voor tech, R&D, industrie en andere gekwalificeerde activiteiten. Geldig 10 jaar.', doc: 'Aanvragen via Portal das Finanças als nieuwe fiscale inwoner. Goedgekeurde activiteitenlijst controleren.' },
+      { name: 'Dividenden buitenland onder NHR', status: 'borderline', pct: 0, tip: 'Onder oud NHR: mogelijk 0%. Onder NHR 2.0 strenger — afhankelijk van belastingverdrag met oorsprongsland.', risk: 'Controleer per inkomenssoort en oorsprongsland met een fiscalist.' },
+    ]},
+  ],
+
+  TH: [
+    { category: 'Software & Technology', icon: '💻', items: [
+      { name: 'Software / SaaS (Adobe, Figma, GitHub)', status: 'safe', pct: 100, tip: '"Software license [name] — business expense, [company registration no.]"', doc: 'Thai receipt/invoice. VAT (7%) reclaimable if VAT registered (turnover > ฿1.8M).' },
+      { name: 'AI API costs', status: 'safe', pct: 100, tip: '"AI API — business operations"' },
+      { name: 'Hosting / cloud / domain', status: 'safe', pct: 100, tip: '"Cloud/hosting [provider] — business infrastructure"' },
+    ]},
+    { category: 'Hardware & Equipment', icon: '🖥️', items: [
+      { name: 'Laptop / computer', status: 'safe', pct: 100, tip: '"Business equipment: laptop [brand] — company asset"', doc: 'Invoice to company name. Depreciate 3-5 years or expense directly for SMEs.' },
+      { name: 'Phone (business use)', status: 'borderline', pct: 75, tip: '"Business phone — 75% professional use documented"', risk: 'Document business use percentage.' },
+    ]},
+    { category: 'Clothing', icon: '👔', items: [
+      { name: 'Uniform / company branded clothing', status: 'safe', pct: 100, tip: '"Uniform/branded clothing — company expense, [company name]"', doc: 'Company logo required or specific work uniform.' },
+      { name: 'Business attire (meetings)', status: 'borderline', pct: 60, tip: '"Professional attire for client meetings — [X]% business use"', risk: 'Thailand Revenue Dept: deductible if required for work. Document the business context.' },
+    ]},
+    { category: 'Meals & Entertainment', icon: '🍽️', items: [
+      { name: 'Business entertainment with client', status: 'safe', pct: 100, tip: '"Entertainment expense — dinner with [client] re. [project], [date]"', doc: 'Thai receipt + note business purpose. Keep for 5 years.', risk: 'Entertainment deductions for listed companies capped at 0.3% of revenue. Much more flexible for SMEs.' },
+      { name: 'Per diem / meals on business trip', status: 'safe', pct: 100, tip: '"Per diem — business trip to [city], [date]"', doc: 'Revenue Dept allows ฿270/day per diem (general rate). Higher for overseas.' },
+    ]},
+    { category: 'Travel', icon: '✈️', items: [
+      { name: 'Business flights', status: 'safe', pct: 100, tip: '"Business travel: flights to [destination] — client/event [name]"', doc: 'Keep boarding pass + evidence of business purpose.' },
+      { name: 'Hotel (business trip)', status: 'safe', pct: 100, tip: '"Hotel [city] — business trip [dates]"' },
+      { name: 'Car / taxi (business use)', status: 'safe', pct: 100, tip: '"Business transport — [destination], client visit"' },
+    ]},
+    { category: 'Home Office / Office', icon: '🏠', items: [
+      { name: 'Office rent / coworking', status: 'safe', pct: 100, tip: '"Office rent [name] — business premises"', doc: 'Rental contract in company name.' },
+      { name: 'Home office (pro-rata)', status: 'borderline', pct: 30, tip: '"Home office — [X]% of residence used for business"', risk: 'Revenue Dept allows home office deductions with documentation. Pro-rata by area.' },
+      { name: 'Internet / utilities', status: 'safe', pct: 100, tip: '"Internet — business operations"', doc: 'Bill in company name preferred.' },
+    ]},
+    { category: 'BOI & Tax Incentives', icon: '🌟', items: [
+      { name: 'BOI-vrijstelling (BOI-registered company)', status: 'safe', pct: 0, tip: 'BOI geeft 0% CIT voor 3-8 jaar voor goedgekeurde activiteiten (tech, export, R&D). Aanvragen via BOI Thailand.', doc: 'Vereist specifieke activiteiten en investeringen. Machtiging vóór start activiteiten aanvragen.' },
+      { name: 'Long Term Resident (LTR) Visa', status: 'safe', pct: 0, tip: 'LTR Visa voor high-income remote workers: 10-jaar verblijf + belastingvoordeel op buitenlands inkomen.', doc: 'Vereist inkomen > $80k/jaar of $1M belegde assets. Aanvragen via BOI.' },
+    ]},
+  ],
+
+  ID: [
+    { category: 'Software & Teknologi', icon: '💻', items: [
+      { name: 'Software / SaaS (Adobe, Figma, GitHub)', status: 'safe', pct: 100, tip: '"Biaya lisensi perangkat lunak [nama] — operasional bisnis, NPWP [nomor]"', doc: 'Faktur dengan NPWP. PPN 11% terug te vorderen als BTW-plichtig.' },
+      { name: 'AI API costs', status: 'safe', pct: 100, tip: '"Biaya API AI [penyedia] — keperluan bisnis"' },
+      { name: 'Hosting / cloud / domain', status: 'safe', pct: 100, tip: '"Hosting/cloud [penyedia] — infrastruktur bisnis"' },
+    ]},
+    { category: 'UMKM & Regime Keuze', icon: '📊', items: [
+      { name: 'UMKM: 0,5% PPh Final over bruto-omzet', status: 'safe', pct: 100, tip: 'Voor omzet tot IDR 4,8 miljard/jaar: 0,5% belasting over bruto-omzet. Geen verdere aftrekken nodig.', doc: 'Betaal maandelijks via SIMBARA/DJP Online. NPWP verplicht.' },
+      { name: 'UMKM: 0% belasting eerste jaar', status: 'safe', pct: 0, tip: 'Nieuwe ondernemers in het eerste belastingjaar: 0% PPh Final (bepaalde voorwaarden van toepassing).', doc: 'Vrijstelling aanvragen bij KPP Pratama.' },
+    ]},
+    { category: 'Kleding', icon: '👔', items: [
+      { name: 'Seragam / uniform met bedrijfslogo', status: 'safe', pct: 100, tip: '"Seragam/pakaian dinas — keperluan operasional perusahaan"', doc: 'Faktur op bedrijfsnaam (NPWP). Bewaar als biaya jabatan.' },
+      { name: 'Zakelijke representatiekleding', status: 'borderline', pct: 50, tip: '"Pakaian representasi bisnis — 50% keperluan profesional"', risk: 'Dirjen Pajak: kleding zonder bedrijfskarakter is grotendeels privé. Documenteer zakelijk doel.' },
+    ]},
+    { category: 'Makan & Representasi', icon: '🍽️', items: [
+      { name: 'Business lunch/dinner met klant', status: 'safe', pct: 100, tip: '"Biaya representasi — makan dengan [klien] re. [proyek], [tanggal]"', doc: 'Kwitansi/nota met NPWP verkoper. In UMKM-regime: niet relevant (plat tarief).', risk: 'In Lucro Real/PPh Badan: entertainment expenses zijn aftrekbaar maar kunnen worden betwist bij excessieve bedragen.' },
+      { name: 'Eigen maaltijden (werkdag)', status: 'borderline', pct: 50, tip: '"Biaya makan selama tugas — hari kerja [tanggal]"', risk: 'Bij UMKM-regime: niet relevant. In PPh Badan: acceptabel met onderbouwing.' },
+    ]},
+    { category: 'Perjalanan Bisnis', icon: '✈️', items: [
+      { name: 'Vliegticket zakelijke reis', status: 'safe', pct: 100, tip: '"Tiket penerbangan — perjalanan dinas ke [kota], tujuan: [doel]"', doc: 'Surat tugas (opdracht memo) aanbevolen bij bedrijfsonkostenvergoeding.' },
+      { name: 'Hotel zakelijke reis', status: 'safe', pct: 100, tip: '"Akomodasi — perjalanan dinas, [kota], [tanggal]"' },
+      { name: 'BBM / brandstof (zakelijk voertuig)', status: 'safe', pct: 100, tip: '"BBM kendaraan dinas — operasional bisnis"', doc: 'Bon brandstof. Zakelijk voertuig: 100% aftrekbaar.' },
+    ]},
+    { category: 'Kantor & Home Office', icon: '🏠', items: [
+      { name: 'Kantoor / coworking', status: 'safe', pct: 100, tip: '"Sewa kantor/coworking [nama] — operasional bisnis"', doc: 'Kwitansi sewa. Verhuurder verplicht PPh Pasal 4(2) te betalen.' },
+      { name: 'Internet (zakelijk)', status: 'safe', pct: 100, tip: '"Internet — operasional bisnis"', doc: 'Tagihan op naam van bedrijf.' },
+      { name: 'Listrik / nutstarieven (pro-rata)', status: 'borderline', pct: 30, tip: '"Listrik — 30% operasional home office"', risk: 'Alleen relevant bij PPh Badan (lucro real). In UMKM-regime: niet nodig.' },
+    ]},
+  ],
+
+  US: [
+    { category: 'Software & Technology', icon: '💻', items: [
+      { name: 'Business software / SaaS', status: 'safe', pct: 100, tip: '"Software subscription [name] — business expense, [business name]"', doc: 'Invoice or bank statement. 100% deductible if exclusively used for business.' },
+      { name: 'AI API costs', status: 'safe', pct: 100, tip: '"AI API — business operations expense"' },
+      { name: 'Hosting / cloud / domain', status: 'safe', pct: 100, tip: '"Business hosting [provider] — infrastructure"' },
+    ]},
+    { category: 'Hardware (Section 179)', icon: '🖥️', items: [
+      { name: 'Laptop / computer (>50% business)', status: 'safe', pct: 100, tip: '"Business equipment: [item] — Section 179 immediate expensing"', doc: 'Must be >50% business use. Section 179: full deduction in year of purchase (up to $1.16M limit).' },
+      { name: 'Mixed-use equipment', status: 'borderline', pct: 60, tip: '"Business equipment [item] — [X]% business use, documented mileage/log"', risk: 'Must document business use %. IRS may require depreciation over 5 years if mixed-use <100%.' },
+    ]},
+    { category: 'Clothing', icon: '👔', items: [
+      { name: 'Required uniform / safety gear', status: 'safe', pct: 100, tip: '"Required uniform — not suitable for everyday wear, [business name]"', doc: 'Must NOT be suitable for everyday wear. Specific uniform required by employer/profession.' },
+      { name: 'Business suit / professional clothing', status: 'no', pct: 0, tip: 'NOT deductible. IRS rule: if suitable for everyday wear, it is a personal expense — even if worn only for work.', risk: 'Strict IRS position upheld in court cases. Do not deduct suits, dresses, or shoes without required uniform status.' },
+    ]},
+    { category: 'Meals & Entertainment', icon: '🍽️', items: [
+      { name: 'Business meals with client (documented)', status: 'safe', pct: 50, tip: '"Business meal — [client name] re. [business topic], [date], [restaurant]"', doc: 'Note: who attended, business discussed. 50% deductible post-TCJA 2017.', risk: 'Entertainment (events, sports, shows) = 0% deductible since TCJA. Only meals at 50%.' },
+      { name: 'Meals while traveling overnight', status: 'safe', pct: 50, tip: '"Meal during overnight business travel — [city], [date]"', doc: '50% deductible when traveling away from home for business.' },
+      { name: 'Office meals / snacks for employees', status: 'borderline', pct: 50, tip: '"Employee meals — provided at the employer convenience"', risk: 'Was 100%, now 50% post-TCJA. Scheduled to drop to 0% after 2025 unless renewed by Congress.' },
+    ]},
+    { category: 'Travel', icon: '✈️', items: [
+      { name: 'Business flights (100% business trip)', status: 'safe', pct: 100, tip: '"Business travel — flights to [city] for [client/conference]"', doc: 'Keep itinerary, conference registration, or client emails as evidence.' },
+      { name: 'Hotel (business trip)', status: 'safe', pct: 100, tip: '"Business lodging [city] — [dates], [purpose]"' },
+      { name: 'Mileage (personal vehicle)', status: 'safe', pct: 100, tip: '"Business mileage — [X] miles × $0.67/mile (2024 IRS standard rate)"', doc: 'Mileage log required: date, destination, business purpose, miles driven.' },
+      { name: 'Mixed vacation + business trip', status: 'borderline', pct: 50, tip: '"Travel [destination] — primarily business (>50% business days)"', risk: 'If >50% of days are business: transport 100% deductible, hotel/meals only for business days.' },
+    ]},
+    { category: 'Home Office (Form 8829)', icon: '🏠', items: [
+      { name: 'Home office — exclusive use (dedicated room)', status: 'safe', pct: 100, tip: '"Home office — exclusive and regular business use: [X] sq ft / [Y] total sq ft"', doc: 'IRS: must be EXCLUSIVE use. No personal use at all. Calculate: home office sq ft ÷ total sq ft × home expenses.' },
+      { name: 'Home office — simplified method', status: 'safe', pct: 100, tip: '"Home office simplified: [X] sq ft × $5/sq ft (max 300 sq ft = $1,500 deduction)"', doc: 'Simpler alternative. Max $1,500 deduction per year.' },
+      { name: 'Home office — shared/dual-use room', status: 'no', pct: 0, tip: 'NOT deductible. IRS requires EXCLUSIVE business use. A bedroom with a desk at night does NOT qualify.', risk: 'Very strict IRS rule. One personal use voids the entire deduction for that space.' },
+    ]},
+    { category: 'Self-Employment Tax Deductions', icon: '💰', items: [
+      { name: 'Self-employment tax (50% deduction)', status: 'safe', pct: 50, tip: 'Automatically deduct 50% of SE tax on Schedule 1. Reduces adjusted gross income.', doc: 'Computed on Schedule SE. No tracking needed — automatic calculation.' },
+      { name: 'Self-employed health insurance premiums', status: 'safe', pct: 100, tip: '"Health insurance premiums — self-employed deduction, Schedule 1 Line 17"', doc: 'Cannot exceed net self-employment income.' },
+      { name: 'QBI Deduction (Section 199A)', status: 'safe', pct: 20, tip: '20% deduction on qualified business income for most pass-through entities (LLC, sole prop, S-Corp).', doc: 'Auto-calculated on Form 8995. Subject to income thresholds ($182k single / $364k MFJ for 2024).' },
+      { name: 'SEP-IRA / Solo 401(k) contributions', status: 'safe', pct: 100, tip: '"Retirement contribution — SEP-IRA/Solo 401(k) [year]"', doc: 'SEP-IRA: up to 25% of net SE income, max $69k (2024). Powerful tax reducer — consider annually.' },
+    ]},
+  ],
+
+  BR: [
+    { category: 'Software & Tecnologia', icon: '💻', items: [
+      { name: 'Software / SaaS (Adobe, Figma, GitHub)', status: 'safe', pct: 100, tip: '"Licença de software [nome] — despesa operacional, CNPJ [número]"', doc: 'Nota fiscal com CNPJ. In Simples Nacional: al inbegrepen in DAS. In Lucro Real: volledig aftrekbaar.' },
+      { name: 'AI API costs', status: 'safe', pct: 100, tip: '"Custos API IA [fornecedor] — despesa operacional"' },
+      { name: 'Hosting / cloud / domínio', status: 'safe', pct: 100, tip: '"Serviços cloud [fornecedor] — infraestrutura empresarial"' },
+    ]},
+    { category: 'Regime Tributário — Keuze is alles', icon: '📊', items: [
+      { name: 'MEI (Microempreendedor Individual)', status: 'safe', pct: 0, tip: 'MEI: vaste maandbedragen DAS omvat INSS + ISS/ICMS. Omzetlimiet: R$81.000/jaar. Simpelste systeem.', doc: 'Betaling DAS via PGMEI. Geen aftrekposten nodig — forfaitair systeem.' },
+      { name: 'Simples Nacional (omzet tot R$4.8M)', status: 'safe', pct: 0, tip: 'Alles-in-één tarief: 4-19,5% op bruto-omzet (Anexo III/V voor diensten). Omvat IR, CSLL, PIS, COFINS, ISS.', doc: 'DAS berekend via Pgdas-D. Geen losse aftrekken — simpel maar niet altijd goedkoopst.' },
+      { name: 'Lucro Presumido (omzet < R$78M)', status: 'borderline', pct: 32, tip: 'AT gaat er van uit dat 32% van de omzet winst is (servicebedrijven). Hierover: 15% IRPJ + 9% CSLL + PIS/COFINS.', doc: 'Interessant bij hoge marges. Meer administratie vereist.' },
+      { name: 'Lucro Real', status: 'borderline', pct: 100, tip: 'Alle werkelijke kosten aftrekbaar. Vereist volledige boekhouding. Interessant bij lage marges of hoge kosten.', doc: 'Verplicht boven R$78M omzet. Optioneel voor kleinere bedrijven met hoge kostenstructuur.' },
+    ]},
+    { category: 'Kleding', icon: '👔', items: [
+      { name: 'Uniforme / EPI (beschermende uitrusting)', status: 'safe', pct: 100, tip: '"Uniforme/EPI — despesa necessária para atividade"', doc: 'Nota fiscal op CNPJ.' },
+      { name: 'Zakelijke kleding (representatie)', status: 'borderline', pct: 50, tip: '"Vestuário representação — 50% uso profissional"', risk: 'Receita Federal: kleding aftrekbaar als noodzakelijk voor activiteit. Gewone kleding is moeilijker te verdedigen.' },
+    ]},
+    { category: 'Alimentação & Representação', icon: '🍽️', items: [
+      { name: 'Business dinner/lunch met klant', status: 'safe', pct: 100, tip: '"Despesas de representação — jantar com [cliente] re. [projeto], [data]"', doc: 'Nota fiscal met CNPJ. In Simples Nacional: niet relevant (plat tarief).', risk: 'In Lucro Real: representatiekosten aftrekbaar maar houd bedragen realistisch.' },
+      { name: 'PAT — Maaltijdvergoeding werknemers', status: 'safe', pct: 100, tip: 'PAT (Programa de Alimentação do Trabalhador): maaltijdvergoeding voor werknemers is aftrekbaar en geeft fiscaal voordeel.', doc: 'Aanmelden bij Ministério do Trabalho voor PAT-certificering.' },
+    ]},
+    { category: 'Viagens & Transporte', icon: '✈️', items: [
+      { name: 'Vliegticket zakelijke reis', status: 'safe', pct: 100, tip: '"Passagem aérea — viagem a negócios, [destino], [propósito]"', doc: 'Nota fiscal of recibo. In Simples Nacional: niet relevant (plat tarief).' },
+      { name: 'Hotel zakelijke reis', status: 'safe', pct: 100, tip: '"Hospedagem — viagem a negócios, [cidade], [datas]"' },
+      { name: 'Combustível (zakelijk voertuig)', status: 'safe', pct: 100, tip: '"Combustível — veículo empresa/profissional"', doc: 'Cupom fiscal op CNPJ.' },
+    ]},
+    { category: 'Escritório & Home Office', icon: '🏠', items: [
+      { name: 'Kantoor / coworking', status: 'safe', pct: 100, tip: '"Aluguel escritório/coworking [nome] — despesa operacional"', doc: 'Recibo/nota fiscal met CNPJ.' },
+      { name: 'Home office (pro-rata, Lucro Real)', status: 'borderline', pct: 25, tip: '"Home office — [X]% do imóvel em uso profissional"', risk: 'In Simples Nacional: niet relevant (plat tarief). In Lucro Real: proportioneel aftrekbaar met onderbouwing.' },
+      { name: 'Internet / telefone', status: 'safe', pct: 100, tip: '"Internet/telefone — uso profissional"', doc: 'Fatura op CNPJ.' },
+    ]},
+    { category: 'INSS & Contribuições', icon: '💳', items: [
+      { name: 'INSS Contribuinte Individual (freelancer)', status: 'safe', pct: 100, tip: '"Contribuição INSS — previdência social"', doc: 'INSS bijdrage: 20% over maandinkomen (max teto). Aftrekbaar als bedrijfskosten.' },
+      { name: 'DAS / Simples Nacional betaling', status: 'safe', pct: 0, tip: 'DAS is de all-in belasting voor Simples/MEI. Geen verdere aftrekken nodig in dit regime.', doc: 'Betaling via Pgdas-D op site Receita Federal.' },
+    ]},
+  ],
+
+
+};
+
+// Helper: get deductibility guide for a jurisdiction, with flat search
+const getDeductGuide = (jurCode) => DEDUCTIBILITY_GUIDE[jurCode] || DEDUCTIBILITY_GUIDE.NL;
 
 // ============================================================================
 // JURISDICTIONS (NL + DR)
@@ -980,50 +1367,99 @@ const INVOICE_TEMPLATES = [
 ];
 
 // ============================================================================
-// AI HELPER
-// Priority: VITE_ANTHROPIC_API_KEY env var → settings.apiKey (fallback)
-// Stel in .env.local: VITE_ANTHROPIC_API_KEY=sk-ant-...
+// AI HELPER — supports both Anthropic (sk-ant-...) and OpenAI (sk-...)
+// Priority: VITE_ANTHROPIC_API_KEY / VITE_OPENAI_API_KEY env var → settings key (fallback)
 // ============================================================================
-const resolveApiKey = (settingsKey) =>
-  import.meta.env.VITE_ANTHROPIC_API_KEY || settingsKey || null;
 
-const callClaude = async ({ system, prompt, apiKey, maxTokens = 2000 }) => {
-  const resolvedKey = resolveApiKey(apiKey);
-  const headers = { 'Content-Type': 'application/json' };
-  if (resolvedKey) {
-    headers['x-api-key'] = resolvedKey;
-    headers['anthropic-version'] = '2023-06-01';
-    headers['anthropic-dangerous-direct-browser-access'] = 'true';
+// Detect provider from key format
+const detectProvider = (key) => {
+  if (!key) return null;
+  if (key.startsWith('sk-ant-') || key.startsWith('sk-ant_')) return 'anthropic';
+  if (key.startsWith('sk-')) return 'openai';
+  return 'anthropic'; // default
+};
+
+// Resolve best available key: env vars first, then settings
+const resolveApiKey = (settingsAnthropicKey, settingsOpenAIKey) => {
+  // Env vars take priority
+  if (import.meta.env.VITE_ANTHROPIC_API_KEY) return import.meta.env.VITE_ANTHROPIC_API_KEY;
+  if (import.meta.env.VITE_OPENAI_API_KEY) return import.meta.env.VITE_OPENAI_API_KEY;
+  // Settings keys: Anthropic preferred over OpenAI
+  if (settingsAnthropicKey) return settingsAnthropicKey;
+  if (settingsOpenAIKey) return settingsOpenAIKey;
+  return null;
+};
+
+// Universal AI text call — routes to Anthropic or OpenAI based on key prefix
+const callAI = async ({ system, prompt, messages, apiKey, openaiApiKey, maxTokens = 2000 }) => {
+  const key = resolveApiKey(apiKey, openaiApiKey);
+  if (!key) throw new Error('Geen AI API key ingesteld. Vul een Anthropic of OpenAI key in via Instellingen → AI.');
+  const provider = detectProvider(key);
+
+  if (provider === 'openai') {
+    const msgs = [];
+    if (system) msgs.push({ role: 'system', content: system });
+    if (messages) msgs.push(...messages);
+    else msgs.push({ role: 'user', content: prompt });
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({ model: 'gpt-4o-mini', max_tokens: maxTokens, messages: msgs }),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`OpenAI API error ${response.status}: ${errText.slice(0, 200)}`);
+    }
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content || '';
   }
+
+  // Anthropic
+  const anthropicMessages = messages || [{ role: 'user', content: prompt }];
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: maxTokens,
       system,
-      messages: [{ role: 'user', content: prompt }],
+      messages: anthropicMessages,
     }),
   });
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`API error ${response.status}: ${errText.slice(0, 200)}`);
+    throw new Error(`Anthropic API error ${response.status}: ${errText.slice(0, 200)}`);
   }
   const data = await response.json();
-  const textBlock = data.content?.find(b => b.type === 'text');
-  return textBlock?.text || '';
+  return data.content?.find(b => b.type === 'text')?.text || '';
 };
 
+// Backward compat alias
+const callClaude = ({ system, prompt, apiKey, maxTokens = 2000 }) =>
+  callAI({ system, prompt, apiKey, maxTokens });
+
 // Vision API — scant bon/factuur foto en retourneert gestructureerde data
-const callClaudeVision = async ({ imageDataUrl, apiKey, jurisdiction = 'NL' }) => {
-  const resolvedKey = resolveApiKey(apiKey);
-  if (!resolvedKey) throw new Error('Geen API key ingesteld. Voeg VITE_ANTHROPIC_API_KEY toe aan .env.local of stel hem in via Instellingen → AI.');
+const callClaudeVision = async ({ imageDataUrl, apiKey, openaiApiKey, jurisdiction = 'NL' }) => {
+  const resolvedKey = resolveApiKey(apiKey, openaiApiKey);
+  if (!resolvedKey) throw new Error('Geen AI API key ingesteld. Vul een Anthropic of OpenAI key in via Instellingen → AI.');
   const base64 = imageDataUrl.split(',')[1];
   const mediaType = imageDataUrl.split(';')[0].split(':')[1] || 'image/jpeg';
-  const taxRates = jurisdiction === 'NL' ? '0, 9 or 21' : '0, 16 or 18';
-  const taxName = jurisdiction === 'NL' ? 'BTW/VAT' : 'ITBIS';
+  const taxRates = jurisdiction === 'NL' ? '0, 9 or 21' : jurisdiction === 'EE' ? '0, 9 or 22' : '0, 16 or 18';
+  const taxName = jurisdiction === 'NL' ? 'BTW/VAT' : jurisdiction === 'EE' ? 'KM/VAT' : 'ITBIS';
+  const deductibilityContext = jurisdiction === 'NL'
+    ? `NL deductibility rules: Software/SaaS always deductible. Hardware >€450 must be depreciated. Clothing only if it has a company logo. Meals/entertainment: max 80% deductible. Home office: complex, usually not. Travel: fully deductible. Training: fully deductible.`
+    : jurisdiction === 'DR'
+    ? `DR (Dominican Republic) deductibility rules: Very lenient. Clothing deductible even without logo (if used for work). Meals and restaurant visits largely deductible. Fuel/transport fully deductible. Software/subscriptions fully deductible. Generally: if it helps the business, it is deductible (Gastos necesarios para producir renta).`
+    : jurisdiction === 'EE'
+    ? `Estonia OÜ deductibility rules: Business expenses fully deductible. Mixed personal/business expenses need documentation. Meals deductible with business purpose. Travel fully deductible. Home office deductible with proper documentation. No clothing rule — if for business use, deductible.`
+    : `General: business expenses necessary for generating revenue are deductible.`;
 
-  const prompt = `You are an expert receipt/invoice data extractor. Analyze this receipt or invoice image carefully.
+  const prompt = `You are an expert receipt/invoice data extractor AND tax advisor for ${jurisdiction}. Analyze this receipt or invoice image carefully.
 
 Return ONLY a valid JSON object with exactly these fields (no markdown, no explanation):
 {
@@ -1032,43 +1468,76 @@ Return ONLY a valid JSON object with exactly these fields (no markdown, no expla
   "total_incl_tax": 0.00,
   "tax_amount": 0.00,
   "tax_rate": 0,
-  "currency": "ISO 4217 code"
+  "currency": "ISO 4217 code",
+  "deductible": true,
+  "deductible_pct": 100,
+  "deductible_risk": "safe",
+  "deductible_note": "one sentence in Dutch explaining if/why this is deductible",
+  "deductible_description": "exact Dutch bookkeeping description to write on this expense"
 }
 
 Rules:
-- "total_incl_tax": the final total amount INCLUDING tax (the amount the customer pays). If only excl amount shown, add the tax.
-- "tax_amount": the tax/VAT/${taxName} amount shown. If not shown, calculate from rate.
-- "tax_rate": choose the closest from ${taxRates}. If no tax, use 0.
-- "currency": detect from currency symbol (€=EUR, $=USD, £=GBP, RD$=DOP, ¥=JPY). Default to EUR only if truly undetectable.
-- All amounts as decimal numbers with a period (not comma).
-- If a value is truly unreadable, use 0 or empty string.`;
+- "total_incl_tax": final amount INCLUDING tax. If only excl shown, add the tax.
+- "tax_amount": tax/VAT/${taxName} amount. If not shown, calculate from rate.
+- "tax_rate": choose closest from ${taxRates}. If no tax, use 0.
+- "currency": detect from symbol (€=EUR, $=USD, £=GBP, RD$=DOP, ¥=JPY). Default EUR only if truly unclear.
+- All amounts as decimals with period (not comma). Unreadable values: 0 or empty string.
+- "deductible": true/false for freelancer/ZZP in ${jurisdiction}.
+- "deductible_pct": percentage deductible (100, 80, 75, 50, 30, 0).
+- "deductible_risk": "safe" (clear yes), "borderline" (grey area, document well), "risky" (likely rejected), "no" (not deductible).
+- "deductible_note": short Dutch explanation of deductibility + any conditions.
+- "deductible_description": the EXACT Dutch description to write in bookkeeping, e.g. "Zakelijk diner met [klant] re. [project]" or "Software licentie Figma — zakelijk gebruik". Make it specific, professional, and optimized for tax purposes.
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': resolvedKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 500,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+${deductibilityContext}`;
+
+  const provider = detectProvider(resolvedKey);
+  let text = '';
+
+  if (provider === 'openai') {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${resolvedKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        max_tokens: 500,
+        messages: [{ role: 'user', content: [
+          { type: 'image_url', image_url: { url: imageDataUrl } },
           { type: 'text', text: prompt },
-        ],
-      }],
-    }),
-  });
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`API error ${response.status}: ${errText.slice(0, 200)}`);
+        ]}],
+      }),
+    });
+    if (!response.ok) throw new Error(`OpenAI API error ${response.status}`);
+    const data = await response.json();
+    text = data.choices?.[0]?.message?.content || '';
+  } else {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': resolvedKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 500,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+            { type: 'text', text: prompt },
+          ],
+        }],
+      }),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`API error ${response.status}: ${errText.slice(0, 200)}`);
+    }
+    const data = await response.json();
+    text = data.content?.find(b => b.type === 'text')?.text || '';
   }
-  const data = await response.json();
-  const text = data.content?.find(b => b.type === 'text')?.text || '';
+
   // Robust JSON extraction — find the outermost {...} block
   const match = text.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}/s) || text.match(/\{[\s\S]*\}/);
   if (!match) throw new Error('Geen JSON gevonden in AI-respons. Probeer een scherpere foto.');
@@ -1077,6 +1546,80 @@ Rules:
   } catch {
     throw new Error('AI-respons kon niet worden verwerkt. Probeer opnieuw.');
   }
+};
+
+// AI — klantinfo opzoeken via website URL
+const callClaudeForClientFromWebsite = async ({ url, apiKey, openaiApiKey }) => {
+  if (!resolveApiKey(apiKey, openaiApiKey)) throw new Error('Geen AI API key ingesteld. Vul een key in via Instellingen → AI.');
+  let pageText = '';
+  try {
+    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+    const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
+    const json = await res.json();
+    pageText = (json.contents || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000);
+  } catch {
+    pageText = '';
+  }
+  const system = 'Je bent een expert in het extraheren van bedrijfsinformatie. Retourneer ALLEEN geldig JSON, geen uitleg of markdown.';
+  const prompt = `Extraheer bedrijfsinformatie voor: ${url}
+${pageText ? `Pagina-inhoud:\n${pageText}` : ''}
+
+Retourneer ALLEEN dit JSON object:
+{"name":"","contactName":"","email":"","phone":"","address":"","postal":"","city":"","country":"Nederland","btw":"","kvk":""}
+
+Gebruik lege string "" als een veld niet bekend is.`;
+  const raw = await callAI({ system, prompt, apiKey, maxTokens: 400 });
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('Geen geldige JSON teruggegeven');
+  return JSON.parse(match[0]);
+};
+
+// AI — klantinfo uit visitekaartje foto
+const callClaudeVisionForCard = async ({ imageDataUrl, apiKey, openaiApiKey }) => {
+  const resolvedKey = resolveApiKey(apiKey, openaiApiKey);
+  if (!resolvedKey) throw new Error('Geen AI API key ingesteld. Vul een key in via Instellingen → AI.');
+  const base64 = imageDataUrl.split(',')[1];
+  const mediaType = imageDataUrl.split(';')[0].split(':')[1] || 'image/jpeg';
+  const prompt = `Extraheer alle contactinformatie van dit visitekaartje.
+Retourneer ALLEEN dit JSON object (geen uitleg):
+{"name":"bedrijfsnaam","contactName":"naam persoon","email":"","phone":"","address":"","postal":"","city":"","country":"Nederland","btw":"","kvk":""}
+Gebruik lege string "" als een veld niet zichtbaar is.`;
+  const provider = detectProvider(resolvedKey);
+  let raw = '';
+  if (provider === 'openai') {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${resolvedKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini', max_tokens: 400,
+        messages: [{ role: 'user', content: [
+          { type: 'image_url', image_url: { url: imageDataUrl } },
+          { type: 'text', text: prompt },
+        ]}],
+      }),
+    });
+    if (!response.ok) throw new Error(`OpenAI API error ${response.status}`);
+    const data = await response.json();
+    raw = data.choices?.[0]?.message?.content || '';
+  } else {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': resolvedKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001', max_tokens: 400,
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+          { type: 'text', text: prompt },
+        ]}],
+      }),
+    });
+    if (!response.ok) throw new Error(`API error ${response.status}`);
+    const data = await response.json();
+    raw = data.content?.find(b => b.type === 'text')?.text || '';
+  }
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('Geen geldige JSON teruggegeven');
+  return JSON.parse(match[0]);
 };
 
 // ============================================================================
@@ -1192,6 +1735,8 @@ const Badge = ({ status, children }) => {
     overdue: { background: 'var(--danger-soft)', color: 'var(--danger)' },
     open: { background: 'var(--warning-soft)', color: 'var(--warning)' },
     processed: { background: 'var(--success-soft)', color: 'var(--success)' },
+    partial: { background: 'rgba(139,92,246,0.12)', color: '#7c3aed' },
+    credit_note: { background: 'var(--danger-soft)', color: 'var(--danger)' },
   };
   const labels = {
     draft: 'Concept',
@@ -1200,6 +1745,8 @@ const Badge = ({ status, children }) => {
     overdue: 'Te laat',
     open: 'Open',
     processed: 'Verwerkt',
+    partial: 'Deelbetaling',
+    credit_note: 'Creditnota',
   };
   return (
     <span style={styles[status] || styles.draft} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider">
@@ -1212,10 +1759,9 @@ const Modal = ({ open, onClose, children, size = 'md' }) => {
   if (!open) return null;
   const sizes = { sm: 'max-w-md', md: 'max-w-2xl', lg: 'max-w-4xl', xl: 'max-w-6xl', full: 'max-w-7xl' };
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto" style={{ background: 'rgba(26, 22, 18, 0.4)' }} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto" style={{ background: 'rgba(26, 22, 18, 0.4)' }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div
         className={`${sizes[size]} w-full bg-white rounded-xl shadow-2xl my-8 animate-slide`}
-        onClick={(e) => e.stopPropagation()}
         style={{ border: '1px solid var(--border)' }}
       >
         {children}
@@ -1271,7 +1817,10 @@ const EntitySwitcher = ({ activeEntity, entities, onSwitch, onManage }) => {
         className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border transition-colors text-left"
         style={{ borderColor: 'var(--border-strong)', background: 'var(--surface)' }}
       >
-        <span className="text-lg">{typ.icon}</span>
+        {activeEntity.logo
+          ? <img src={activeEntity.logo} alt="" style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />
+          : <span className="text-lg">{typ.icon}</span>
+        }
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium truncate" style={{ color: 'var(--ink)' }}>{activeEntity.name}</div>
           <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
@@ -1292,7 +1841,10 @@ const EntitySwitcher = ({ activeEntity, entities, onSwitch, onManage }) => {
                 onClick={() => { onSwitch(e.id); setOpen(false); }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-left hover:opacity-80 transition-opacity"
               >
-                <span className="text-base">{t.icon}</span>
+                {e.logo
+                  ? <img src={e.logo} alt="" style={{ width: 24, height: 24, objectFit: 'contain', borderRadius: 3, flexShrink: 0 }} />
+                  : <span className="text-base">{t.icon}</span>
+                }
                 <div className="flex-1 min-w-0">
                   <div className="text-sm truncate" style={{ color: 'var(--ink)' }}>{e.name}</div>
                   <div className="text-[10px]" style={{ color: 'var(--muted)' }}>{j.flag} {t.label}</div>
@@ -1461,13 +2013,16 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
               style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0, cursor: 'pointer' }}
             >
               <div style={{
-                width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0,
-                background: 'linear-gradient(135deg, #4f46e5, #818cf8)',
+                width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0, overflow: 'hidden',
+                background: profile?.avatar_url ? 'transparent' : 'linear-gradient(135deg, #4f46e5, #818cf8)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: '13px', fontWeight: '700', color: '#fff',
                 boxShadow: '0 2px 6px rgba(79,70,229,0.35)',
               }}>
-                {displayName[0].toUpperCase()}
+                {profile?.avatar_url
+                  ? <img src={profile.avatar_url} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : displayName[0].toUpperCase()
+                }
               </div>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>{displayName}</div>
@@ -1512,6 +2067,15 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
             </button>
           );
         })}
+        {onToggleTheme && (
+          <button onClick={onToggleTheme}
+            className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg"
+            style={{ color: 'var(--text-3)', background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            <span style={{ fontSize: '10px', fontWeight: '500' }}>{theme === 'dark' ? 'Light' : 'Dark'}</span>
+          </button>
+        )}
       </nav>
     </>
   );
@@ -1792,7 +2356,7 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
 // ============================================================================
 // CLIENTS VIEW
 // ============================================================================
-const ClientsView = ({ clients, setClients, invoices }) => {
+const ClientsView = ({ clients, setClients, invoices, settings }) => {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
 
@@ -1898,19 +2462,75 @@ const ClientsView = ({ clients, setClients, invoices }) => {
       )}
 
       {editing !== null && (
-        <ClientForm client={editing} onSave={handleSave} onClose={() => setEditing(null)} />
+        <ClientForm client={editing} onSave={handleSave} onClose={() => setEditing(null)} settings={settings} />
       )}
     </div>
   );
 };
 
-const ClientForm = ({ client, onSave, onClose }) => {
+const ClientForm = ({ client, onSave, onClose, settings }) => {
   const [form, setForm] = useState({
     name: '', contactName: '', email: '', address: '', postal: '', city: '', country: 'Nederland',
     btw: '', kvk: '', notes: '', ...client,
   });
+  const [websiteUrl, setWebsiteUrl] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
 
-  const update = (key, val) => setForm({ ...form, [key]: val });
+  const update = (key, val) => setForm(f => ({ ...f, [key]: val }));
+
+  const applyAiData = (data) => {
+    setForm(f => ({
+      ...f,
+      name: data.name || f.name,
+      contactName: data.contactName || f.contactName,
+      email: data.email || f.email,
+      phone: data.phone || f.phone || '',
+      address: data.address || f.address,
+      postal: data.postal || f.postal,
+      city: data.city || f.city,
+      country: data.country || f.country,
+      btw: data.btw || f.btw,
+      kvk: data.kvk || f.kvk,
+    }));
+  };
+
+  const lookupWebsite = async () => {
+    if (!websiteUrl) return;
+    setAiLoading(true); setAiError('');
+    try {
+      const url = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`;
+      const data = await callClaudeForClientFromWebsite({ url, apiKey: settings?.apiKey });
+      applyAiData(data);
+    } catch (e) {
+      setAiError(e.message);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const scanCard = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAiLoading(true); setAiError('');
+    try {
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        try {
+          const data = await callClaudeVisionForCard({ imageDataUrl: ev.target.result, apiKey: settings?.apiKey });
+          applyAiData(data);
+        } catch (err) {
+          setAiError(err.message);
+        } finally {
+          setAiLoading(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (e) {
+      setAiError(e.message);
+      setAiLoading(false);
+    }
+  };
 
   return (
     <Modal open onClose={onClose} size="lg">
@@ -1919,6 +2539,36 @@ const ClientForm = ({ client, onSave, onClose }) => {
         <button onClick={onClose} className="p-1.5 rounded hover:bg-stone-100"><X size={16} /></button>
       </div>
       <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto scrollable">
+        {/* AI-assisted lookup */}
+        {!form.id && (
+          <div className="rounded-lg p-4 space-y-3" style={{ background: 'var(--bg-alt)', border: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-2">
+              <Wand2 size={14} style={{ color: 'var(--accent)' }} />
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent)' }}>Automatisch invullen met AI</span>
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={websiteUrl}
+                onChange={e => setWebsiteUrl(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && lookupWebsite()}
+                placeholder="Website bijv. acme.nl"
+                className="flex-1 px-3 py-2 text-sm rounded border"
+                style={{ background: 'var(--bg)', color: 'var(--text)', borderColor: 'var(--border)' }}
+              />
+              <Button size="sm" onClick={lookupWebsite} disabled={aiLoading || !websiteUrl}>
+                {aiLoading ? <RefreshCw size={13} className="animate-spin" /> : <Globe size={13} />}
+                {aiLoading ? 'Zoeken...' : 'Ophalen'}
+              </Button>
+              <label className="cursor-pointer">
+                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={scanCard} disabled={aiLoading} />
+                <span className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded font-medium" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', cursor: aiLoading ? 'not-allowed' : 'pointer' }}>
+                  <Paperclip size={13} /> Visitekaartje
+                </span>
+              </label>
+            </div>
+            {aiError && <p className="text-xs" style={{ color: 'var(--danger)' }}>{aiError}</p>}
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Input label="Bedrijfsnaam *" value={form.name} onChange={e => update('name', e.target.value)} placeholder="Acme B.V." />
           <Input label="Contactpersoon" value={form.contactName} onChange={e => update('contactName', e.target.value)} placeholder="Jan Jansen" />
@@ -1950,32 +2600,65 @@ const ClientForm = ({ client, onSave, onClose }) => {
 // ============================================================================
 // INVOICES VIEW
 // ============================================================================
-const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, settings, setSettings, activeEntity, setEntities, entities, onSendReminder }) => {
+const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients, settings, setSettings, activeEntity, setEntities, entities, onSendReminder }) => {
   const [view, setView] = useState({ mode: 'list' });
   const [statusFilter, setStatusFilter] = useState('all');
 
+  const [showAging, setShowAging] = useState(false);
   const filtered = invoices
     .filter(i => statusFilter === 'all' || computeInvoiceStatus(i) === statusFilter)
     .sort((a, b) => new Date(b.issueDate) - new Date(a.issueDate));
 
+  // Aging report: open/overdue invoices grouped by overdue days
+  const agingBuckets = useMemo(() => {
+    const open = invoices.filter(i => ['sent','overdue','partial'].includes(computeInvoiceStatus(i)));
+    const buckets = { '0-30': [], '31-60': [], '61-90': [], '90+': [] };
+    open.forEach(inv => {
+      const days = inv.dueDate ? daysBetween(inv.dueDate, todayISO()) : 0;
+      const total = computeInvoice(inv.items).total - (inv.paidAmount || 0);
+      const entry = { inv, days, total };
+      if (days <= 0) buckets['0-30'].push(entry);
+      else if (days <= 30) buckets['0-30'].push(entry);
+      else if (days <= 60) buckets['31-60'].push(entry);
+      else if (days <= 90) buckets['61-90'].push(entry);
+      else buckets['90+'].push(entry);
+    });
+    return buckets;
+  }, [invoices]);
+
   const handleSave = async (invoice) => {
     const allInv = allInvoices || invoices;
     if (invoice.id && allInv.find(i => i.id === invoice.id)) {
+      // Uniqueness check on edit
+      const duplicate = allInv.find(i => i.id !== invoice.id && i.number === invoice.number && i.entityId === invoice.entityId);
+      if (duplicate && !window.confirm(`Factuurnummer ${invoice.number} bestaat al. Toch opslaan?`)) return;
       await setInvoices(allInv.map(i => i.id === invoice.id ? invoice : i));
     } else {
-      const nextNum = activeEntity?.nextInvoiceNumber || 1;
-      const prefix = activeEntity?.invoicePrefix || '2026-';
+      const currentYear = new Date().getFullYear();
+      let nextNum = activeEntity?.nextInvoiceNumber || 1;
+      // Year-reset: if yearlyReset enabled and last number was from a different year, reset to 1
+      if (activeEntity?.yearlyReset && activeEntity?.lastInvoiceYear && activeEntity.lastInvoiceYear < currentYear) {
+        nextNum = 1;
+      }
+      const prefix = activeEntity?.invoicePrefix || `${currentYear}-`;
+      const autoNumber = `${prefix}${String(nextNum).padStart(4, '0')}`;
+      // Uniqueness check on new
+      const duplicate = allInv.find(i => i.number === (invoice.number || autoNumber) && i.entityId === activeEntity?.id);
+      if (duplicate && !window.confirm(`Factuurnummer ${invoice.number || autoNumber} bestaat al. Toch opslaan?`)) return;
       const newInv = {
         ...invoice,
         id: generateId('inv'),
         entityId: activeEntity?.id,
-        number: invoice.number || `${prefix}${String(nextNum).padStart(4, '0')}`,
+        number: invoice.number || autoNumber,
         status: invoice.status || 'draft',
         remindersSent: [],
+        payments: [],
       };
       await setInvoices([...allInv, newInv]);
       if (!invoice.number && activeEntity) {
-        await setEntities(entities.map(e => e.id === activeEntity.id ? { ...e, nextInvoiceNumber: nextNum + 1 } : e));
+        await setEntities(entities.map(e => e.id === activeEntity.id
+          ? { ...e, nextInvoiceNumber: nextNum + 1, lastInvoiceYear: currentYear }
+          : e));
       }
     }
     setView({ mode: 'list' });
@@ -2009,8 +2692,48 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, settings, s
     setView({ mode: 'edit', invoice: newInv });
   };
 
+  const handleCreateCreditNote = async (origInv) => {
+    const allInv = allInvoices || invoices;
+    const nextNum = activeEntity?.nextInvoiceNumber || 1;
+    const prefix = activeEntity?.invoicePrefix || '';
+    const creditNote = {
+      ...origInv,
+      id: generateId('inv'),
+      number: `CN-${origInv.number}`,
+      status: 'credit_note',
+      creditNoteFor: origInv.id,
+      issueDate: todayISO(),
+      dueDate: todayISO(),
+      sentAt: null,
+      paidAt: null,
+      remindersSent: [],
+      payments: [],
+      items: origInv.items.map(it => ({ ...it, price: -Math.abs(Number(it.price)) })),
+      notes: `Creditnota voor factuur ${origInv.number}`,
+    };
+    await setInvoices([...allInv, creditNote]);
+    setView({ mode: 'view', invoice: creditNote });
+  };
+
+  const handleRegisterPayment = async (inv, payment) => {
+    const allInv = allInvoices || invoices;
+    const payments = [...(inv.payments || []), payment];
+    const totals = computeInvoice(inv.items);
+    const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+    const isFullyPaid = totalPaid >= totals.total - 0.005;
+    const updated = {
+      ...inv,
+      payments,
+      status: isFullyPaid ? 'paid' : 'partial',
+      paidAmount: totalPaid,
+      paidAt: isFullyPaid ? new Date().toISOString() : null,
+    };
+    await setInvoices(allInv.map(i => i.id === inv.id ? updated : i));
+    setView({ mode: 'view', invoice: updated });
+  };
+
   if (view.mode === 'edit') {
-    return <InvoiceEditor invoice={view.invoice} clients={clients} settings={settings} activeEntity={activeEntity} onSave={handleSave} onCancel={() => setView({ mode: 'list' })} />;
+    return <InvoiceEditor invoice={view.invoice} clients={clients} setClients={setClients} settings={settings} activeEntity={activeEntity} onSave={handleSave} onCancel={() => setView({ mode: 'list' })} />;
   }
 
   if (view.mode === 'view') {
@@ -2026,6 +2749,8 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, settings, s
       onStatusChange={handleStatusChange}
       onDuplicate={handleDuplicate}
       onSendReminder={onSendReminder}
+      onCreateCreditNote={handleCreateCreditNote}
+      onRegisterPayment={handleRegisterPayment}
     />;
   }
 
@@ -2043,17 +2768,44 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, settings, s
             {invoices.length} factu{invoices.length === 1 ? 'ur' : 'ren'} · Volgend nr: <span className="font-mono">{nextPrefix}{String(nextNum).padStart(4, '0')}</span> · {activeEntity?.name}
           </p>
         </div>
-        <Button onClick={() => {
-          if (clients.length === 0) { alert('Voeg eerst een klant toe.'); return; }
-          setView({ mode: 'edit', invoice: { issueDate: todayISO(), dueDate: addDays(todayISO(), paymentTermsForEntity), items: [{ description: '', quantity: 1, price: 0, btwRate: defaultBtw }] } });
-        }}>
-          <Plus size={16} /> Nieuwe factuur
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="secondary" size="sm" onClick={() => setShowAging(a => !a)}>
+            <FileBarChart size={14} /> Ouderdomsanalyse
+          </Button>
+          <Button onClick={() => {
+            setView({ mode: 'edit', invoice: { issueDate: todayISO(), dueDate: addDays(todayISO(), paymentTermsForEntity), items: [{ description: '', quantity: 1, price: 0, btwRate: defaultBtw }] } });
+          }}>
+            <Plus size={16} /> Nieuwe factuur
+          </Button>
+        </div>
       </div>
+
+      {showAging && (
+        <Card className="p-5">
+          <h3 className="font-display text-base font-medium mb-4">Ouderdomsanalyse openstaande facturen</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[['0-30', '0–30 dagen', 'var(--info)'], ['31-60', '31–60 dagen', 'var(--warning)'], ['61-90', '61–90 dagen', 'var(--danger)'], ['90+', '> 90 dagen', '#7c3aed']].map(([key, label, color]) => {
+              const entries = agingBuckets[key] || [];
+              const total = entries.reduce((s, e) => s + e.total, 0);
+              return (
+                <div key={key} className="rounded-lg p-3" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                  <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--muted)' }}>{label}</div>
+                  <div className="font-display text-lg num font-medium" style={{ color }}>{fmtEUR(total)}</div>
+                  <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{entries.length} factuu{entries.length === 1 ? 'r' : 'ren'}</div>
+                  {entries.slice(0,3).map(({inv}) => {
+                    const c = clients?.find(x => x.id === inv.clientId);
+                    return <div key={inv.id} className="text-xs mt-1 truncate" style={{ color: 'var(--text-2)' }}>{c?.name || inv.number}</div>;
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       <Card className="p-3">
         <div className="flex flex-wrap gap-1">
-          {[{ id: 'all', label: 'Alles' }, { id: 'draft', label: 'Concept' }, { id: 'sent', label: 'Verstuurd' }, { id: 'overdue', label: 'Te laat' }, { id: 'paid', label: 'Betaald' }].map(f => (
+          {[{ id: 'all', label: 'Alles' }, { id: 'draft', label: 'Concept' }, { id: 'sent', label: 'Verstuurd' }, { id: 'partial', label: 'Deelbetaling' }, { id: 'overdue', label: 'Te laat' }, { id: 'paid', label: 'Betaald' }, { id: 'credit_note', label: 'Creditnota' }].map(f => (
             <button
               key={f.id}
               onClick={() => setStatusFilter(f.id)}
@@ -2127,15 +2879,19 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, settings, s
 // ============================================================================
 // INVOICE EDITOR
 // ============================================================================
-const InvoiceEditor = ({ invoice, clients, settings, activeEntity, onSave, onCancel }) => {
+const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, onSave, onCancel }) => {
   const paymentTerms = activeEntity?.paymentTerms || settings.invoice?.paymentTerms || 14;
-  const defaultBtw = JURISDICTIONS[activeEntity?.jurisdiction || 'NL'].salesTax.standard;
+  const jurisdiction = JURISDICTIONS[activeEntity?.jurisdiction || 'NL'] || JURISDICTIONS.NL;
+  const defaultBtw = jurisdiction.salesTax.standard;
+  const taxName = jurisdiction.salesTax.name; // 'BTW', 'VAT', 'ITBIS', etc.
+  const taxRates = jurisdiction.salesTax.rates; // e.g. [0,9,21]
   const [form, setForm] = useState({
     clientId: '', issueDate: todayISO(), dueDate: addDays(todayISO(), paymentTerms),
     items: [{ description: '', quantity: 1, price: 0, btwRate: defaultBtw, discount: null }],
     notes: '', reference: '',
     ...invoice,
   });
+  const [addingClient, setAddingClient] = useState(false);
 
   const update = (key, val) => setForm({ ...form, [key]: val });
   const updateItem = (idx, key, val) => {
@@ -2177,12 +2933,41 @@ const InvoiceEditor = ({ invoice, clients, settings, activeEntity, onSave, onCan
         </p>
       </div>
 
+      {addingClient && (
+        <ClientForm
+          client={{}}
+          settings={settings}
+          onSave={(data) => {
+            const newClient = { ...data, id: generateId('cli'), createdAt: new Date().toISOString() };
+            if (setClients) setClients(prev => [...prev, newClient]);
+            update('clientId', newClient.id);
+            setAddingClient(false);
+          }}
+          onClose={() => setAddingClient(false)}
+        />
+      )}
       <Card className="p-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <Select label="Klant *" value={form.clientId} onChange={e => update('clientId', e.target.value)} className="md:col-span-2">
-            <option value="">Kies klant...</option>
-            {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </Select>
+          <div className="md:col-span-2 space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Klant *</label>
+              <button onClick={() => setAddingClient(true)} className="flex items-center gap-1 text-xs hover:underline" style={{ color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                <Plus size={11} /> Nieuwe klant
+              </button>
+            </div>
+            {clients.length === 0 ? (
+              <div className="px-3 py-2 text-sm rounded border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                Geen klanten — klik op <strong>+ Nieuwe klant</strong> om er een toe te voegen.
+              </div>
+            ) : (
+              <select value={form.clientId} onChange={e => update('clientId', e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded border"
+                style={{ background: 'var(--bg)', color: 'var(--text)', borderColor: 'var(--border)' }}>
+                <option value="">Kies klant...</option>
+                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            )}
+          </div>
           <Input label="Referentie" value={form.reference || ''} onChange={e => update('reference', e.target.value)} placeholder="PO-nummer, etc." />
           <Input label="Factuurdatum *" type="date" value={form.issueDate} onChange={e => {
             update('issueDate', e.target.value);
@@ -2210,7 +2995,7 @@ const InvoiceEditor = ({ invoice, clients, settings, activeEntity, onSave, onCan
                   <th className="text-left py-2 font-medium">Omschrijving</th>
                   <th className="text-right py-2 font-medium w-20">Aantal</th>
                   <th className="text-right py-2 font-medium w-28">Prijs</th>
-                  <th className="text-right py-2 font-medium w-20">BTW</th>
+                  <th className="text-right py-2 font-medium w-20">{taxName}</th>
                   <th className="text-right py-2 font-medium w-28">Totaal</th>
                   <th className="w-8"></th>
                 </tr>
@@ -2258,9 +3043,7 @@ const InvoiceEditor = ({ invoice, clients, settings, activeEntity, onSave, onCan
                             className="w-full px-1 py-1.5 text-xs bg-transparent rounded border"
                             style={{ borderColor: 'var(--border)' }}
                           >
-                            <option value={0}>0%</option>
-                            <option value={9}>9%</option>
-                            <option value={21}>21%</option>
+                            {taxRates.map(r => <option key={r} value={r}>{r}%</option>)}
                           </select>
                         </td>
                         <td className="py-2 text-right num font-medium">
@@ -2350,7 +3133,7 @@ const InvoiceEditor = ({ invoice, clients, settings, activeEntity, onSave, onCan
             </div>
             {Object.entries(totals.btwByRate).map(([rate, amt]) => Number(rate) > 0 && (
               <div key={rate} className="flex justify-between py-1.5">
-                <span style={{ color: 'var(--muted)' }}>BTW {rate}%</span>
+                <span style={{ color: 'var(--muted)' }}>{taxName} {rate}%</span>
                 <span className="num font-medium">{fmtEUR(amt)}</span>
               </div>
             ))}
@@ -2375,10 +3158,16 @@ const InvoiceEditor = ({ invoice, clients, settings, activeEntity, onSave, onCan
 // ============================================================================
 // INVOICE DETAIL VIEW (with PDF preview)
 // ============================================================================
-const InvoiceDetail = ({ invoice, clients, settings, activeEntity, entities, onClose, onEdit, onDelete, onStatusChange, onDuplicate, onSendReminder }) => {
+const InvoiceDetail = ({ invoice, clients, settings, activeEntity, entities, onClose, onEdit, onDelete, onStatusChange, onDuplicate, onSendReminder, onCreateCreditNote, onRegisterPayment }) => {
   const [showSendModal, setShowSendModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const client = clients.find(c => c.id === invoice.clientId);
   const totals = computeInvoice(invoice.items);
+
+  // Partial payment state
+  const payments = invoice.payments || [];
+  const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+  const remaining = Math.max(0, totals.total - totalPaid);
   const status = computeInvoiceStatus(invoice);
   // Pick the entity this invoice belongs to (or fall back to active)
   const invoiceEntity = entities?.find(e => e.id === invoice.entityId) || activeEntity;
@@ -2437,14 +3226,20 @@ ${el.innerHTML}
           <Button size="sm" variant="secondary" onClick={() => onDuplicate(invoice)}><Copy size={13} /> Dupliceren</Button>
           <Button size="sm" variant="secondary" onClick={handlePrint}><Download size={13} /> Download PDF</Button>
           {status === 'draft' && <Button size="sm" variant="secondary" onClick={() => onEdit(invoice)}><Edit3 size={13} /> Bewerken</Button>}
-          {(status === 'draft' || status === 'sent' || status === 'overdue') && (
+          {(status === 'draft' || status === 'sent' || status === 'overdue' || status === 'partial') && (
             <Button size="sm" onClick={() => setShowSendModal(true)}><Send size={13} /> {status === 'draft' ? 'Versturen' : 'Opnieuw versturen'}</Button>
           )}
-          {status !== 'paid' && status !== 'draft' && (
-            <Button size="sm" onClick={() => onStatusChange(invoice.id, 'paid', { paidAt: new Date().toISOString() })}><Check size={13} /> Markeer betaald</Button>
+          {(status === 'sent' || status === 'overdue' || status === 'partial') && onRegisterPayment && (
+            <Button size="sm" variant="secondary" onClick={() => setShowPaymentModal(true)}><Wallet size={13} /> Betaling registreren</Button>
+          )}
+          {status !== 'paid' && status !== 'draft' && status !== 'credit_note' && (
+            <Button size="sm" onClick={() => onStatusChange(invoice.id, 'paid', { paidAt: new Date().toISOString(), payments: [...payments, { amount: remaining, date: todayISO(), note: 'Volledig betaald' }] })}><Check size={13} /> Markeer betaald</Button>
           )}
           {status === 'paid' && (
             <Button size="sm" variant="secondary" onClick={() => onStatusChange(invoice.id, 'sent', { paidAt: null })}><X size={13} /> Markeer onbetaald</Button>
+          )}
+          {status === 'paid' && onCreateCreditNote && (
+            <Button size="sm" variant="secondary" onClick={() => onCreateCreditNote(invoice)}><FileCheck2 size={13} /> Creditnota</Button>
           )}
           <Button size="sm" variant="danger" onClick={() => onDelete(invoice.id)}><Trash2 size={13} /></Button>
         </div>
@@ -2472,6 +3267,34 @@ ${el.innerHTML}
         </Card>
       )}
 
+      {/* Partial payments panel */}
+      {payments.length > 0 && (
+        <Card className="p-4 no-print">
+          <h3 className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: 'var(--muted)' }}>Betalingen</h3>
+          <div className="space-y-1.5 mb-3">
+            {payments.map((p, i) => (
+              <div key={i} className="flex items-center justify-between text-sm">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={13} style={{ color: 'var(--success)' }} />
+                  <span>{fmtDate(p.date)}</span>
+                  {p.note && <span style={{ color: 'var(--muted)' }}>— {p.note}</span>}
+                </div>
+                <span className="num font-medium" style={{ color: 'var(--success)' }}>{fmtEUR(p.amount)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-between text-sm font-medium pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+            <span>Openstaand</span>
+            <span className="num" style={{ color: remaining > 0 ? 'var(--warning)' : 'var(--success)' }}>{fmtEUR(remaining)}</span>
+          </div>
+          {remaining > 0 && (
+            <div className="mt-2 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface-3)' }}>
+              <div className="h-full rounded-full" style={{ background: 'var(--success)', width: `${Math.min(100, (totalPaid / totals.total) * 100)}%`, transition: 'width 0.4s' }} />
+            </div>
+          )}
+        </Card>
+      )}
+
       {/* Invoice preview / printable — uses template selected on entity */}
       <Card className="invoice-printable" style={{ maxWidth: 800, margin: '0 auto', overflow: 'hidden' }}>
         {renderTemplate(invoiceEntity?.templateId || 'classic', { invoice, entity: invoiceEntity, client, totals, parentEntity: invoiceParentEntity })}
@@ -2494,7 +3317,64 @@ ${el.innerHTML}
           mode="send"
         />
       )}
+
+      {showPaymentModal && (
+        <RegisterPaymentModal
+          invoice={invoice}
+          remaining={remaining}
+          totals={totals}
+          onSave={(payment) => {
+            onRegisterPayment(invoice, payment);
+            setShowPaymentModal(false);
+          }}
+          onClose={() => setShowPaymentModal(false)}
+        />
+      )}
     </div>
+  );
+};
+
+// ============================================================================
+// REGISTER PAYMENT MODAL
+// ============================================================================
+const RegisterPaymentModal = ({ invoice, remaining, totals, onSave, onClose }) => {
+  const [amount, setAmount] = useState(remaining.toFixed(2));
+  const [date, setDate] = useState(todayISO());
+  const [note, setNote] = useState('');
+  const amountNum = Math.max(0, Number(amount) || 0);
+  const isFullPayment = amountNum >= remaining - 0.005;
+
+  return (
+    <Modal open onClose={onClose} size="sm">
+      <div className="px-6 py-5 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+        <div>
+          <h2 className="font-display text-xl">Betaling registreren</h2>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Factuur {invoice.number} · openstaand {fmtEUR(remaining)}</p>
+        </div>
+        <button onClick={onClose} className="p-1.5 rounded hover:bg-stone-100"><X size={16} /></button>
+      </div>
+      <div className="p-6 space-y-4">
+        <Input label="Bedrag ontvangen" type="number" step="0.01" min="0" value={amount} onChange={e => setAmount(e.target.value)} />
+        <Input label="Datum ontvangst" type="date" value={date} onChange={e => setDate(e.target.value)} />
+        <Input label="Opmerking (optioneel)" value={note} onChange={e => setNote(e.target.value)} placeholder="Bijv. eerste termijn" />
+        {isFullPayment && amountNum > 0 && (
+          <div className="rounded p-2 text-xs" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
+            Volledige betaling — factuur wordt automatisch op Betaald gezet.
+          </div>
+        )}
+        {!isFullPayment && amountNum > 0 && (
+          <div className="rounded p-2 text-xs" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
+            Restbedrag na betaling: {fmtEUR(remaining - amountNum)}
+          </div>
+        )}
+      </div>
+      <div className="px-6 pb-5 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose}>Annuleren</Button>
+        <Button disabled={amountNum <= 0} onClick={() => onSave({ amount: amountNum, date, note })}>
+          <Check size={14} /> Registreren
+        </Button>
+      </div>
+    </Modal>
   );
 };
 
@@ -2893,7 +3773,7 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
     setScanError(null);
     setScanResult(null);
     try {
-      const apiKey = resolveApiKey(settings.apiKey);
+      const apiKey = resolveApiKey(settings.apiKey, settings.openaiApiKey);
       const result = await callClaudeVision({ imageDataUrl: expense.image, apiKey, jurisdiction: settings.jurisdiction || 'NL' });
 
       // Use total_incl_tax as originalAmount — recalc formula expects the INCLUSIVE amount
@@ -2902,7 +3782,7 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
       const btwRate = Number(result.tax_rate) || 0;
       const detectedCurrency = (result.currency || baseCurr).toUpperCase();
 
-      setScanResult({ vendor: result.vendor, date: result.date, totalIncl, btwAmt, btwRate, currency: detectedCurrency });
+      setScanResult({ vendor: result.vendor, date: result.date, totalIncl, btwAmt, btwRate, currency: detectedCurrency, deductible: result.deductible, deductiblePct: result.deductible_pct, deductibleRisk: result.deductible_risk, deductibleNote: result.deductible_note, deductibleDescription: result.deductible_description });
 
       setForm(f => {
         const next = {
@@ -3020,14 +3900,37 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
         </div>
       </div>
       {scanResult && !scanError && (
-        <div className="mx-6 mt-3 px-3 py-2 rounded-md text-xs flex items-start gap-2 animate-in" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
-          <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
-          <span>
-            <strong>AI gevonden:</strong> {scanResult.vendor || '?'} · {scanResult.date || '?'} ·{' '}
-            {fmtCurrency(scanResult.totalIncl, scanResult.currency)}
-            {scanResult.btwAmt > 0 && ` (incl. ${scanResult.currency === 'EUR' ? 'BTW' : 'belasting'} ${fmtCurrency(scanResult.btwAmt, scanResult.currency)})`}
-            {scanResult.currency !== baseCurr && <span className="ml-1 opacity-80">→ wisselkoers ophalen...</span>}
-          </span>
+        <div className="mx-6 mt-3 space-y-1.5 animate-in">
+          <div className="px-3 py-2 rounded-md text-xs flex items-start gap-2" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
+            <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
+            <span>
+              <strong>AI gevonden:</strong> {scanResult.vendor || '?'} · {scanResult.date || '?'} ·{' '}
+              {fmtCurrency(scanResult.totalIncl, scanResult.currency)}
+              {scanResult.btwAmt > 0 && ` (incl. ${scanResult.currency === 'EUR' ? 'BTW' : 'belasting'} ${fmtCurrency(scanResult.btwAmt, scanResult.currency)})`}
+              {scanResult.currency !== baseCurr && <span className="ml-1 opacity-80">→ wisselkoers ophalen...</span>}
+            </span>
+          </div>
+          {scanResult.deductibleNote && (
+            <div className="space-y-1">
+              <div className="px-3 py-2 rounded-md text-xs flex items-start gap-2" style={{
+                background: scanResult.deductibleRisk === 'safe' ? 'var(--success-soft)' : scanResult.deductibleRisk === 'no' ? 'var(--surface-3)' : 'var(--warning-soft)',
+                color: scanResult.deductibleRisk === 'safe' ? 'var(--success)' : scanResult.deductibleRisk === 'no' ? 'var(--muted)' : 'var(--warning)',
+              }}>
+                <span className="shrink-0">{scanResult.deductibleRisk === 'safe' ? '✅' : scanResult.deductibleRisk === 'no' ? '❌' : '⚠️'}</span>
+                <span>
+                  <strong>Aftrekbaar{scanResult.deductiblePct && scanResult.deductiblePct < 100 ? ` (${scanResult.deductiblePct}%)` : ''}:</strong> {scanResult.deductibleNote}
+                </span>
+              </div>
+              {scanResult.deductibleDescription && (
+                <div className="px-3 py-2 rounded-md text-xs flex items-start gap-2" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                  <span className="shrink-0">📝</span>
+                  <span style={{ color: 'var(--ink-2)' }}>
+                    <strong>Omschrijf als:</strong> <span className="font-mono" style={{ color: 'var(--ink)' }}>{scanResult.deductibleDescription}</span>
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
       {scanError && (
@@ -3355,7 +4258,7 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
     reference: invoice?.number,
   }) : null;
   const qrUrl = epcData
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=90x90&ecc=M&data=${encodeURIComponent(epcData)}`
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=200x200&ecc=M&margin=4&data=${encodeURIComponent(epcData)}`
     : null;
 
   return (
@@ -3401,9 +4304,13 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
             {legalEntity.bicCode && <div className="font-mono text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>BIC: {legalEntity.bicCode}</div>}
           </div>
           {qrUrl && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-              <img src={qrUrl} alt="SEPA QR" width={80} height={80} style={{ borderRadius: 4, border: '1px solid var(--border)' }} />
-              <div style={{ fontSize: 8, color: 'var(--muted)', textAlign: 'center', lineHeight: 1.3 }}>Scan om<br />te betalen</div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
+              <div style={{ padding: 4, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+                <img src={qrUrl} alt="SEPA betaal-QR" width={84} height={84} style={{ display: 'block' }} />
+              </div>
+              <div style={{ fontSize: 7.5, color: '#aaa', textAlign: 'center', lineHeight: 1.4, letterSpacing: '0.04em' }}>
+                SEPA betaling<br />scan &amp; betaal
+              </div>
             </div>
           )}
           <div className="text-right">
@@ -3437,7 +4344,7 @@ const EntityBrand = ({
   entity,
   logoHeight = 38, fontSize = 22, fontWeight = 600,
   fontFamily = 'Fraunces, Georgia, serif',
-  color = '#1a1a1a', light = false,
+  color = '#1a1a1a', light = false, logoBackground = null,
 }) => {
   const mode = entity.headerMode || 'auto';
   const hasLogo = !!entity.logo;
@@ -3450,7 +4357,11 @@ const EntityBrand = ({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: alignMap[align] }}>
       {showLogo && (
-        <img src={entity.logo} alt={entity.name} style={{ height: logoHeight * scale, objectFit: 'contain', display: 'block', marginBottom: showText ? 6 : 0 }} />
+        logoBackground
+          ? <div style={{ background: logoBackground, borderRadius: 8, padding: '8px 12px', display: 'inline-flex', marginBottom: showText ? 8 : 0 }}>
+              <img src={entity.logo} alt={entity.name} style={{ height: logoHeight * scale, objectFit: 'contain', display: 'block' }} />
+            </div>
+          : <img src={entity.logo} alt={entity.name} style={{ height: logoHeight * scale, objectFit: 'contain', display: 'block', marginBottom: showText ? 6 : 0 }} />
       )}
       {showText && (
         <div style={{ fontFamily, fontSize, fontWeight, color: nameColor, lineHeight: 1.2 }}>{entity.name}</div>
@@ -3464,6 +4375,7 @@ const EntityBrand = ({
 const TemplateClassic = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
+  const opts = entity?.templateOptions || {};
   return (
     <div className="bg-white" style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Accent top bar */}
@@ -3472,17 +4384,14 @@ const TemplateClassic = ({ invoice, entity, client, totals, parentEntity }) => {
         {/* Header: logo/naam links, "FACTUUR" rechts */}
         <div className="flex items-start justify-between mb-12">
           <div>
-            {entity.logo
-              ? <img src={entity.logo} alt="logo" style={{ height: 44 * ((entity.logoScale||100)/100), objectFit: 'contain', marginBottom: 12, display: 'block' }} />
-              : <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontSize: 22, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>{entity.name}</div>
-            }
-            {entity.logo && <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontSize: 16, fontWeight: 500, color: 'var(--ink)', marginBottom: 4 }}>{entity.name}</div>}
-            <div style={{ fontSize: 11, lineHeight: 1.7, color: 'var(--ink-2)' }}>
-              {entity.address && <div>{entity.address}</div>}
-              {(entity.postal || entity.city) && <div>{entity.postal} {entity.city}</div>}
-              {entity.country && <div>{entity.country}</div>}
-              {entity.email && <div style={{ marginTop: 4 }}>{entity.email}</div>}
-              {entity.phone && <div>{entity.phone}</div>}
+            <EntityBrand entity={entity} fontSize={22} logoHeight={44} />
+            <div style={{ fontSize: 11, lineHeight: 1.7, color: 'var(--ink-2)', marginTop: 8 }}>
+              {opts.showAddress !== false && entity.address && <div>{entity.address}</div>}
+              {opts.showAddress !== false && (entity.postal || entity.city) && <div>{entity.postal} {entity.city}</div>}
+              {opts.showAddress !== false && entity.country && <div>{entity.country}</div>}
+              {opts.showEmail !== false && entity.email && <div style={{ marginTop: 4 }}>{entity.email}</div>}
+              {opts.showPhone !== false && entity.phone && <div>{entity.phone}</div>}
+              {opts.showWebsite === true && entity.website && <div style={{ color: 'var(--muted)' }}>{entity.website}</div>}
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
@@ -3520,7 +4429,7 @@ const TemplateClassic = ({ invoice, entity, client, totals, parentEntity }) => {
 const TemplateModern = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
-  // Compute a lighter tint for header backgrounds
+  const opts = entity?.templateOptions || {};
   return (
     <div className="bg-white" style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Full-bleed header */}
@@ -3530,14 +4439,11 @@ const TemplateModern = ({ invoice, entity, client, totals, parentEntity }) => {
         <div style={{ position: 'absolute', right: 40, bottom: -80, width: 180, height: 180, borderRadius: '50%', background: 'rgba(255,255,255,0.05)', pointerEvents: 'none' }} />
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', position: 'relative' }}>
           <div>
-            {entity.logo
-              ? <div style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 8, padding: '8px 12px', display: 'inline-flex', marginBottom: 12 }}>
-                  <img src={entity.logo} alt="logo" style={{ height: 36, objectFit: 'contain' }} />
-                </div>
-              : null}
-            <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontSize: 24, fontWeight: 600, color: '#fff', lineHeight: 1.2 }}>{entity.name}</div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', marginTop: 4 }}>
-              {entity.email}{entity.phone ? ` · ${entity.phone}` : ''}{entity.website ? ` · ${entity.website}` : ''}
+            <EntityBrand entity={entity} fontSize={24} fontWeight={600} light={true} logoHeight={36} logoBackground="rgba(255,255,255,0.15)" />
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', marginTop: 6 }}>
+              {opts.showEmail !== false && entity.email && <span>{entity.email}</span>}
+              {opts.showPhone !== false && entity.phone && <span> · {entity.phone}</span>}
+              {opts.showWebsite === true && entity.website && <span> · {entity.website}</span>}
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
@@ -3579,6 +4485,7 @@ const TemplateModern = ({ invoice, entity, client, totals, parentEntity }) => {
 const TemplateMinimal = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
+  const opts = entity?.templateOptions || {};
   return (
     <div className="bg-white" style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, padding: '64px 72px 56px', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Decorative accent dot */}
@@ -3587,12 +4494,13 @@ const TemplateMinimal = ({ invoice, entity, client, totals, parentEntity }) => {
       {/* Company name as headline */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 56 }}>
         <div>
-          {entity.logo && <img src={entity.logo} alt="logo" style={{ height: 38, objectFit: 'contain', marginBottom: 16 }} />}
-          <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontSize: 28, fontWeight: 400, color: 'var(--ink)', letterSpacing: '-0.02em', lineHeight: 1.2 }}>{entity.name}</div>
+          <EntityBrand entity={entity} fontSize={28} fontWeight={400} logoHeight={38} />
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6, lineHeight: 1.8 }}>
-            {entity.address && <span>{entity.address} · </span>}
-            {(entity.postal || entity.city) && <span>{entity.postal} {entity.city} · </span>}
-            {entity.email && <span>{entity.email}</span>}
+            {opts.showAddress !== false && entity.address && <span>{entity.address} · </span>}
+            {opts.showAddress !== false && (entity.postal || entity.city) && <span>{entity.postal} {entity.city} · </span>}
+            {opts.showEmail !== false && entity.email && <span>{entity.email}</span>}
+            {opts.showPhone !== false && entity.phone && <span> · {entity.phone}</span>}
+            {opts.showWebsite === true && entity.website && <span> · {entity.website}</span>}
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
@@ -3635,13 +4543,15 @@ const TemplateMinimal = ({ invoice, entity, client, totals, parentEntity }) => {
 const TemplateStatement = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
+  const opts = entity?.templateOptions || {};
+  const logoScale = (entity.logoScale || 100) / 100;
   return (
     <div className="bg-white" style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, display: 'flex', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Left sidebar */}
       <div style={{ width: 72, flexShrink: 0, background: accent, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between', padding: '32px 0' }}>
-        {entity.logo
+        {entity.logo && (entity.headerMode || 'auto') !== 'text'
           ? <div style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 6, padding: 8, margin: '0 8px' }}>
-              <img src={entity.logo} alt="logo" style={{ width: 40, height: 40, objectFit: 'contain' }} />
+              <img src={entity.logo} alt="logo" style={{ width: Math.min(40 * logoScale, 52), height: Math.min(40 * logoScale, 52), objectFit: 'contain' }} />
             </div>
           : <div style={{ writingMode: 'vertical-rl', textOrientation: 'mixed', transform: 'rotate(180deg)', fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', color: 'rgba(255,255,255,0.9)', textTransform: 'uppercase', padding: '0 4px' }}>
               {entity.name}
@@ -3659,9 +4569,10 @@ const TemplateStatement = ({ invoice, entity, client, totals, parentEntity }) =>
           <div>
             <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontSize: 26, fontWeight: 600, color: 'var(--ink)', letterSpacing: '-0.01em' }}>{entity.name}</div>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.7 }}>
-              {entity.address && <span>{entity.address} · </span>}
-              {(entity.postal || entity.city) && <span>{entity.postal} {entity.city}</span>}
-              {entity.email && <div>{entity.email}{entity.phone ? ` · ${entity.phone}` : ''}</div>}
+              {opts.showAddress !== false && entity.address && <span>{entity.address} · </span>}
+              {opts.showAddress !== false && (entity.postal || entity.city) && <span>{entity.postal} {entity.city}</span>}
+              {opts.showEmail !== false && entity.email && <div>{entity.email}{opts.showPhone !== false && entity.phone ? ` · ${entity.phone}` : ''}</div>}
+              {opts.showWebsite === true && entity.website && <div style={{ color: 'var(--muted)' }}>{entity.website}</div>}
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
@@ -3698,6 +4609,7 @@ const TemplateStatement = ({ invoice, entity, client, totals, parentEntity }) =>
 const TemplateNordic = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
+  const opts = entity?.templateOptions || {};
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, background: '#fff', fontFamily: 'Geist, -apple-system, sans-serif', position: 'relative', overflow: 'hidden' }}>
       {/* Rechter accentstreep */}
@@ -3709,8 +4621,9 @@ const TemplateNordic = ({ invoice, entity, client, totals, parentEntity }) => {
           <div>
             <EntityBrand entity={entity} fontSize={22} />
             <div style={{ fontSize: 10.5, color: '#888', marginTop: 7, lineHeight: 1.85 }}>
-              {entity.address && <div>{entity.address}{(entity.postal || entity.city) ? `, ${entity.postal} ${entity.city}` : ''}</div>}
-              {entity.email && <div>{entity.email}{entity.phone ? ` · ${entity.phone}` : ''}</div>}
+              {opts.showAddress !== false && entity.address && <div>{entity.address}{(entity.postal || entity.city) ? `, ${entity.postal} ${entity.city}` : ''}</div>}
+              {opts.showEmail !== false && entity.email && <div>{entity.email}{opts.showPhone !== false && entity.phone ? ` · ${entity.phone}` : ''}</div>}
+              {opts.showWebsite === true && entity.website && <div>{entity.website}</div>}
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
@@ -3759,6 +4672,7 @@ const TemplateNordic = ({ invoice, entity, client, totals, parentEntity }) => {
 const TemplateBold = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
+  const opts = entity?.templateOptions || {};
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, background: '#fff', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       <div style={{ padding: '48px 56px 0' }}>
@@ -3772,10 +4686,11 @@ const TemplateBold = ({ invoice, entity, client, totals, parentEntity }) => {
             </div>
           </div>
           <div style={{ fontSize: 10.5, color: '#999', marginTop: 10, lineHeight: 1.7 }}>
-            {entity.address && <span>{entity.address}</span>}
-            {(entity.postal || entity.city) && <span> · {entity.postal} {entity.city}</span>}
-            {entity.email && <span> · {entity.email}</span>}
-            {entity.phone && <span> · {entity.phone}</span>}
+            {opts.showAddress !== false && entity.address && <span>{entity.address}</span>}
+            {opts.showAddress !== false && (entity.postal || entity.city) && <span> · {entity.postal} {entity.city}</span>}
+            {opts.showEmail !== false && entity.email && <span> · {entity.email}</span>}
+            {opts.showPhone !== false && entity.phone && <span> · {entity.phone}</span>}
+            {opts.showWebsite === true && entity.website && <span> · {entity.website}</span>}
           </div>
         </div>
 
@@ -3808,6 +4723,7 @@ const TemplateBold = ({ invoice, entity, client, totals, parentEntity }) => {
 const TemplateHorizon = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
+  const opts = entity?.templateOptions || {};
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, background: '#fff', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Gespleten header */}
@@ -3815,8 +4731,9 @@ const TemplateHorizon = ({ invoice, entity, client, totals, parentEntity }) => {
         <div style={{ background: '#fff', padding: '36px 40px 28px 52px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <EntityBrand entity={entity} fontSize={20} />
           <div style={{ fontSize: 10, color: '#999', marginTop: 7, lineHeight: 1.85 }}>
-            {entity.address && <div>{entity.address}{(entity.postal || entity.city) ? `, ${entity.postal} ${entity.city}` : ''}</div>}
-            {entity.email && <div>{entity.email}{entity.phone ? ` · ${entity.phone}` : ''}</div>}
+            {opts.showAddress !== false && entity.address && <div>{entity.address}{(entity.postal || entity.city) ? `, ${entity.postal} ${entity.city}` : ''}</div>}
+            {opts.showEmail !== false && entity.email && <div>{entity.email}{opts.showPhone !== false && entity.phone ? ` · ${entity.phone}` : ''}</div>}
+            {opts.showWebsite === true && entity.website && <div>{entity.website}</div>}
           </div>
         </div>
         <div style={{ background: accent, padding: '36px 52px 28px 36px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
@@ -3857,6 +4774,7 @@ const TemplateHorizon = ({ invoice, entity, client, totals, parentEntity }) => {
 const TemplateSplit = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
+  const opts = entity?.templateOptions || {};
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, display: 'flex', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Links paneel: warm beige, linkerrand in accent */}
@@ -3864,10 +4782,11 @@ const TemplateSplit = ({ invoice, entity, client, totals, parentEntity }) => {
         <div>
           <EntityBrand entity={entity} fontSize={15} fontWeight={700} fontFamily="Fraunces, Georgia, serif" color={accent} />
           <div style={{ fontSize: 9.5, color: '#aaa', marginTop: 8, lineHeight: 1.9 }}>
-            {entity.address && <div>{entity.address}</div>}
-            {(entity.postal || entity.city) && <div>{entity.postal} {entity.city}</div>}
-            {entity.email && <div style={{ marginTop: 3 }}>{entity.email}</div>}
-            {entity.phone && <div>{entity.phone}</div>}
+            {opts.showAddress !== false && entity.address && <div>{entity.address}</div>}
+            {opts.showAddress !== false && (entity.postal || entity.city) && <div>{entity.postal} {entity.city}</div>}
+            {opts.showEmail !== false && entity.email && <div style={{ marginTop: 3 }}>{entity.email}</div>}
+            {opts.showPhone !== false && entity.phone && <div>{entity.phone}</div>}
+            {opts.showWebsite === true && entity.website && <div>{entity.website}</div>}
           </div>
         </div>
 
@@ -4055,6 +4974,58 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
         </div>
       </Card>
 
+      {/* Logo grootte */}
+      {entity.logo && (
+        <Card className="p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-semibold" style={{ color: 'var(--ink-2)' }}>Logo grootte</div>
+            <span className="text-xs font-mono" style={{ color: 'var(--muted)' }}>{entity.logoScale || 100}%</span>
+          </div>
+          <input
+            type="range" min="40" max="200" step="5"
+            value={entity.logoScale || 100}
+            onChange={e => onUpdate({ ...entity, logoScale: Number(e.target.value) })}
+            className="w-full"
+          />
+          <div className="flex gap-2">
+            {[60, 80, 100, 130, 160].map(v => (
+              <button key={v} onClick={() => onUpdate({ ...entity, logoScale: v })}
+                className="flex-1 py-1 text-xs rounded border"
+                style={{ borderColor: (entity.logoScale || 100) === v ? 'var(--ink)' : 'var(--border)', background: (entity.logoScale || 100) === v ? 'var(--ink)' : 'transparent', color: (entity.logoScale || 100) === v ? '#fff' : 'var(--ink-2)' }}>
+                {v}%
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Bedrijfsinfo in koptekst */}
+      <Card className="p-5 space-y-4">
+        <div className="text-xs font-semibold" style={{ color: 'var(--ink-2)' }}>Bedrijfsinfo in koptekst</div>
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            { key: 'showAddress', label: 'Adres', default: true },
+            { key: 'showEmail', label: 'E-mailadres', default: true },
+            { key: 'showPhone', label: 'Telefoonnummer', default: true },
+            { key: 'showWebsite', label: 'Website', default: false },
+          ].map(({ key, label, default: def }) => {
+            const opts = entity.templateOptions || {};
+            const active = opts[key] !== undefined ? opts[key] : def;
+            return (
+              <button key={key} onClick={() => onUpdate({ ...entity, templateOptions: { ...opts, [key]: !active } })}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg border text-xs transition-all text-left"
+                style={{ borderColor: active ? 'var(--ink)' : 'var(--border)', background: active ? 'var(--surface-2)' : 'transparent' }}>
+                <div className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center flex-shrink-0 ${active ? 'border-0' : ''}`}
+                  style={{ background: active ? 'var(--ink)' : 'transparent', borderColor: 'var(--border-strong)' }}>
+                  {active && <svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 4l2 2 4-4" stroke="#fff" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>}
+                </div>
+                <span style={{ color: 'var(--ink-2)' }}>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+
       {/* Aanpassingen */}
       <Card className="p-5 space-y-4">
         <div className="text-xs font-semibold" style={{ color: 'var(--ink-2)' }}>Aanpassingen &amp; zichtbaarheid</div>
@@ -4122,24 +5093,92 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
       <Card className="p-4" style={{ background: 'var(--surface-2)' }}>
         <div className="flex items-center justify-between mb-3">
           <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>Live preview</div>
-          {!docEditMode && (
+          <div className="flex items-center gap-2">
             <button
-              onClick={handleOpenEdit}
               className="flex items-center gap-1.5 text-[10px] px-2.5 py-1.5 rounded-md border transition-all"
               style={{ color: 'var(--ink-2)', borderColor: 'var(--border-2)', background: 'var(--surface)', cursor: 'pointer' }}
+              onClick={() => {
+                const printWin = window.open('', '_blank', 'width=960,height=1200');
+                const previewEl = document.getElementById('invoice-template-preview');
+                const html = previewEl ? previewEl.innerHTML : '';
+                printWin.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Factuur voorbeeld</title>
+  <script src="https://cdn.tailwindcss.com"><\/script>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600&family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --ink: #1a1a1a; --ink-2: #4a4a4a; --muted: #888;
+      --border: #e5e7eb; --border-2: #d1d5db; --border-strong: #9ca3af;
+      --surface: #fff; --surface-2: #f9fafb; --surface-3: #f3f4f6;
+      --text: #1a1a1a; --text-2: #4a4a4a; --text-3: #888;
+    }
+    body { margin: 0; background: #e8edf3; display: flex; flex-direction: column; align-items: center; padding: 32px 20px; font-family: Geist, -apple-system, sans-serif; gap: 16px; }
+    .invoice-wrapper { background: #fff; width: 800px; box-shadow: 0 2px 32px rgba(0,0,0,0.13); }
+    .print-bar { display: flex; gap: 10px; align-items: center; }
+    .print-btn { background: #1a1a1a; color: #fff; border: none; padding: 9px 22px; border-radius: 8px; font-size: 13px; cursor: pointer; font-family: Geist, sans-serif; font-weight: 500; letter-spacing: 0.01em; }
+    .print-btn:hover { background: #333; }
+    @media print { body { background: #fff; padding: 0; } .print-bar { display: none; } .invoice-wrapper { box-shadow: none; width: 100%; } }
+  </style>
+</head>
+<body>
+  <div class="print-bar">
+    <button class="print-btn" onclick="window.print()">&#128438; Afdrukken / Opslaan als PDF</button>
+  </div>
+  <div class="invoice-wrapper">${html}</div>
+</body>
+</html>`);
+                printWin.document.close();
+              }}
             >
-              <Edit3 size={10} />
-              Tekst bewerken
+              <Eye size={10} />
+              Voorbeeld bekijken
             </button>
-          )}
+            {!docEditMode && (
+              <button
+                onClick={handleOpenEdit}
+                className="flex items-center gap-1.5 text-[10px] px-2.5 py-1.5 rounded-md border transition-all"
+                style={{ color: 'var(--ink-2)', borderColor: 'var(--border-2)', background: 'var(--surface)', cursor: 'pointer' }}
+              >
+                <Edit3 size={10} />
+                Tekst bewerken
+              </button>
+            )}
+          </div>
         </div>
 
         {docEditMode ? (
           <div>
             <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-1.5 text-[10px] px-1" style={{ color: 'var(--muted)' }}>
-                <Edit3 size={10} />
-                Klik op <strong style={{ color: 'var(--ink-2)' }}>opmerkingen</strong> of <strong style={{ color: 'var(--ink-2)' }}>voettekst</strong> om te bewerken
+              <div className="flex items-center gap-2">
+                {entity.logo && (
+                  <div className="flex items-center gap-1 px-2 py-1 rounded-md border" style={{ borderColor: 'var(--border-2)', background: 'var(--surface)' }}>
+                    <span className="text-[9px] font-medium mr-0.5" style={{ color: 'var(--muted)' }}>Logo</span>
+                    {[
+                      { align: 'left', icon: <AlignLeft size={10} /> },
+                      { align: 'center', icon: <AlignCenter size={10} /> },
+                      { align: 'right', icon: <AlignRight size={10} /> },
+                    ].map(({ align, icon }) => (
+                      <button key={align}
+                        onClick={() => onUpdate({ ...entity, logoAlign: align })}
+                        className="flex items-center justify-center w-5 h-5 rounded transition-all"
+                        style={{
+                          background: (entity.logoAlign || 'left') === align ? 'var(--ink)' : 'transparent',
+                          color: (entity.logoAlign || 'left') === align ? '#fff' : 'var(--ink-2)',
+                          border: 'none', cursor: 'pointer',
+                        }}>
+                        {icon}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5 text-[10px] px-1" style={{ color: 'var(--muted)' }}>
+                  <Edit3 size={10} />
+                  Klik op <strong style={{ color: 'var(--ink-2)' }}>opmerkingen</strong> of <strong style={{ color: 'var(--ink-2)' }}>voettekst</strong>
+                </div>
               </div>
               <div className="flex items-center gap-1.5">
                 <button
@@ -4166,8 +5205,10 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
           </div>
         ) : (
           <div className="rounded-lg overflow-hidden border shadow-sm" style={{ borderColor: 'var(--border)' }}>
-            <div style={{ transform: 'scale(0.65)', transformOrigin: 'top left', width: '154%', marginBottom: '-35%' }}>
-              {renderTemplate(entity.templateId, { invoice: sampleInvoice, entity, client: sampleClient, totals })}
+            <div style={{ transform: 'scale(0.65)', transformOrigin: 'top left', width: '154%', marginBottom: '-35%', background: '#fff' }}>
+              <div id="invoice-template-preview">
+                {renderTemplate(entity.templateId, { invoice: sampleInvoice, entity, client: sampleClient, totals })}
+              </div>
             </div>
           </div>
         )}
@@ -4614,7 +5655,12 @@ const EntityForm = ({ entity, entities, onSave, onClose }) => {
           <div>
             <h3 className="text-sm font-medium mb-3" style={{ color: 'var(--ink)' }}>Bank</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Input label="IBAN" value={form.iban} onChange={e => update('iban', e.target.value)} />
+              <div>
+                <Input label="IBAN" value={form.iban} onChange={e => update('iban', e.target.value)} />
+                {form.iban && !/^[A-Z]{2}[0-9]{2}[A-Z0-9]{4,30}$/.test(form.iban.replace(/\s/g, '').toUpperCase()) && (
+                  <p className="text-xs mt-1" style={{ color: 'var(--warning)' }}>⚠ Ongeldig IBAN-formaat (verwacht: NL02ABNA0123456789)</p>
+                )}
+              </div>
               <Input label="BIC" value={form.bicCode} onChange={e => update('bicCode', e.target.value)} />
             </div>
           </div>
@@ -4625,6 +5671,10 @@ const EntityForm = ({ entity, entities, onSave, onClose }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Input label="Factuurnummer prefix" value={form.invoicePrefix} onChange={e => update('invoicePrefix', e.target.value)} hint="Bijv. '2026-' of 'INV-'" />
             <Input label="Volgend nummer" type="number" value={form.nextInvoiceNumber} onChange={e => update('nextInvoiceNumber', Number(e.target.value))} />
+            <label className="flex items-center gap-2 text-sm col-span-2 cursor-pointer">
+              <input type="checkbox" checked={!!form.yearlyReset} onChange={e => update('yearlyReset', e.target.checked)} className="w-4 h-4" />
+              <span>Factuurnummer jaarlijks resetten (bijv. 2027-0001 bij nieuw jaar)</span>
+            </label>
             <Input label="Betaaltermijn (dagen)" type="number" value={form.paymentTerms} onChange={e => update('paymentTerms', Number(e.target.value))} />
             <Input label="Accentkleur" type="color" value={form.accentColor} onChange={e => update('accentColor', e.target.value)} />
           </div>
@@ -5122,17 +6172,283 @@ const TaxReportView = ({ invoices, expenses, clients, settings, activeEntity }) 
 };
 
 // ============================================================================
+// INCOME TAX CALCULATOR  (NL / DR / EE — benaderingen 2024/2025)
+// ============================================================================
+const calcIncomeTax = (jurCode, { revenue = 0, costs = 0, isStarter = false, hasUrencriterium = true } = {}) => {
+  const winst = Math.max(0, revenue - costs);
+
+  if (jurCode === 'NL') {
+    // Zelfstandigenaftrek 2024: €3.750 (daalt jaarlijks richting €900 in 2027)
+    const zelfstandigenAftrek = hasUrencriterium ? Math.min(3750, winst) : 0;
+    // Startersaftrek: +€2.123 extra, eerste 3 jaar
+    const startersAftrek = (isStarter && hasUrencriterium) ? Math.min(2123, Math.max(0, winst - zelfstandigenAftrek)) : 0;
+    const winstNaAftrek = Math.max(0, winst - zelfstandigenAftrek - startersAftrek);
+    // MKB-winstvrijstelling: 13,31% over winst na aftrek
+    const mkbVrijstelling = Math.round(winstNaAftrek * 0.1331);
+    const belastbaarInkomen = Math.max(0, winstNaAftrek - mkbVrijstelling);
+
+    // Box 1: 36,97% t/m €73.031, 49,5% daarboven
+    let belasting = belastbaarInkomen <= 73031
+      ? belastbaarInkomen * 0.3697
+      : 73031 * 0.3697 + (belastbaarInkomen - 73031) * 0.495;
+
+    // Algemene Heffingskorting: max €3.362, afgebouwd tot €0 bij €73k+
+    const ahk = belastbaarInkomen <= 22660 ? 3362
+      : belastbaarInkomen >= 73031 ? 0
+      : Math.max(0, 3362 * (1 - (belastbaarInkomen - 22660) / (73031 - 22660)));
+
+    // Arbeidskorting: max ~€5.158, opgebouwd t/m €40k, daarna afgebouwd
+    const ak = belastbaarInkomen <= 10741 ? belastbaarInkomen * 0.0823
+      : belastbaarInkomen <= 23201 ? 884 + (belastbaarInkomen - 10741) * 0.3001
+      : belastbaarInkomen <= 40070 ? Math.min(5158, 4625 + (belastbaarInkomen - 23201) * 0.028)
+      : belastbaarInkomen <= 124935 ? Math.max(0, 5158 - (belastbaarInkomen - 40070) * 0.0651)
+      : 0;
+
+    const kortingen = Math.min(belasting, ahk + ak);
+    const inkomstenbelasting = Math.max(0, Math.round(belasting - kortingen));
+    // Zvw-bijdrage: 5,32% over belastbaar inkomen (max €66.956 basis)
+    const zvw = Math.round(Math.min(belastbaarInkomen, 66956) * 0.0532);
+    const totaal = inkomstenbelasting + zvw;
+
+    return {
+      currency: 'EUR', winst, zelfstandigenAftrek, startersAftrek, mkbVrijstelling,
+      belastbaarInkomen: Math.round(belastbaarInkomen),
+      inkomstenbelasting, zvw, totaal,
+      effectief: revenue > 0 ? Math.round((totaal / revenue) * 1000) / 10 : 0,
+      opzijPercentage: revenue > 0 ? Math.ceil((totaal / revenue) * 100) : 0,
+      alerts: [
+        revenue > 16000 && revenue < 20000 && { type: 'warning', msg: `KOR-grens: nog €${Math.round(20000 - revenue).toLocaleString('nl-NL')} ruimte. Daarna BTW-plichtig!` },
+        revenue >= 20000 && { type: 'info', msg: `Boven KOR-grens (€20.000): BTW-aangifte verplicht.` },
+        inkomstenbelasting === 0 && { type: 'success', msg: `Je hoeft waarschijnlijk geen inkomstenbelasting te betalen — alleen Zvw (€${zvw.toLocaleString('nl-NL')}).` },
+        belastbaarInkomen > 73031 && { type: 'warning', msg: `Je raakt de 49,5%-schijf (>€73.031). Overweeg lijfrente of extra kosten boeken.` },
+      ].filter(Boolean),
+    };
+  }
+
+  if (jurCode === 'DR') {
+    // ISR Personas Físicas 2024 (brackets in DOP)
+    const brackets = [
+      { to: 416220, rate: 0 }, { to: 624329, rate: 0.15 },
+      { to: 867123, rate: 0.20 }, { to: Infinity, rate: 0.25 },
+    ];
+    let isrPF = 0, prev = 0;
+    for (const b of brackets) {
+      if (winst <= prev) break;
+      isrPF += (Math.min(winst, b.to) - prev) * b.rate;
+      prev = b.to;
+    }
+    const isrSRL = Math.round(winst * 0.27); // SRL (bedrijf): 27% flat
+    const anticiposSRL = Math.round(revenue * 0.015); // 1,5% maandelijkse vooruitbetaling
+    return {
+      currency: 'DOP', winst,
+      isrPF: Math.round(isrPF), isrSRL, anticiposSRL,
+      totaal: Math.round(isrPF),
+      effectief: revenue > 0 ? Math.round((isrPF / revenue) * 1000) / 10 : 0,
+      effectiefSRL: revenue > 0 ? Math.round((isrSRL / revenue) * 1000) / 10 : 0,
+      alerts: [
+        { type: 'info', msg: `Persona Física: progressief 0%–25%. SRL (bedrijf): 27% flat over winst.` },
+        { type: 'success', msg: `DR is soepel: kleding, maaltijden, benzine zijn aftrekbaar zonder logo-eis!` },
+        anticiposSRL > 0 && { type: 'warning', msg: `SRL-anticipos: RD$${anticiposSRL.toLocaleString('es-DO')}/jaar (1,5% omzet) — maandelijks vooruit aan DGII.` },
+      ].filter(Boolean),
+    };
+  }
+
+  if (jurCode === 'EE') {
+    const ouDividend = Math.round(winst * 0.22); // dividendbelasting OÜ
+    const fieTaxable = Math.max(0, winst * 0.8); // 20% kostenaftrek FIE
+    const fieIncome = Math.round(fieTaxable * 0.22);
+    const fieSocial = Math.round(fieTaxable * 0.33);
+    return {
+      currency: 'EUR', winst, ouRetained: 0, ouDividend,
+      fieIncome, fieSocial, fieTotal: fieIncome + fieSocial,
+      totaal: 0, effectief: 0,
+      effectiefDividend: revenue > 0 ? Math.round((ouDividend / revenue) * 1000) / 10 : 0,
+      effectiefFIE: revenue > 0 ? Math.round(((fieIncome + fieSocial) / revenue) * 1000) / 10 : 0,
+      alerts: [
+        { type: 'success', msg: `OÜ: 0% belasting op ingehouden winst — ideaal voor digital nomads!` },
+        { type: 'info', msg: `Dividenden uitkeren: 22%. Salaris: +33% social tax boven op inkomen.` },
+        { type: 'warning', msg: `FIE (eenmanszaak): ~55% effectief — gebruik altijd een OÜ in Estland!` },
+      ],
+    };
+  }
+
+  return { winst, totaal: 0, effectief: 0, alerts: [], currency: 'EUR' };
+};
+
+// Returns { struct, tax, eff, color, lines, note } in EUR for any jurisdiction
+const calcCompareTax = (code, eurRevenue, eurCosts, taxProfile = {}) => {
+  const jInfo = JURISDICTIONS[code];
+  if (!jInfo) return null;
+  const eurRev = Math.round(eurRevenue);
+  const eurCost = Math.round(eurCosts);
+  const eurProfit = Math.max(0, eurRev - eurCost);
+
+  if (code === 'NL') {
+    const t = calcIncomeTax('NL', { revenue: eurRev, costs: eurCost, ...taxProfile });
+    return {
+      struct: 'ZZP', tax: t.totaal, eff: t.effectief,
+      color: t.inkomstenbelasting === 0 ? 'var(--success)' : 'var(--accent)',
+      lines: [
+        `IB: €${(t.inkomstenbelasting ?? 0).toLocaleString('nl-NL')}`,
+        `Zvw: €${(t.zvw ?? 0).toLocaleString('nl-NL')}`,
+        t.zelfstandigenAftrek > 0 ? `Aftrek: €${(t.zelfstandigenAftrek + (t.startersAftrek || 0)).toLocaleString('nl-NL')}` : 'Geen zelfst.aftrek',
+      ],
+      note: t.inkomstenbelasting === 0 ? 'Geen IB dankzij heffingskortingen!' : '',
+    };
+  }
+  if (code === 'DR') {
+    const drProfit = eurProfit * 60;
+    const t = calcIncomeTax('DR', { revenue: drProfit * 1.3, costs: drProfit * 0.3 });
+    return {
+      struct: 'Persona Física', tax: Math.round(t.isrPF / 60), eff: t.effectief,
+      color: eurProfit > 60000 ? 'var(--success)' : 'var(--accent)',
+      lines: [
+        `PF progressief: ~€${Math.round(t.isrPF / 60).toLocaleString('nl-NL')}`,
+        `SRL flat 27%: ~€${Math.round(t.isrSRL / 60).toLocaleString('nl-NL')}`,
+        'Auto/kleding/maaltijden aftrekbaar',
+      ],
+      note: eurProfit > 60000 ? 'DR aantrekkelijk boven ~€60k!' : 'Interessanter bij hogere winst',
+    };
+  }
+  if (code === 'EE') {
+    const t = calcIncomeTax('EE', { revenue: eurRev, costs: eurCost });
+    return {
+      struct: 'OÜ', tax: 0, eff: 0,
+      color: 'var(--success)',
+      lines: [
+        'Ingehouden: €0 (0%)',
+        `Dividend: €${(t.ouDividend ?? 0).toLocaleString('nl-NL')} (22%)`,
+        'Geen salaris verplicht',
+      ],
+      note: '0% bij ingehouden winst!',
+    };
+  }
+  if (code === 'UAE') {
+    const corpThreshold = 102000; // AED 375k ÷ 3.67
+    const tax = Math.round(Math.max(0, eurProfit - corpThreshold) * 0.09);
+    const eff = eurRev > 0 ? Math.round((tax / eurRev) * 1000) / 10 : 0;
+    return {
+      struct: 'FZ / LLC', tax, eff,
+      color: eurProfit < corpThreshold ? 'var(--success)' : 'var(--accent)',
+      lines: [
+        eurProfit < corpThreshold ? 'VPB: €0 (onder drempel)' : `VPB 9%: €${tax.toLocaleString('nl-NL')}`,
+        'Persoonlijk inkomen: 0%',
+        'Vrije zones: 0% VPB',
+      ],
+      note: eurProfit < corpThreshold ? '0% belasting onder €102k winst' : '9% VPB boven €102k',
+    };
+  }
+  if (code === 'ES') {
+    const ss = Math.min(eurProfit, 4392);
+    const base = Math.max(0, eurProfit - ss);
+    const braks = [{to:12450,r:0.19},{to:20200,r:0.24},{to:35200,r:0.30},{to:60000,r:0.37},{to:Infinity,r:0.47}];
+    let ibTax = 0, prev = 0;
+    for (const b of braks) { if (base <= prev) break; ibTax += (Math.min(base, b.to) - prev) * b.r; prev = b.to; }
+    ibTax = Math.round(ibTax);
+    const total = ibTax + ss;
+    return {
+      struct: 'Autónomo', tax: total, eff: eurRev > 0 ? Math.round((total / eurRev) * 1000) / 10 : 0,
+      color: 'var(--warning)',
+      lines: [`IB: €${ibTax.toLocaleString('nl-NL')}`, `Sociale lasten: €${ss.toLocaleString('nl-NL')}/jaar`, 'IS vennootschap: 25%'],
+      note: 'Hoge sociale lasten autónomo',
+    };
+  }
+  if (code === 'PT') {
+    const ss = Math.round(eurProfit * 0.214);
+    const base = Math.max(0, eurProfit - ss);
+    const braks = [{to:7703,r:0.145},{to:11623,r:0.21},{to:16472,r:0.265},{to:21321,r:0.285},{to:27146,r:0.35},{to:39791,r:0.37},{to:51997,r:0.435},{to:81199,r:0.45},{to:Infinity,r:0.48}];
+    let irsTax = 0, prev = 0;
+    for (const b of braks) { if (base <= prev) break; irsTax += (Math.min(base, b.to) - prev) * b.r; prev = b.to; }
+    irsTax = Math.round(irsTax);
+    const total = irsTax + ss;
+    return {
+      struct: 'ENI', tax: total, eff: eurRev > 0 ? Math.round((total / eurRev) * 1000) / 10 : 0,
+      color: 'var(--warning)',
+      lines: [`IRS: €${irsTax.toLocaleString('nl-NL')}`, `Sociale lasten (21,4%): €${ss.toLocaleString('nl-NL')}`, 'NHR: mogelijk 20% flat'],
+      note: 'NHR kan gunstig zijn voor expats',
+    };
+  }
+  if (code === 'TH') {
+    const thbProfit = eurProfit * 38;
+    const braks = [{to:150000,r:0},{to:300000,r:0.05},{to:500000,r:0.10},{to:750000,r:0.15},{to:1000000,r:0.20},{to:2000000,r:0.25},{to:5000000,r:0.30},{to:Infinity,r:0.35}];
+    let thbTax = 0, prev = 0;
+    for (const b of braks) { if (thbProfit <= prev) break; thbTax += (Math.min(thbProfit, b.to) - prev) * b.r; prev = b.to; }
+    const tax = Math.round(thbTax / 38);
+    return {
+      struct: 'Individu / BOI', tax, eff: eurRev > 0 ? Math.round((tax / eurRev) * 1000) / 10 : 0,
+      color: 'var(--accent)',
+      lines: [`PIT progressief: €${tax.toLocaleString('nl-NL')}`, 'CIT vennootschap: 20%', 'Lage levenskosten'],
+      note: 'Gunstig bij lage winst',
+    };
+  }
+  if (code === 'ID') {
+    const umkm = Math.round(eurRev * 0.005);
+    const idrProfit = eurProfit * 17000;
+    const braks = [{to:60000000,r:0.05},{to:250000000,r:0.15},{to:500000000,r:0.25},{to:Infinity,r:0.30}];
+    let idrTax = 0, prev = 0;
+    for (const b of braks) { if (idrProfit <= prev) break; idrTax += (Math.min(idrProfit, b.to) - prev) * b.r; prev = b.to; }
+    const pph = Math.round(idrTax / 17000);
+    const tax = Math.min(umkm, pph);
+    return {
+      struct: 'UMKM / PT', tax, eff: eurRev > 0 ? Math.round((tax / eurRev) * 1000) / 10 : 0,
+      color: 'var(--accent)',
+      lines: [`UMKM (0,5% omzet): €${umkm.toLocaleString('nl-NL')}`, `PPh progressief: €${pph.toLocaleString('nl-NL')}`, 'UMKM: gunstigste optie'],
+      note: 'UMKM: 0,5% bruto-omzet',
+    };
+  }
+  if (code === 'US') {
+    const se = Math.round(eurProfit * 0.9235 * 0.153);
+    const agi = Math.max(0, eurProfit - se / 2 - eurProfit * 0.2);
+    const ib = Math.round(Math.max(0, agi - 13850) * 0.22);
+    const total = se + ib;
+    return {
+      struct: 'LLC / S-Corp', tax: total, eff: eurRev > 0 ? Math.round((total / eurRev) * 1000) / 10 : 0,
+      color: 'var(--warning)',
+      lines: [`SE-belasting (15,3%): €${se.toLocaleString('nl-NL')}`, `Inkomstenbelasting: €${ib.toLocaleString('nl-NL')}`, 'S-Corp verlaagt SE-belasting'],
+      note: 'Hoge self-employment tax',
+    };
+  }
+  if (code === 'BR') {
+    const tax = Math.round(eurRev * 0.06);
+    return {
+      struct: 'MEI / Simples', tax, eff: eurRev > 0 ? Math.round((tax / eurRev) * 1000) / 10 : 0,
+      color: 'var(--warning)',
+      lines: [`Simples Nacional (~6%): €${tax.toLocaleString('nl-NL')}`, 'IRPJ + CSLL + PIS/COFINS', 'Complex systeem'],
+      note: 'Simples voor kleine bedrijven',
+    };
+  }
+  const rough = Math.round(eurProfit * 0.20);
+  return {
+    struct: jInfo.name, tax: rough, eff: eurRev > 0 ? Math.round((rough / eurRev) * 1000) / 10 : 0,
+    color: 'var(--muted)',
+    lines: ['Indicatieve schatting', '~20% over winst', 'Raadpleeg belastingadviseur'],
+    note: 'Indicatief',
+  };
+};
+
+// ============================================================================
 // AI ADVISOR VIEW (Bedrijfsrapportage + fiscaal advies)
 // ============================================================================
 const AIAdvisorView = ({ entities, activeEntity, invoices, expenses, clients, settings }) => {
-  const [mode, setMode] = useState('report'); // 'report' | 'advice' | 'chat'
+  const [mode, setMode] = useState('report'); // 'report' | 'advice' | 'chat' | 'tax'
   const [loading, setLoading] = useState(false);
   const [output, setOutput] = useState('');
   const [error, setError] = useState(null);
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState([]);
+  // Belasting prognose state
+  const [taxProfile, setTaxProfile] = useState({ isStarter: false, hasUrencriterium: true });
+  const [taxRevOverride, setTaxRevOverride] = useState('');
+  const [taxCostOverride, setTaxCostOverride] = useState('');
+  const [showCompare, setShowCompare] = useState(false);
+  const [compareCode1, setCompareCode1] = useState(null);
+  const [compareCode2, setCompareCode2] = useState(null);
+  // Aftrekposten gids state
+  const [deductSearch, setDeductSearch] = useState('');
+  const [deductJur, setDeductJur] = useState(null); // null = huidig bedrijf
+  const [expandedItem, setExpandedItem] = useState(null);
 
-  const apiKey = resolveApiKey(settings.apiKey);
+  const apiKey = resolveApiKey(settings.apiKey, settings.openaiApiKey);
   const jur = JURISDICTIONS[activeEntity?.jurisdiction || 'NL'];
 
   // Build current financial snapshot for context
@@ -5173,10 +6489,18 @@ const AIAdvisorView = ({ entities, activeEntity, invoices, expenses, clients, se
     const outstanding = entityInvoices.filter(i => i.status === 'sent').reduce((s, i) => s + computeInvoice(i.items).total, 0);
     const overdue = entityInvoices.filter(i => computeInvoiceStatus(i) === 'overdue').reduce((s, i) => s + computeInvoice(i.items).total, 0);
 
+    // Jaarprognose op basis van verstreken dagen
+    const dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000);
+    const yearFraction = Math.max(0.01, dayOfYear / 365);
+    const projRevenue = Math.round(revenue / yearFraction);
+    const projCosts = Math.round(costs / yearFraction);
+
     return {
       entity: activeEntity,
       year: now.getFullYear(),
       revenue, costs, profit: revenue - costs,
+      projRevenue, projCosts, projProfit: projRevenue - projCosts,
+      yearFraction: Math.round(yearFraction * 100),
       btwOwed, btwReclaim, btwNet: btwOwed - btwReclaim,
       invoiceCount: yearInvoices.length,
       expenseCount: yearExpenses.length,
@@ -5236,7 +6560,7 @@ Maak een beknopte bedrijfsrapportage met:
 
 Houd het zakelijk, scherp, max 400 woorden.`;
 
-      const result = await callClaude({ system, prompt, apiKey, maxTokens: 1500 });
+      const result = await callAI({ system, prompt, apiKey: settings.apiKey, openaiApiKey: settings.openaiApiKey, maxTokens: 1500 });
       setOutput(result);
     } catch (e) {
       setError(e.message);
@@ -5261,7 +6585,7 @@ Geef fiscaal advies voor dit bedrijf, specifiek voor ${jur.name}:
 
 Wees concreet. Geen algemene praatjes. Max 500 woorden.`;
 
-      const result = await callClaude({ system, prompt, apiKey, maxTokens: 1800 });
+      const result = await callAI({ system, prompt, apiKey: settings.apiKey, openaiApiKey: settings.openaiApiKey, maxTokens: 1800 });
       setOutput(result);
     } catch (e) {
       setError(e.message);
@@ -5286,16 +6610,64 @@ ${buildContext()}`;
         ...chatHistory.map(m => ({ role: m.role, content: m.content })),
         { role: 'user', content: userMsg },
       ];
-      const headers = { 'Content-Type': 'application/json', 'x-api-key': resolveApiKey(apiKey), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1500, system, messages }),
-      });
-      if (!resp.ok) throw new Error(`API error ${resp.status}`);
-      const data = await resp.json();
-      const result = data.content?.find(b => b.type === 'text')?.text || '';
+      const result = await callAI({ system, messages, apiKey: settings.apiKey, openaiApiKey: settings.openaiApiKey, maxTokens: 1500 });
       setChatHistory(h => [...h, { role: 'assistant', content: result }]);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runTaxExplanation = async (taxResult, projectedRevenue, projectedCosts) => {
+    setLoading(true);
+    setError(null);
+    setOutput('');
+    try {
+      const jurName = jur.name;
+      const jurCode = jur.code;
+      const system = `Je bent een fiscaal adviseur gespecialiseerd in belasting voor digital nomads en zzp'ers in ${jurName}. Je geeft heldere, concrete uitleg over belastingverplichtingen. Geen disclaimers. Gebruik markdown.`;
+      let taxSummary = '';
+      if (jurCode === 'NL') {
+        taxSummary = `BELASTINGBEREKENING NL (prognose ${snapshot?.year}):
+- Verwachte jaaromzet: €${Math.round(projectedRevenue).toLocaleString('nl-NL')}
+- Verwachte kosten: €${Math.round(projectedCosts).toLocaleString('nl-NL')}
+- Winst: €${Math.round(taxResult.winst).toLocaleString('nl-NL')}
+- Zelfstandigenaftrek: €${taxResult.zelfstandigenAftrek.toLocaleString('nl-NL')} (urencriterium: ${taxProfile.hasUrencriterium ? 'ja' : 'nee'})
+- Startersaftrek: €${taxResult.startersAftrek.toLocaleString('nl-NL')} (starter: ${taxProfile.isStarter ? 'ja' : 'nee'})
+- MKB-winstvrijstelling: €${taxResult.mkbVrijstelling.toLocaleString('nl-NL')}
+- Belastbaar inkomen: €${taxResult.belastbaarInkomen.toLocaleString('nl-NL')}
+- Inkomstenbelasting (na heffingskortingen): €${taxResult.inkomstenbelasting.toLocaleString('nl-NL')}
+- Zvw-bijdrage: €${taxResult.zvw.toLocaleString('nl-NL')}
+- TOTAAL opzij te zetten: €${taxResult.totaal.toLocaleString('nl-NL')} (${taxResult.effectief}% van omzet)`;
+      } else if (jurCode === 'DR') {
+        taxSummary = `BELASTINGBEREKENING DR (prognose ${snapshot?.year}):
+- Verwachte jaaromzet: RD$${Math.round(projectedRevenue).toLocaleString('es-DO')}
+- Verwachte kosten: RD$${Math.round(projectedCosts).toLocaleString('es-DO')}
+- Winst: RD$${Math.round(taxResult.winst).toLocaleString('es-DO')}
+- ISR Persona Física (progressief): RD$${taxResult.isrPF.toLocaleString('es-DO')} (${taxResult.effectief}%)
+- ISR SRL/bedrijf (27% flat): RD$${taxResult.isrSRL.toLocaleString('es-DO')} (${taxResult.effectiefSRL}%)`;
+      } else if (jurCode === 'EE') {
+        taxSummary = `BELASTINGBEREKENING ESTLAND (prognose ${snapshot?.year}):
+- Verwachte winst: €${Math.round(taxResult.winst).toLocaleString('nl-NL')}
+- OÜ, ingehouden winst: €0 (0%)
+- OÜ, dividend uitkeren: €${taxResult.ouDividend.toLocaleString('nl-NL')} (${taxResult.effectiefDividend}%)
+- FIE (eenmanszaak): €${taxResult.fieTotal.toLocaleString('nl-NL')} (${taxResult.effectiefFIE}%)`;
+      }
+      const prompt = `${buildContext()}
+
+${taxSummary}
+
+Geef een heldere uitleg voor een digital nomad die officieel in ${jurName} is geregistreerd:
+1. **Wat moet ik opzij zetten?** Leg de berekening uit in gewone taal.
+2. **Waarom zo weinig/veel?** Verklaar de sleutelaftrekposten of tarieven.
+3. **Wanneer betaal ik dit?** Geef de concrete betaalmomenten/deadlines.
+4. **Specifieke tips voor ${jurName}**: 2-3 concrete acties om de belastingdruk legaal te verlagen.
+5. **Valkuilen**: wat vergeten digital nomads in ${jurName} vaak?
+
+Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
+      const result = await callAI({ system, prompt, apiKey: settings.apiKey, openaiApiKey: settings.openaiApiKey, maxTokens: 1800 });
+      setOutput(result);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -5345,6 +6717,8 @@ ${buildContext()}`;
         {[
           { id: 'report', label: 'Bedrijfsrapportage', icon: FileBarChart, action: runReport, desc: 'Snelle analyse van je YTD performance + concrete acties' },
           { id: 'advice', label: 'Fiscaal advies', icon: Lightbulb, action: runAdvice, desc: `${jur.salesTax.name}-optimalisatie en aftrekposten specifiek voor ${jur.name}` },
+          { id: 'tax', label: 'Belasting prognose', icon: Calculator, action: null, desc: 'Bereken hoeveel je opzij moet zetten + landen vergelijker' },
+          { id: 'deduct', label: 'Aftrekposten gids', icon: Percent, action: null, desc: 'Wat mag je aftrekken in NL/DR/EE + exacte omschrijftips' },
           { id: 'chat', label: 'Vrije vraag', icon: MessageSquare, action: null, desc: 'Stel zelf een vraag over je financiën of belastingen' },
         ].map(t => (
           <button
@@ -5390,11 +6764,375 @@ ${buildContext()}`;
           <div className="flex items-start gap-3">
             <AlertCircle size={16} className="mt-0.5" style={{ color: 'var(--warning)' }} />
             <div className="text-xs flex-1" style={{ color: 'var(--ink-2)' }}>
-              <strong>API key niet ingesteld.</strong> Maak een bestand <span className="font-mono">.env.local</span> aan in de projectmap met: <span className="font-mono">VITE_ANTHROPIC_API_KEY=sk-ant-...</span> — of vul de key in via Instellingen → AI.
+              <strong>AI key niet ingesteld.</strong> Vul een Anthropic (<span className="font-mono">sk-ant-...</span>) of OpenAI (<span className="font-mono">sk-...</span>) key in via <strong>Instellingen → AI</strong>.
             </div>
           </div>
         </Card>
       )}
+
+      {/* ── AFTREKPOSTEN GIDS TAB ── */}
+      {mode === 'deduct' && (() => {
+        const activeJur = deductJur || jur.code;
+        const guide = getDeductGuide(activeJur);
+        const q = deductSearch.toLowerCase().trim();
+        const STATUS_COLORS = { safe: 'var(--success)', borderline: 'var(--warning)', risky: 'var(--danger)', no: 'var(--muted)' };
+        const STATUS_LABEL = { safe: '✅ Veilig', borderline: '⚠️ Randje', risky: '🚫 Risicovol', no: '❌ Niet aftrekbaar' };
+        const STATUS_BG = { safe: 'var(--success-soft)', borderline: 'var(--warning-soft)', risky: 'var(--danger-soft)', no: 'var(--surface-3)' };
+
+        const filteredGuide = guide.map(cat => ({
+          ...cat,
+          items: cat.items.filter(item =>
+            !q || item.name.toLowerCase().includes(q) || (item.tip || '').toLowerCase().includes(q)
+          ),
+        })).filter(cat => cat.items.length > 0);
+
+        return (
+          <div className="space-y-4">
+            {/* Header + land selector + zoekbalk */}
+            <Card className="p-4">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex gap-1 flex-wrap">
+                  {Object.values(JURISDICTIONS).map(({ code, flag, name }) => (
+                    <button key={code} onClick={() => setDeductJur(code)}
+                      className="px-3 py-1.5 rounded text-xs font-semibold"
+                      title={name}
+                      style={{ background: activeJur === code ? 'var(--ink)' : 'var(--surface-2)', color: activeJur === code ? '#fff' : 'var(--ink-2)' }}>
+                      {flag} {code}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  value={deductSearch}
+                  onChange={e => setDeductSearch(e.target.value)}
+                  placeholder="Zoek: kleding, laptop, benzine..."
+                  className="flex-1 min-w-[200px] px-3 py-1.5 text-sm rounded-md border"
+                  style={{ borderColor: 'var(--border-strong)', background: 'var(--surface-2)' }}
+                />
+              </div>
+              <div className="flex gap-3 mt-3 text-[11px] flex-wrap">
+                {Object.entries(STATUS_LABEL).map(([k, v]) => (
+                  <span key={k} className="flex items-center gap-1" style={{ color: STATUS_COLORS[k] }}>{v}</span>
+                ))}
+              </div>
+            </Card>
+
+            {filteredGuide.map((cat, ci) => (
+              <Card key={ci} className="p-0 overflow-hidden">
+                <div className="px-4 py-3 flex items-center gap-2" style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
+                  <span className="text-base">{cat.icon}</span>
+                  <span className="font-semibold text-sm">{cat.category}</span>
+                  <span className="text-[11px] ml-auto" style={{ color: 'var(--muted)' }}>{cat.items.length} items</span>
+                </div>
+                <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+                  {cat.items.map((item, ii) => {
+                    const key = `${ci}-${ii}`;
+                    const isOpen = expandedItem === key;
+                    return (
+                      <div key={ii}>
+                        <button
+                          onClick={() => setExpandedItem(isOpen ? null : key)}
+                          className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-opacity-50"
+                          style={{ background: isOpen ? STATUS_BG[item.status] : 'transparent' }}
+                        >
+                          <span className="text-xs font-semibold shrink-0 w-24" style={{ color: STATUS_COLORS[item.status] }}>
+                            {STATUS_LABEL[item.status]}
+                          </span>
+                          <span className="flex-1 text-sm">{item.name}</span>
+                          {item.pct > 0 && item.pct < 100 && (
+                            <span className="text-[11px] shrink-0 font-mono" style={{ color: 'var(--muted)' }}>{item.pct}%</span>
+                          )}
+                          <ChevronDown size={12} style={{ flexShrink: 0, color: 'var(--muted)', transform: isOpen ? 'rotate(180deg)' : 'none' }} />
+                        </button>
+                        {isOpen && (
+                          <div className="px-4 pb-4 pt-2 space-y-2 text-xs" style={{ background: STATUS_BG[item.status] }}>
+                            {item.tip && (
+                              <div className="p-2.5 rounded-md font-mono text-xs" style={{ background: 'var(--surface)', border: '1px solid var(--border-strong)' }}>
+                                <div className="text-[10px] uppercase tracking-wider mb-1 font-sans" style={{ color: 'var(--muted)' }}>Omschrijving op de bon / in boekhouding</div>
+                                {item.tip}
+                              </div>
+                            )}
+                            {item.doc && (
+                              <div className="flex gap-2 items-start p-2 rounded-md" style={{ background: 'var(--surface-2)' }}>
+                                <span>📋</span>
+                                <span style={{ color: 'var(--ink-2)' }}><strong>Documentatie:</strong> {item.doc}</span>
+                              </div>
+                            )}
+                            {item.risk && (
+                              <div className="flex gap-2 items-start p-2 rounded-md" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
+                                <span>⚠️</span>
+                                <span><strong>Let op:</strong> {item.risk}</span>
+                              </div>
+                            )}
+                            {item.pct > 0 && item.pct < 100 && (
+                              <div className="text-[11px]" style={{ color: 'var(--muted)' }}>
+                                Aftrekbaar: <strong>{item.pct}%</strong> van het bedrag
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            ))}
+
+            {filteredGuide.length === 0 && (
+              <Card className="p-8 text-center">
+                <div className="text-2xl mb-2">🔍</div>
+                <div className="text-sm" style={{ color: 'var(--muted)' }}>Geen resultaten voor "{deductSearch}"</div>
+                <button onClick={() => setDeductSearch('')} className="text-xs mt-2" style={{ color: 'var(--accent)' }}>Wis zoekopdracht</button>
+              </Card>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── BELASTING PROGNOSE TAB ── */}
+      {mode === 'tax' && snapshot && (() => {
+        const projRev = taxRevOverride !== '' ? Number(taxRevOverride) : snapshot.projRevenue;
+        const projCost = taxCostOverride !== '' ? Number(taxCostOverride) : snapshot.projCosts;
+        const taxResult = calcIncomeTax(jur.code, { revenue: projRev, costs: projCost, ...taxProfile });
+        const curr = jur.baseCurrency;
+        const fmt = (v) => fmtCurrency(v, curr);
+
+        // Landen vergelijker (altijd in EUR via ruwe wisselkoers)
+        const EUR_RATE = jur.code === 'DR' ? 60 : 1; // RD$60 ≈ €1
+        const eurProfit = Math.round((projRev - projCost) / EUR_RATE);
+        const eurRevEUR = Math.round(projRev / EUR_RATE);
+        const eurCostEUR = Math.round(projCost / EUR_RATE);
+
+        return (
+          <div className="space-y-4">
+            {/* Profiel */}
+            {jur.code === 'NL' && (
+              <Card className="p-4">
+                <h3 className="font-display text-base font-medium mb-3">Jouw ZZP-profiel</h3>
+                <div className="flex gap-5 flex-wrap text-sm">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" checked={taxProfile.hasUrencriterium} onChange={e => setTaxProfile(p => ({ ...p, hasUrencriterium: e.target.checked }))} className="rounded" />
+                    <span>1225+ uur/jaar <span style={{ color: 'var(--muted)' }}>(→ zelfstandigenaftrek €3.750)</span></span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" checked={taxProfile.isStarter} onChange={e => setTaxProfile(p => ({ ...p, isStarter: e.target.checked }))} className="rounded" />
+                    <span>Starter (eerste 3 jaar) <span style={{ color: 'var(--muted)' }}>(→ +€2.123 startersaftrek)</span></span>
+                  </label>
+                </div>
+              </Card>
+            )}
+
+            {/* Prognose inputs */}
+            <Card className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h3 className="font-display text-base font-medium">Jaarprognose {snapshot.year}</h3>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+                    Op basis van {snapshot.yearFraction}% van het jaar · aanpasbaar
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium block mb-1" style={{ color: 'var(--muted)' }}>Verwachte jaaromzet</label>
+                  <input
+                    type="number"
+                    value={taxRevOverride}
+                    onChange={e => setTaxRevOverride(e.target.value)}
+                    placeholder={String(snapshot.projRevenue)}
+                    className="w-full px-3 py-2 text-sm rounded-md border num"
+                    style={{ borderColor: 'var(--border-strong)', background: 'var(--surface-2)' }}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium block mb-1" style={{ color: 'var(--muted)' }}>Verwachte jaarkosten</label>
+                  <input
+                    type="number"
+                    value={taxCostOverride}
+                    onChange={e => setTaxCostOverride(e.target.value)}
+                    placeholder={String(snapshot.projCosts)}
+                    className="w-full px-3 py-2 text-sm rounded-md border num"
+                    style={{ borderColor: 'var(--border-strong)', background: 'var(--surface-2)' }}
+                  />
+                </div>
+              </div>
+            </Card>
+
+            {/* Belasting breakdown */}
+            <Card className="p-5">
+              <div className="flex items-start justify-between gap-4 mb-4">
+                <div>
+                  <h3 className="font-display text-base font-medium">Belastingberekening {jur.flag} {jur.name}</h3>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Schatting op basis van {snapshot.year}-tarieven</p>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Opzij zetten</div>
+                  <div className="font-display text-2xl font-medium num" style={{ color: taxResult.totaal > 0 ? 'var(--accent)' : 'var(--success)' }}>
+                    {fmt(taxResult.totaal)}
+                  </div>
+                  <div className="text-xs" style={{ color: 'var(--muted)' }}>{taxResult.effectief}% van omzet</div>
+                </div>
+              </div>
+
+              {/* Breakdown rows */}
+              <div className="space-y-1.5 text-sm border-t pt-3" style={{ borderColor: 'var(--border)' }}>
+                {jur.code === 'NL' && <>
+                  <div className="flex justify-between"><span style={{ color: 'var(--muted)' }}>Verwachte omzet</span><span className="num font-medium">{fmt(projRev)}</span></div>
+                  <div className="flex justify-between"><span style={{ color: 'var(--muted)' }}>Verwachte kosten</span><span className="num" style={{ color: 'var(--danger)' }}>- {fmt(projCost)}</span></div>
+                  <div className="flex justify-between border-t pt-1.5" style={{ borderColor: 'var(--border)' }}><span style={{ color: 'var(--muted)' }}>Winst voor aftrek</span><span className="num font-medium">{fmt(taxResult.winst)}</span></div>
+                  {taxResult.zelfstandigenAftrek > 0 && <div className="flex justify-between"><span style={{ color: 'var(--accent)' }}>- Zelfstandigenaftrek</span><span className="num" style={{ color: 'var(--accent)' }}>- {fmt(taxResult.zelfstandigenAftrek)}</span></div>}
+                  {taxResult.startersAftrek > 0 && <div className="flex justify-between"><span style={{ color: 'var(--accent)' }}>- Startersaftrek</span><span className="num" style={{ color: 'var(--accent)' }}>- {fmt(taxResult.startersAftrek)}</span></div>}
+                  {taxResult.mkbVrijstelling > 0 && <div className="flex justify-between"><span style={{ color: 'var(--accent)' }}>- MKB-vrijstelling (13,31%)</span><span className="num" style={{ color: 'var(--accent)' }}>- {fmt(taxResult.mkbVrijstelling)}</span></div>}
+                  <div className="flex justify-between border-t pt-1.5 font-medium" style={{ borderColor: 'var(--border)' }}><span>Belastbaar inkomen</span><span className="num">{fmt(taxResult.belastbaarInkomen)}</span></div>
+                  <div className="flex justify-between mt-2">
+                    <span style={{ color: taxResult.inkomstenbelasting === 0 ? 'var(--success)' : 'var(--ink-2)' }}>Inkomstenbelasting (na kortingen)</span>
+                    <span className="num font-medium" style={{ color: taxResult.inkomstenbelasting === 0 ? 'var(--success)' : 'var(--danger)' }}>{fmt(taxResult.inkomstenbelasting)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span style={{ color: 'var(--ink-2)' }}>Zvw-bijdrage (5,32%)</span>
+                    <span className="num font-medium" style={{ color: 'var(--warning)' }}>{fmt(taxResult.zvw)}</span>
+                  </div>
+                  <div className="flex justify-between border-t pt-2 font-semibold text-base" style={{ borderColor: 'var(--border)' }}>
+                    <span>Totaal opzij</span>
+                    <span className="num" style={{ color: taxResult.totaal > 0 ? 'var(--accent)' : 'var(--success)' }}>{fmt(taxResult.totaal)}</span>
+                  </div>
+                </>}
+                {jur.code === 'DR' && <>
+                  <div className="flex justify-between"><span style={{ color: 'var(--muted)' }}>Verwachte omzet</span><span className="num font-medium">{fmt(projRev)}</span></div>
+                  <div className="flex justify-between"><span style={{ color: 'var(--muted)' }}>Verwachte kosten</span><span className="num" style={{ color: 'var(--danger)' }}>- {fmt(projCost)}</span></div>
+                  <div className="flex justify-between border-t pt-2 font-medium" style={{ borderColor: 'var(--border)' }}><span>Winst (belastbare basis)</span><span className="num">{fmt(taxResult.winst)}</span></div>
+                  <div className="h-2" />
+                  <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--muted)' }}>Optie A: Persona Física (jijzelf)</div>
+                  <div className="flex justify-between"><span style={{ color: 'var(--ink-2)' }}>ISR progressief (0%–25%)</span><span className="num font-semibold" style={{ color: 'var(--danger)' }}>{fmt(taxResult.isrPF)} ({taxResult.effectief}%)</span></div>
+                  <div className="h-1" />
+                  <div className="text-xs font-semibold uppercase tracking-wide mb-1 mt-2" style={{ color: 'var(--muted)' }}>Optie B: SRL (bedrijf)</div>
+                  <div className="flex justify-between"><span style={{ color: 'var(--ink-2)' }}>ISR flat 27%</span><span className="num font-semibold" style={{ color: 'var(--warning)' }}>{fmt(taxResult.isrSRL)} ({taxResult.effectiefSRL}%)</span></div>
+                  <div className="flex justify-between"><span style={{ color: 'var(--muted)' }}>Anticipos maandelijks (1,5% omzet)</span><span className="num">{fmt(taxResult.anticiposSRL)}/jaar</span></div>
+                </>}
+                {jur.code === 'EE' && <>
+                  <div className="flex justify-between"><span style={{ color: 'var(--muted)' }}>Verwachte omzet</span><span className="num font-medium">{fmt(projRev)}</span></div>
+                  <div className="flex justify-between border-t pt-2 font-medium" style={{ borderColor: 'var(--border)' }}><span>Winst OÜ</span><span className="num">{fmt(taxResult.winst)}</span></div>
+                  <div className="h-2" />
+                  <div className="flex justify-between"><span style={{ color: 'var(--ink-2)' }}>OÜ — winst inhouden (niet uitkeren)</span><span className="num font-semibold" style={{ color: 'var(--success)' }}>€0 (0%)</span></div>
+                  <div className="flex justify-between"><span style={{ color: 'var(--ink-2)' }}>OÜ — dividend uitkeren (22%)</span><span className="num font-semibold" style={{ color: 'var(--warning)' }}>{fmt(taxResult.ouDividend)} ({taxResult.effectiefDividend}%)</span></div>
+                  <div className="flex justify-between"><span style={{ color: 'var(--ink-2)' }}>FIE (eenmanszaak, ~55%)</span><span className="num font-semibold" style={{ color: 'var(--danger)' }}>{fmt(taxResult.fieTotal)} ({taxResult.effectiefFIE}%)</span></div>
+                </>}
+              </div>
+
+              {/* Alerts */}
+              {taxResult.alerts.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  {taxResult.alerts.map((a, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs p-2.5 rounded-md" style={{
+                      background: a.type === 'success' ? 'var(--success-soft)' : a.type === 'warning' ? 'var(--warning-soft)' : 'var(--surface-2)',
+                      color: a.type === 'success' ? 'var(--success)' : a.type === 'warning' ? 'var(--warning)' : 'var(--ink-2)',
+                    }}>
+                      <span>{a.msg}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* AI uitleg knop */}
+              <div className="mt-4 pt-3 border-t flex gap-2 flex-wrap" style={{ borderColor: 'var(--border)' }}>
+                <Button onClick={() => runTaxExplanation(taxResult, projRev, projCost)} disabled={loading}>
+                  {loading ? <><RefreshCw size={14} className="animate-spin" /> Genereren...</> : <><Wand2 size={14} /> Laat AI dit uitleggen</>}
+                </Button>
+              </div>
+            </Card>
+
+            {/* Landen vergelijker */}
+            <Card className="p-4">
+              <button
+                onClick={() => setShowCompare(v => !v)}
+                className="w-full flex items-center justify-between text-sm font-medium"
+              >
+                <span className="flex items-center gap-2"><Globe size={14} /> Landen vergelijker</span>
+                <ChevronDown size={14} style={{ transform: showCompare ? 'rotate(180deg)' : 'none', transition: '0.2s' }} />
+              </button>
+              {showCompare && (() => {
+                const otherCodes = Object.keys(JURISDICTIONS).filter(c => c !== jur.code);
+                const defaultC1 = jur.code === 'NL' ? 'DR' : 'NL';
+                const defaultC2raw = jur.code === 'NL' ? 'EE' : (jur.code === 'EE' ? 'DR' : 'EE');
+                const c1 = (compareCode1 && compareCode1 !== jur.code) ? compareCode1 : defaultC1;
+                const defaultC2 = defaultC2raw === c1 ? (otherCodes.find(c => c !== c1) || otherCodes[0]) : defaultC2raw;
+                const c2 = (compareCode2 && compareCode2 !== jur.code && compareCode2 !== c1) ? compareCode2 : defaultC2;
+                const cards = [jur.code, c1, c2].map(code => ({
+                  code, info: JURISDICTIONS[code],
+                  card: calcCompareTax(code, eurRevEUR, eurCostEUR, taxProfile),
+                }));
+                return (
+                  <div className="mt-4 space-y-3">
+                    <div className="flex items-center gap-2 flex-wrap text-xs">
+                      <span style={{ color: 'var(--muted)' }}>Vergelijk:</span>
+                      <span className="font-medium">{jur.flag} {jur.name}</span>
+                      <span style={{ color: 'var(--muted)' }}>vs</span>
+                      <select value={c1} onChange={e => setCompareCode1(e.target.value)}
+                        className="px-2 py-1 rounded border text-xs"
+                        style={{ borderColor: 'var(--border-strong)', background: 'var(--surface-2)', color: 'var(--ink)' }}>
+                        {Object.values(JURISDICTIONS).filter(j => j.code !== jur.code && j.code !== c2).map(j => (
+                          <option key={j.code} value={j.code}>{j.flag} {j.name}</option>
+                        ))}
+                      </select>
+                      <span style={{ color: 'var(--muted)' }}>vs</span>
+                      <select value={c2} onChange={e => setCompareCode2(e.target.value)}
+                        className="px-2 py-1 rounded border text-xs"
+                        style={{ borderColor: 'var(--border-strong)', background: 'var(--surface-2)', color: 'var(--ink)' }}>
+                        {Object.values(JURISDICTIONS).filter(j => j.code !== jur.code && j.code !== c1).map(j => (
+                          <option key={j.code} value={j.code}>{j.flag} {j.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                      Vergelijking op basis van ~€{eurProfit.toLocaleString('nl-NL')} winst per jaar (indicatief).
+                      {jur.code === 'DR' && ' RD$60 ≈ €1 gebruikt voor omrekening.'}
+                    </p>
+                    <div className="grid grid-cols-3 gap-3">
+                      {cards.map(({ code, info, card }) => card && (
+                        <div key={code} className="rounded-lg p-3 text-center" style={{ background: 'var(--surface-2)', border: code === jur.code ? '2px solid var(--accent)' : '1px solid var(--border)' }}>
+                          {code === jur.code && <div className="text-[9px] uppercase tracking-wider mb-1 font-semibold" style={{ color: 'var(--accent)' }}>Jouw land</div>}
+                          <div className="text-2xl mb-1">{info.flag}</div>
+                          <div className="font-semibold text-sm">{info.name}</div>
+                          <div className="text-[10px] mb-2" style={{ color: 'var(--muted)' }}>{card.struct}</div>
+                          <div className="font-display text-xl num font-medium" style={{ color: card.color }}>
+                            {card.tax === 0 ? '€0' : `€${card.tax.toLocaleString('nl-NL')}`}
+                          </div>
+                          <div className="text-[11px] mb-2" style={{ color: 'var(--muted)' }}>{card.eff}% van omzet</div>
+                          <div className="text-[10px] space-y-0.5 text-left border-t pt-2" style={{ borderColor: 'var(--border)', color: 'var(--ink-2)' }}>
+                            {card.lines.map((l, i) => <div key={i}>· {l}</div>)}
+                          </div>
+                          {card.note && <div className="text-[10px] mt-2 font-medium" style={{ color: card.color }}>{card.note}</div>}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-2 text-xs p-3 rounded-md" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--ink-2)' }}>
+                      <div className="font-semibold text-sm mb-1" style={{ color: 'var(--ink)' }}>Wanneer wordt welk land interessant?</div>
+                      <div><span className="font-medium" style={{ color: 'var(--accent)' }}>Nederland ZZP</span> is verrassend gunstig bij winst onder ~€40k. Dankzij zelfstandigenaftrek, MKB-vrijstelling en heffingskortingen betaal je bij lage winst nauwelijks inkomstenbelasting — alleen Zvw (5,32%). Nadeel: strenge regels, €20k KOR-grens, logo-eis op kleding.</div>
+                      <div><span className="font-medium" style={{ color: 'var(--warning)' }}>Dominicaanse Republiek</span> wordt interessanter bij hogere winsten (€60k+). Als individu (Persona Física) betaal je progressief 0%–25% — bij lage inkomens redelijk, bij hoge inkomens loopt het op. Als bedrijf (SRL) betaal je 27% flat, wat bij €20k winst juist nadelig is. Voordeel: soepele aftrekposten, lage levenskosten, geen vermogensbelasting.</div>
+                      <div><span className="font-medium" style={{ color: 'var(--success)' }}>Estland OÜ</span> is ideaal voor remote werkers: zolang je winst in de BV laat, betaal je 0%. Pas als je dividend uitkeert, betaal je 22%. Je kunt winst jaren laten groeien en dan pas opnemen als het jou uitkomt — of herinvesteren zonder belasting. Geen verplicht salaris.</div>
+                      <div><span className="font-medium" style={{ color: 'var(--ink)' }}>Dubai / UAE</span> kent 0% persoonlijke inkomstenbelasting. Vennootschapsbelasting is 9% maar pas boven ~€102k winst. Hoge levenskosten, maar enorm aantrekkelijk bij hogere inkomens.</div>
+                      <div className="pt-1 border-t" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                        Alle bedragen zijn indicatief — lokale aftrekposten, structuur en adviseur kunnen sterk afwijken.
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </Card>
+
+            {/* AI output */}
+            {output && (
+              <Card className="p-6 animate-in">
+                <div className="flex items-center gap-2 mb-4 pb-4 border-b" style={{ borderColor: 'var(--border)' }}>
+                  <Sparkles size={16} style={{ color: 'var(--accent)' }} />
+                  <div className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--muted)' }}>AI Belastinguitleg · {new Date().toLocaleString('nl-NL')}</div>
+                </div>
+                <div className="prose prose-sm max-w-none" style={{ color: 'var(--ink)' }}>{renderMarkdown(output)}</div>
+              </Card>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Action button or chat input */}
       {mode === 'chat' ? (
@@ -5482,7 +7220,7 @@ ${buildContext()}`;
 // ============================================================================
 // SETTINGS VIEW
 // ============================================================================
-const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntities, clients, initialSection, updateProfile, profile, user, organization, updateOrganization }) => {
+const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntities, clients, initialSection, updateProfile, profile, user, organization, updateOrganization, saveUserApiKeys }) => {
   const [section, setSection] = useState(initialSection || 'jurisdiction');
   const [draft, setDraft] = useState(settings);
   const [savedFlash, setSavedFlash] = useState(false);
@@ -5527,7 +7265,12 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
   };
 
   const save = async () => {
-    await setSettings(draft);
+    // API keys zijn per gebruiker — apart opslaan in user_settings
+    if (saveUserApiKeys) {
+      await saveUserApiKeys({ apiKey: draft.apiKey || '', openaiApiKey: draft.openaiApiKey || '' });
+    }
+    const { apiKey, openaiApiKey, ...orgDraft } = draft;
+    await setSettings(orgDraft);
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 2000);
   };
@@ -5579,18 +7322,44 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
           <Card className="p-6 space-y-5">
             <h3 className="font-display text-lg font-medium">Mijn profiel</h3>
             <div className="flex items-center gap-4">
-              <div style={{
-                width: '56px', height: '56px', borderRadius: '50%', flexShrink: 0,
-                background: 'linear-gradient(135deg, #4f46e5, #818cf8)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '22px', fontWeight: '700', color: '#fff',
-                boxShadow: '0 4px 12px rgba(79,70,229,0.35)',
-              }}>
-                {(profileName || profile?.full_name || user?.email || 'G')[0].toUpperCase()}
-              </div>
+              <label style={{ position: 'relative', cursor: 'pointer', flexShrink: 0 }} title="Profielfoto wijzigen">
+                <div style={{
+                  width: '64px', height: '64px', borderRadius: '50%', overflow: 'hidden',
+                  background: profile?.avatar_url ? 'transparent' : 'linear-gradient(135deg, #4f46e5, #818cf8)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '24px', fontWeight: '700', color: '#fff',
+                  boxShadow: '0 4px 12px rgba(79,70,229,0.35)',
+                }}>
+                  {profile?.avatar_url
+                    ? <img src={profile.avatar_url} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    : (profileName || profile?.full_name || user?.email || 'G')[0].toUpperCase()
+                  }
+                </div>
+                {/* Hover overlay */}
+                <div style={{
+                  position: 'absolute', inset: 0, borderRadius: '50%',
+                  background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  opacity: 0, transition: 'opacity 0.18s',
+                }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                  onMouseLeave={e => e.currentTarget.style.opacity = 0}
+                >
+                  <Camera size={18} color="#fff" />
+                </div>
+                <input type="file" accept="image/*" className="hidden" onChange={async e => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = async ev => {
+                    if (updateProfile) await updateProfile({ avatar_url: ev.target.result });
+                  };
+                  reader.readAsDataURL(file);
+                }} />
+              </label>
               <div>
                 <div className="font-semibold" style={{ color: 'var(--text)' }}>{profileName || 'Naam niet ingesteld'}</div>
                 <div className="text-sm" style={{ color: 'var(--muted)' }}>{user?.email || ''}</div>
+                <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Klik op foto om te wijzigen</div>
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -5887,21 +7656,40 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
           <div>
             <h3 className="font-display text-lg mb-2 font-medium">AI integratie</h3>
             <p className="text-sm" style={{ color: 'var(--muted)' }}>
-              De app gebruikt Claude voor bedrijfsrapportage en fiscaal advies. Veiligste aanpak: zet <span className="font-mono text-xs">VITE_ANTHROPIC_API_KEY=sk-ant-...</span> in een <span className="font-mono text-xs">.env.local</span> bestand. Of vul de key hieronder in als fallback.
+              De app gebruikt AI voor bon-scan, bedrijfsrapportage en fiscaal advies. Vul <strong>één</strong> van de onderstaande keys in — Anthropic (Claude) of OpenAI. De app detecteert automatisch welke provider te gebruiken op basis van het key-formaat. <strong>Je key is privé</strong> — hij wordt opgeslagen in jouw eigen account en is niet zichtbaar voor andere gebruikers.
             </p>
           </div>
+          <div className="rounded-md p-3 text-xs" style={{ background: 'var(--accent-soft)', color: 'var(--ink-2)', border: '1px solid var(--border-2)' }}>
+            <strong>Anthropic key</strong> begint met <span className="font-mono">sk-ant-</span> (console.anthropic.com) ·
+            <strong> OpenAI key</strong> begint met <span className="font-mono">sk-</span> (platform.openai.com) ·
+            Vul er één in — de ander mag leeg blijven
+          </div>
           <Input
-            label="Anthropic API key"
+            label="Anthropic API key (Claude)"
             type="password"
             value={draft.apiKey || ''}
             onChange={e => update('apiKey', e.target.value)}
             placeholder="sk-ant-..."
-            hint="Krijg een key op console.anthropic.com — alleen nodig voor productie deployment"
+            hint="console.anthropic.com → API keys"
           />
+          <Input
+            label="OpenAI API key (GPT)"
+            type="password"
+            value={draft.openaiApiKey || ''}
+            onChange={e => update('openaiApiKey', e.target.value)}
+            placeholder="sk-..."
+            hint="platform.openai.com → API keys"
+          />
+          {(draft.apiKey || draft.openaiApiKey) && (
+            <div className="rounded-md p-3 text-xs flex items-center gap-2" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
+              <CheckCircle2 size={13} />
+              Actief: {draft.apiKey && detectProvider(draft.apiKey) === 'anthropic' ? 'Anthropic (Claude)' : draft.openaiApiKey ? 'OpenAI (GPT)' : '—'}
+            </div>
+          )}
           <div className="rounded-md p-3 text-xs flex items-start gap-2" style={{ background: 'var(--warning-soft)', color: 'var(--ink-2)' }}>
             <AlertCircle size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--warning)' }} />
             <div>
-              <strong>Productie security:</strong> Gebruik <span className="font-mono">.env.local</span> voor de key (wordt nooit meegebundeld naar git). Voor een gedeelde/publieke deployment: gebruik een Supabase Edge Function als proxy zodat de key server-side blijft.
+              <strong>Jouw key, jouw gebruik:</strong> De key wordt opgeslagen in jouw eigen account en gebruikt voor jouw eigen AI-aanroepen. Geen gedeeld gebruik met andere gebruikers.
             </div>
           </div>
         </Card>
@@ -6124,7 +7912,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
       )}
 
       {section === 'status' && (() => {
-        const hasAiKey = !!(import.meta.env.VITE_ANTHROPIC_API_KEY || draft.apiKey);
+        const hasAiKey = !!(import.meta.env.VITE_ANTHROPIC_API_KEY || import.meta.env.VITE_OPENAI_API_KEY || draft.apiKey || draft.openaiApiKey);
         const hasEmail = !!(draft.email?.fromEmail);
         const hasResend = !!(draft.email?.resendApiKey);
         const hasWhatsApp = !!(draft.email?.whatsappNumber);
@@ -6154,9 +7942,9 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
               <p className="text-sm mb-5" style={{ color: 'var(--muted)' }}>Overzicht van alle koppelingen en API-sleutels</p>
               <div>
                 <StatusRow
-                  label="AI (Claude)"
+                  label="AI (Anthropic / OpenAI)"
                   ok={hasAiKey}
-                  okText="API key geconfigureerd"
+                  okText={`API key geconfigureerd (${resolveApiKey(draft.apiKey, draft.openaiApiKey) ? (detectProvider(resolveApiKey(draft.apiKey, draft.openaiApiKey)) === 'openai' ? 'OpenAI' : 'Anthropic') : 'env var'})`}
                   failText="Geen API key — stel in via Instellingen → AI"
                   action={!hasAiKey ? { label: 'Instellen', onClick: () => setSection('ai') } : null}
                 />
@@ -6397,6 +8185,12 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
   const [settingsOpenSection, setSettingsOpenSection] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem('dhs_theme') || 'dark');
   const [settings, setSettings, settingsLoaded] = useCloudStorage('settings', DEFAULT_SETTINGS);
+  const [userApiKeys, saveUserApiKeys] = useCloudStorage('userApiKeys', { apiKey: '', openaiApiKey: '' });
+  const effectiveSettings = useMemo(() => ({
+    ...settings,
+    apiKey: userApiKeys.apiKey || '',
+    openaiApiKey: userApiKeys.openaiApiKey || '',
+  }), [settings, userApiKeys]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -6516,23 +8310,23 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
       <main className="flex-1 min-w-0">
         <div className="max-w-6xl mx-auto p-5 md:p-8 pb-20 lg:pb-8">
           {activeTab === 'dashboard' && (
-            <Dashboard invoices={entityInvoices} expenses={entityExpenses} clients={clients} settings={settings} activeEntity={activeEntity} setActiveTab={setActiveTab} onSendReminder={handleSendReminder} />
+            <Dashboard invoices={entityInvoices} expenses={entityExpenses} clients={clients} settings={effectiveSettings} activeEntity={activeEntity} setActiveTab={setActiveTab} onSendReminder={handleSendReminder} />
           )}
           {activeTab === 'invoices' && (
-            <InvoicesView invoices={entityInvoices} setInvoices={setInvoices} allInvoices={invoices} clients={clients} settings={settings} setSettings={setSettings} activeEntity={activeEntity} setEntities={setEntities} entities={entities} onSendReminder={handleSendReminder} />
+            <InvoicesView invoices={entityInvoices} setInvoices={setInvoices} allInvoices={invoices} clients={clients} setClients={setClients} settings={effectiveSettings} setSettings={setSettings} activeEntity={activeEntity} setEntities={setEntities} entities={entities} onSendReminder={handleSendReminder} />
           )}
           {activeTab === 'clients' && (
-            <ClientsView clients={clients} setClients={setClients} invoices={invoices} />
+            <ClientsView clients={clients} setClients={setClients} invoices={invoices} settings={effectiveSettings} />
           )}
           {activeTab === 'expenses' && (
-            <ExpensesView expenses={entityExpenses} setExpenses={setExpenses} allExpenses={expenses} settings={settings} setSettings={setSettings} activeEntity={activeEntity} />
+            <ExpensesView expenses={entityExpenses} setExpenses={setExpenses} allExpenses={expenses} settings={effectiveSettings} setSettings={setSettings} activeEntity={activeEntity} />
           )}
           {activeTab === 'inkoop' && (
             <PurchaseInvoicesView
               purchaseInvoices={entityPurchaseInvoices}
               setPurchaseInvoices={setPurchaseInvoices}
               allPurchaseInvoices={purchaseInvoices}
-              settings={settings}
+              settings={effectiveSettings}
               activeEntity={activeEntity}
             />
           )}
@@ -6541,7 +8335,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
               setInvoices={setInvoices}
               setExpenses={setExpenses}
               clients={clients}
-              settings={settings}
+              settings={effectiveSettings}
               activeEntity={activeEntity}
             />
           )}
@@ -6549,15 +8343,15 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
             <EntitiesView entities={entities} setEntities={setEntities} activeEntityId={activeEntityId} setActiveEntityId={setActiveEntityId} invoices={invoices} expenses={expenses} />
           )}
           {activeTab === 'tax' && (
-            <TaxReportView invoices={entityInvoices} expenses={entityExpenses} clients={clients} settings={settings} activeEntity={activeEntity} />
+            <TaxReportView invoices={entityInvoices} expenses={entityExpenses} clients={clients} settings={effectiveSettings} activeEntity={activeEntity} />
           )}
           {activeTab === 'ai' && (
-            <AIAdvisorView entities={entities} activeEntity={activeEntity} invoices={invoices} expenses={expenses} clients={clients} settings={settings} />
+            <AIAdvisorView entities={entities} activeEntity={activeEntity} invoices={invoices} expenses={expenses} clients={clients} settings={effectiveSettings} />
           )}
           {(activeTab === 'quotes' || signToken) && (
             <QuotesView
               quotes={quotes} setQuotes={setQuotes}
-              clients={clients} settings={settings} activeEntity={activeEntity}
+              clients={clients} settings={effectiveSettings} activeEntity={activeEntity}
               signToken={signToken}
               onConvertToInvoice={(inv) => { setInvoices(prev => [inv, ...prev]); setActiveTab('invoices'); }}
             />
@@ -6588,7 +8382,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
             <CreditManagementView
               clients={clients}
               invoices={entityInvoices}
-              settings={settings}
+              settings={effectiveSettings}
               entity={activeEntity}
               onSendReminder={handleSendReminder}
             />
@@ -6597,7 +8391,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
             <LinksView />
           )}
           {activeTab === 'settings' && (
-            <SettingsView settings={settings} setSettings={setSettings} activeEntity={activeEntity} entities={entities} setEntities={setEntities} clients={clients} initialSection={settingsOpenSection} updateProfile={updateProfile} profile={profile} user={user} organization={organization} updateOrganization={updateOrganization} />
+            <SettingsView settings={effectiveSettings} setSettings={setSettings} activeEntity={activeEntity} entities={entities} setEntities={setEntities} clients={clients} initialSection={settingsOpenSection} updateProfile={updateProfile} profile={profile} user={user} organization={organization} updateOrganization={updateOrganization} saveUserApiKeys={saveUserApiKeys} />
           )}
         </div>
       </main>
@@ -6606,7 +8400,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
         <SendInvoiceModal
           invoice={reminderModal.invoice}
           client={clients.find(c => c.id === reminderModal.invoice.clientId)}
-          settings={settings}
+          settings={effectiveSettings}
           mode="reminder"
           reminderLevel={reminderModal.level}
           onSend={(level) => confirmReminder(reminderModal.invoice, level)}

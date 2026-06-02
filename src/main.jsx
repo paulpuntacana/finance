@@ -1,4 +1,4 @@
-import { StrictMode, useState, useEffect, lazy, Suspense } from 'react'
+import { StrictMode, useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import { AuthProvider, useAuth } from './AuthProvider'
@@ -111,13 +111,20 @@ if (window.location.pathname === '/admin') {
   function AppShell() {
     const { user, profile, loading, profileLoading, isConfigured } = useAuth()
     const signToken = getSignToken()
+    const hasBootedRef = useRef(false)
 
     useEffect(() => {
       const saved = localStorage.getItem('dhs_theme') || 'dark'
       document.documentElement.setAttribute('data-theme', saved)
     }, [])
 
-    if (loading || profileLoading) return <Loader />
+    // Toon loader alleen bij het eerste opstarten, niet bij latere profiel-herladen
+    // (bijv. door Supabase token-refresh bij tab-wissel). Zo blijft <App /> gemonteerd
+    // en verlies je je actieve tab/venster niet.
+    if (!hasBootedRef.current && (loading || profileLoading)) return <Loader />
+
+    hasBootedRef.current = true
+
     if (!isConfigured) return <App signToken={signToken} />
     if (!user && !signToken) return <LoginPage />
     if (user && profile?.role === 'employee') return <EmployeePortal />

@@ -302,6 +302,10 @@ const TABLE_CONFIG = {
     fromDB: pinvFromDB, toDB: pinvToDB,
     select: '*',
   },
+  userApiKeys: {
+    table: 'user_settings', mode: 'user_single',
+    fromDB: (row) => row.data || {},
+  },
 }
 
 // Cloud-synced storage hook
@@ -319,8 +323,18 @@ export const useCloudStorage = (key, defaultValue) => {
 
   useEffect(() => {
     const load = async () => {
+      // Stap 1: laad meteen uit localStorage zodat UI direct zichtbaar is na tab-reload
+      try {
+        const cached = localStorage.getItem(storageKey)
+        if (cached) {
+          setValue(JSON.parse(cached))
+          setLoaded(true) // UI is meteen bruikbaar
+        }
+      } catch {}
+
+      // Stap 2: haal verse data op van Supabase op de achtergrond
       const cfg = TABLE_CONFIG[key]
-      if (isSupabaseConfigured && cfg && orgId) {
+      if (isSupabaseConfigured && cfg && (orgId || cfg.mode === 'user_single')) {
         try {
           if (cfg.mode === 'single') {
             const { data: row } = await supabase
@@ -361,6 +375,17 @@ export const useCloudStorage = (key, defaultValue) => {
               setLoaded(true)
               return
             }
+          } else if (cfg.mode === 'user_single') {
+            if (!user?.id) { setLoaded(true); return }
+            const { data: row } = await supabase
+              .from(cfg.table).select('*').eq('user_id', user.id).maybeSingle()
+            if (row) {
+              const parsed = cfg.fromDB(row)
+              setValue(parsed)
+              try { localStorage.setItem(storageKey, JSON.stringify(parsed)) } catch {}
+              setLoaded(true)
+              return
+            }
           }
         } catch (e) {
           console.warn('Supabase load failed:', e.message)
@@ -383,7 +408,7 @@ export const useCloudStorage = (key, defaultValue) => {
     try { localStorage.setItem(storageKey, JSON.stringify(resolved)) } catch {}
 
     const cfg = TABLE_CONFIG[key]
-    if (!isSupabaseConfigured || !cfg || !orgId) return
+    if (!isSupabaseConfigured || !cfg || (!orgId && cfg.mode !== 'user_single')) return
 
     try {
       if (cfg.mode === 'single') {
@@ -439,6 +464,12 @@ export const useCloudStorage = (key, defaultValue) => {
             })
           }
         }
+      } else if (cfg.mode === 'user_single') {
+        if (!user?.id) return
+        await supabase.from(cfg.table).upsert(
+          { user_id: user.id, org_id: orgId || null, data: resolved, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id' }
+        )
       }
     } catch (e) {
       console.warn('Supabase sync failed:', e.message)
@@ -503,6 +534,9 @@ export const AuthProvider = ({ children }) => {
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // Skip TOKEN_REFRESHED to avoid unnecessary re-renders (Supabase fires this on tab focus).
+      // The access token is refreshed internally; user identity does not change.
+      if (event === 'TOKEN_REFRESHED') return
       setUser(session?.user ?? null)
       if (session?.user) {
         // Only re-fetch profile on actual sign-in events, not on token refreshes.
