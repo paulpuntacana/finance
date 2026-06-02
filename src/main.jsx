@@ -44,30 +44,6 @@ const Loader = () => {
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center', gap: '18px',
       }}>
-        {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', animation: 'dhsFade 0.4s ease' }}>
-          <div style={{
-            width: 34, height: 34, borderRadius: 9, flexShrink: 0,
-            background: 'linear-gradient(135deg, #4f46e5 0%, #1e1b8b 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 4px 16px rgba(79,70,229,0.45)',
-          }}>
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-              <path d="M10 4.5C10 4.5 7 4 3.5 4.5C2.7 4.6 2 5.3 2 6.1V15.5C5.5 14.5 10 15.5 10 15.5V4.5Z" fill="rgba(255,255,255,0.18)" stroke="white" strokeWidth="1.1" strokeLinejoin="round"/>
-              <path d="M10 4.5C10 4.5 13 4 16.5 4.5C17.3 4.6 18 5.3 18 6.1V15.5C14.5 14.5 10 15.5 10 15.5V4.5Z" fill="rgba(255,255,255,0.1)" stroke="white" strokeWidth="1.1" strokeLinejoin="round"/>
-              <line x1="10" y1="4" x2="10" y2="16" stroke="white" strokeWidth="1" strokeOpacity="0.4"/>
-              <line x1="3.5" y1="8" x2="8.5" y2="7.5" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
-              <line x1="3.5" y1="10.5" x2="8.5" y2="10" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
-              <line x1="11.5" y1="7.5" x2="16.5" y2="8" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
-              <line x1="11.5" y1="10" x2="16.5" y2="10.5" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
-            </svg>
-          </div>
-          <div>
-            <div style={{ fontFamily: 'Inter,sans-serif', fontWeight: 700, fontSize: 14, color: '#e2e8f0', letterSpacing: '-0.02em' }}>DHS Finance</div>
-            <div style={{ fontFamily: 'Inter,sans-serif', fontSize: 10, color: '#3d5c80', marginTop: 1 }}>Finance Intelligence</div>
-          </div>
-        </div>
-
         {/* Terminal window */}
         <div style={{
           width: 360, background: '#0d1117',
