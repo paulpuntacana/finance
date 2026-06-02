@@ -6340,9 +6340,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
     if (entities.length === 0) {
       const firstEntity = createDefaultEntity(settings);
       setEntities([firstEntity]);
-      if (!settings.activeEntityId) {
-        setSettings({ ...settings, activeEntityId: firstEntity.id });
-      }
+      setSettings({ ...settings, activeEntityId: firstEntity.id });
       // Backfill entityId on existing invoices/expenses
       if (invoices.some(i => !i.entityId)) {
         setInvoices(invoices.map(i => i.entityId ? i : { ...i, entityId: firstEntity.id }));
@@ -6357,7 +6355,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
   }, [loaded]);
 
   const activeEntityId = settings.activeEntityId || entities[0]?.id;
-  const activeEntity = entities.find(e => e.id === activeEntityId);
+  const activeEntity = entities.find(e => e.id === activeEntityId) || entities[0];
 
   const handleSendReminder = (invoice, level) => {
     setReminderModal({ invoice, level });
