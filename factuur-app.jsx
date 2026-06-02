@@ -289,7 +289,8 @@ const resizeImage = async (file, maxWidth = 1400, quality = 0.78) => {
         canvas.height = img.height * scale;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
+        const isPng = file.type === 'image/png';
+        resolve(isPng ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', quality));
       };
       img.onerror = reject;
       img.src = e.target.result;
@@ -3443,10 +3444,13 @@ const EntityBrand = ({
   const showLogo = hasLogo && mode !== 'text';
   const showText = !hasLogo || mode === 'text' || mode === 'both';
   const nameColor = light ? '#fff' : color;
+  const scale = (entity.logoScale || 100) / 100;
+  const align = entity.logoAlign || 'left';
+  const alignMap = { left: 'flex-start', center: 'center', right: 'flex-end' };
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: alignMap[align] }}>
       {showLogo && (
-        <img src={entity.logo} alt={entity.name} style={{ height: logoHeight, objectFit: 'contain', display: 'block', marginBottom: showText ? 6 : 0 }} />
+        <img src={entity.logo} alt={entity.name} style={{ height: logoHeight * scale, objectFit: 'contain', display: 'block', marginBottom: showText ? 6 : 0 }} />
       )}
       {showText && (
         <div style={{ fontFamily, fontSize, fontWeight, color: nameColor, lineHeight: 1.2 }}>{entity.name}</div>
@@ -3469,7 +3473,7 @@ const TemplateClassic = ({ invoice, entity, client, totals, parentEntity }) => {
         <div className="flex items-start justify-between mb-12">
           <div>
             {entity.logo
-              ? <img src={entity.logo} alt="logo" style={{ height: 44, objectFit: 'contain', marginBottom: 12 }} />
+              ? <img src={entity.logo} alt="logo" style={{ height: 44 * ((entity.logoScale||100)/100), objectFit: 'contain', marginBottom: 12, display: 'block' }} />
               : <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontSize: 22, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>{entity.name}</div>
             }
             {entity.logo && <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontSize: 16, fontWeight: 500, color: 'var(--ink)', marginBottom: 4 }}>{entity.name}</div>}
@@ -4644,6 +4648,31 @@ const EntityForm = ({ entity, entities, onSave, onClose }) => {
             }}
             className="text-sm"
           />
+          {form.logo && (
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--ink-2)' }}>Logo grootte — {form.logoScale || 100}%</label>
+                <input type="range" min={30} max={200} step={5}
+                  value={form.logoScale || 100}
+                  onChange={e => update('logoScale', Number(e.target.value))}
+                  style={{ width: '100%', accentColor: 'var(--accent)' }}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--ink-2)' }}>Logo uitlijning</label>
+                <div className="flex gap-2">
+                  {['left','center','right'].map(a => (
+                    <button key={a} onClick={() => update('logoAlign', a)}
+                      style={{ flex:1, padding:'5px', fontSize:11, borderRadius:6, border:'1px solid var(--border)',
+                        background: (form.logoAlign||'left')===a ? 'var(--accent)' : 'var(--surface-2)',
+                        color: (form.logoAlign||'left')===a ? '#fff' : 'var(--ink-2)', cursor:'pointer' }}>
+                      {a==='left'?'Links':a==='center'?'Midden':'Rechts'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
       <div className="px-6 py-4 border-t flex justify-end gap-2" style={{ borderColor: 'var(--border)' }}>
@@ -5453,12 +5482,22 @@ ${buildContext()}`;
 // ============================================================================
 // SETTINGS VIEW
 // ============================================================================
-const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntities, clients, initialSection, updateProfile, profile, user }) => {
+const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntities, clients, initialSection, updateProfile, profile, user, organization, updateOrganization }) => {
   const [section, setSection] = useState(initialSection || 'jurisdiction');
   const [draft, setDraft] = useState(settings);
   const [savedFlash, setSavedFlash] = useState(false);
   const [profileName, setProfileName] = useState(profile?.full_name || '');
   const [profileSaved, setProfileSaved] = useState(false);
+  const [orgName, setOrgName] = useState(organization?.name || '');
+  const [orgPlan, setOrgPlan] = useState(organization?.plan || 'starter');
+  const [orgSaved, setOrgSaved] = useState(false);
+
+  useEffect(() => {
+    if (organization) {
+      setOrgName(organization.name || '');
+      setOrgPlan(organization.plan || 'starter');
+    }
+  }, [organization?.id]);
 
   useEffect(() => {
     if (initialSection) setSection(initialSection);
@@ -5468,6 +5507,12 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
     if (updateProfile) await updateProfile({ full_name: profileName });
     setProfileSaved(true);
     setTimeout(() => setProfileSaved(false), 2000);
+  };
+
+  const saveOrg = async () => {
+    if (updateOrganization) await updateOrganization({ name: orgName.trim(), plan: orgPlan });
+    setOrgSaved(true);
+    setTimeout(() => setOrgSaved(false), 2000);
   };
 
   useEffect(() => setDraft(settings), [settings]);
@@ -5569,7 +5614,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
               <span className="text-xs" style={{ color: 'var(--muted)' }}>E-mailadres kan niet worden gewijzigd</span>
             </div>
           </Card>
-          <Card className="p-6 space-y-3">
+          <Card className="p-6 space-y-4">
             <h3 className="font-display text-base font-medium">Account info</h3>
             <div className="grid grid-cols-2 gap-y-2 text-sm">
               <span style={{ color: 'var(--muted)' }}>Rol</span>
@@ -5581,6 +5626,43 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                 <span style={{ color: 'var(--text)', fontFamily: 'monospace', fontSize: '11px' }}>{profile.organization_id}</span>
               </>}
             </div>
+            {organization && (profile?.role === 'org_owner' || profile?.role === 'platform_admin') && (
+              <div className="space-y-4 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input
+                    label="Organisatienaam"
+                    value={orgName}
+                    onChange={e => setOrgName(e.target.value)}
+                    placeholder="Mijn Bedrijf BV"
+                  />
+                  {profile?.role === 'platform_admin' ? (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Pakket</label>
+                      <select
+                        value={orgPlan}
+                        onChange={e => setOrgPlan(e.target.value)}
+                        className="w-full px-3 py-2 text-sm rounded border"
+                        style={{ background: 'var(--bg)', color: 'var(--text)', borderColor: 'var(--border)' }}
+                      >
+                        <option value="starter">Starter</option>
+                        <option value="pro">Pro</option>
+                        <option value="enterprise">Enterprise</option>
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Pakket</label>
+                      <div className="px-3 py-2 text-sm rounded border capitalize" style={{ background: 'var(--bg-2)', color: 'var(--text)', borderColor: 'var(--border)' }}>
+                        {organization.plan || 'starter'}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <Button onClick={saveOrg}>
+                  {orgSaved ? <><Check size={14} /> Opgeslagen</> : <><Save size={14} /> Organisatie opslaan</>}
+                </Button>
+              </div>
+            )}
           </Card>
         </div>
       )}
@@ -6310,7 +6392,7 @@ const LinksView = () => {
 // ============================================================================
 
 export default function App({ signToken, accountantMode, onAccountantBack }) {
-  const { user, profile, signOut, updateProfile } = useAuth();
+  const { user, profile, organization, signOut, updateProfile, updateOrganization } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [settingsOpenSection, setSettingsOpenSection] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem('dhs_theme') || 'dark');
@@ -6515,7 +6597,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
             <LinksView />
           )}
           {activeTab === 'settings' && (
-            <SettingsView settings={settings} setSettings={setSettings} activeEntity={activeEntity} entities={entities} setEntities={setEntities} clients={clients} initialSection={settingsOpenSection} updateProfile={updateProfile} profile={profile} user={user} />
+            <SettingsView settings={settings} setSettings={setSettings} activeEntity={activeEntity} entities={entities} setEntities={setEntities} clients={clients} initialSection={settingsOpenSection} updateProfile={updateProfile} profile={profile} user={user} organization={organization} updateOrganization={updateOrganization} />
           )}
         </div>
       </main>
