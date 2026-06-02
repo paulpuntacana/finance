@@ -339,7 +339,7 @@ const DEFAULT_SETTINGS = {
   enabledCurrencies: ['EUR', 'USD', 'DOP'],
   exchangeRates: { fetched: null, base: 'EUR', rates: {} }, // cached rates
   company: {
-    name: 'Den Hartogh Solutions',
+    name: '',
     address: '',
     postal: '',
     city: '',
