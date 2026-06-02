@@ -84,3 +84,12 @@ input:focus, textarea:focus, select:focus {
 
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ── Mobile Safe Area & Layout ───────────────────────────────────────────── */
+@media (max-width: 1023px) {
+  /* Zorgt dat main content ruimte laat voor de mobiele topbar + iPhone notch */
+  .mobile-main-inner {
+    padding-top: calc(52px + env(safe-area-inset-top)) !important;
+    padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important;
+  }
+}

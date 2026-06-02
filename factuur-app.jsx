@@ -1943,8 +1943,54 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
   const displayName = profile?.full_name || user?.email?.split('@')[0] || 'Lokaal';
   const roleLabel = profile?.role === 'platform_admin' ? 'Platform Admin' : profile?.role === 'org_owner' ? 'Eigenaar' : 'Starter';
 
+  const allNavItems = [...mainItems, ...finItems, ...accountItems];
+  const activeLabel = allNavItems.find(i => i.id === activeTab)?.label || 'Dashboard';
+
   return (
     <>
+      {/* Mobile top header — fixed boven content, vervangt de notch */}
+      <header className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between border-b"
+        style={{
+          background: 'var(--surface)',
+          borderColor: 'var(--border)',
+          paddingTop: 'env(safe-area-inset-top)',
+          paddingLeft: '16px',
+          paddingRight: '12px',
+          height: 'calc(44px + env(safe-area-inset-top))',
+        }}>
+        {/* Logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{
+            width: '28px', height: '28px', borderRadius: '7px', flexShrink: 0,
+            background: 'linear-gradient(135deg, #4f46e5 0%, #1e1b8b 100%)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 2px 8px rgba(79,70,229,0.4)',
+          }}>
+            <svg width="17" height="17" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M10 4.5C10 4.5 7 4 3.5 4.5C2.7 4.6 2 5.3 2 6.1V15.5C5.5 14.5 10 15.5 10 15.5V4.5Z" fill="rgba(255,255,255,0.18)" stroke="white" strokeWidth="1.1" strokeLinejoin="round"/>
+              <path d="M10 4.5C10 4.5 13 4 16.5 4.5C17.3 4.6 18 5.3 18 6.1V15.5C14.5 14.5 10 15.5 10 15.5V4.5Z" fill="rgba(255,255,255,0.1)" stroke="white" strokeWidth="1.1" strokeLinejoin="round"/>
+              <line x1="10" y1="4" x2="10" y2="16" stroke="white" strokeWidth="1" strokeOpacity="0.4"/>
+              <line x1="3.5" y1="8" x2="8.5" y2="7.5" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
+              <line x1="3.5" y1="10.5" x2="8.5" y2="10" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
+              <line x1="11.5" y1="7.5" x2="16.5" y2="8" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
+              <line x1="11.5" y1="10" x2="16.5" y2="10.5" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
+            </svg>
+          </div>
+          <span style={{ fontWeight: '700', fontSize: '14px', color: 'var(--text)', letterSpacing: '-0.02em' }}>DHS Finance</span>
+        </div>
+        {/* Huidige sectie */}
+        <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-2)', position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
+          {activeLabel}
+        </span>
+        {/* Theme toggle */}
+        {onToggleTheme && (
+          <button onClick={onToggleTheme}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px', borderRadius: '8px', color: 'var(--text-2)', display: 'flex', alignItems: 'center' }}>
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+        )}
+      </header>
+
       {/* Desktop sidebar */}
       <aside
         className="hidden lg:flex flex-col h-screen sticky top-0"
@@ -2047,8 +2093,13 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
       </aside>
 
       {/* Mobile bottom nav */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t flex items-center justify-around py-1.5 px-1"
-        style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t flex items-center justify-around px-1"
+        style={{
+          background: 'var(--surface)',
+          borderColor: 'var(--border)',
+          paddingTop: '6px',
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 6px)',
+        }}>
         {mobileItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -2067,15 +2118,6 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
             </button>
           );
         })}
-        {onToggleTheme && (
-          <button onClick={onToggleTheme}
-            className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg"
-            style={{ color: 'var(--text-3)', background: 'none', border: 'none', cursor: 'pointer' }}
-          >
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-            <span style={{ fontSize: '10px', fontWeight: '500' }}>{theme === 'dark' ? 'Light' : 'Dark'}</span>
-          </button>
-        )}
       </nav>
     </>
   );
@@ -2994,7 +3036,8 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
             <h3 className="font-medium text-sm">Regels</h3>
             <Button size="sm" variant="secondary" onClick={addItem}><Plus size={12} /> Regel</Button>
           </div>
-          <div className="overflow-x-auto scrollable">
+          {/* Desktop tabel — verborgen op mobiel */}
+          <div className="hidden md:block overflow-x-auto scrollable">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-xs uppercase tracking-wider" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
@@ -3114,6 +3157,106 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                 })}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobiele kaartweergave per lijnregel — verborgen op desktop */}
+          <div className="md:hidden space-y-3">
+            {form.items.map((item, idx) => {
+              const line = computeLine(item);
+              const hasDiscount = !!item.discount;
+              return (
+                <div key={idx} className="rounded-lg border p-3 space-y-2" style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}>
+                  <div className="flex items-start justify-between gap-2">
+                    <input
+                      value={item.description}
+                      onChange={e => updateItem(idx, 'description', e.target.value)}
+                      placeholder="Omschrijving werk/product..."
+                      className="flex-1 px-2 py-1.5 text-sm bg-transparent rounded border"
+                      style={{ borderColor: 'var(--border)' }}
+                    />
+                    {form.items.length > 1 && (
+                      <button onClick={() => removeItem(idx)} className="p-1.5 rounded flex-shrink-0" style={{ color: 'var(--danger)' }}>
+                        <X size={15} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <div className="text-[10px] font-medium mb-1" style={{ color: 'var(--muted)' }}>Aantal</div>
+                      <input
+                        type="number" step="0.01" value={item.quantity}
+                        onChange={e => updateItem(idx, 'quantity', e.target.value)}
+                        className="w-full px-2 py-1.5 text-sm text-right bg-transparent rounded border num"
+                        style={{ borderColor: 'var(--border)' }}
+                      />
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-medium mb-1" style={{ color: 'var(--muted)' }}>Prijs (€)</div>
+                      <input
+                        type="number" step="0.01" value={item.price}
+                        onChange={e => updateItem(idx, 'price', e.target.value)}
+                        className="w-full px-2 py-1.5 text-sm text-right bg-transparent rounded border num"
+                        style={{ borderColor: 'var(--border)' }}
+                      />
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-medium mb-1" style={{ color: 'var(--muted)' }}>{taxName}</div>
+                      <select
+                        value={item.btwRate}
+                        onChange={e => updateItem(idx, 'btwRate', Number(e.target.value))}
+                        className="w-full px-1 py-1.5 text-xs bg-transparent rounded border"
+                        style={{ borderColor: 'var(--border)' }}
+                      >
+                        {taxRates.map(r => <option key={r} value={r}>{r}%</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between pt-1">
+                    <button
+                      onClick={() => toggleDiscount(idx)}
+                      className="text-[11px] font-medium"
+                      style={{ color: hasDiscount ? 'var(--accent)' : 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                    >
+                      {hasDiscount ? '× korting verwijderen' : '+ korting'}
+                    </button>
+                    <span className="text-sm num font-semibold" style={{ color: 'var(--text)' }}>
+                      {fmtEUR(line.net)}
+                      {line.discount > 0 && <span className="text-[10px] line-through ml-1" style={{ color: 'var(--muted)' }}>{fmtEUR(line.base)}</span>}
+                    </span>
+                  </div>
+                  {hasDiscount && (
+                    <div className="rounded p-2 space-y-1.5" style={{ background: 'var(--accent-soft)' }}>
+                      <div className="text-[10px] font-medium" style={{ color: 'var(--accent)' }}>Korting</div>
+                      <div className="flex gap-2">
+                        <input
+                          value={item.discount.name || ''}
+                          onChange={e => updateItemDiscount(idx, 'name', e.target.value)}
+                          placeholder="Naam korting"
+                          className="flex-1 px-2 py-1 rounded border text-xs"
+                          style={{ borderColor: 'var(--border)' }}
+                        />
+                        <select
+                          value={item.discount.type}
+                          onChange={e => updateItemDiscount(idx, 'type', e.target.value)}
+                          className="px-2 py-1 rounded border text-xs w-14"
+                          style={{ borderColor: 'var(--border)' }}
+                        >
+                          <option value="percent">%</option>
+                          <option value="amount">€</option>
+                        </select>
+                        <input
+                          type="number" step="0.01" value={item.discount.value}
+                          onChange={e => updateItemDiscount(idx, 'value', Number(e.target.value))}
+                          className="w-20 px-2 py-1 rounded border text-xs text-right num"
+                          style={{ borderColor: 'var(--border)' }}
+                        />
+                      </div>
+                      <div className="text-xs num text-right" style={{ color: 'var(--accent)' }}>−{fmtEUR(line.discount)}</div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -3354,9 +3497,12 @@ ${clone.innerHTML}
       )}
 
       {/* Invoice preview / printable — uses template selected on entity */}
-      <Card className="invoice-printable" style={{ maxWidth: 800, margin: '0 auto', overflow: 'hidden' }}>
-        {renderTemplate(invoiceEntity?.templateId || 'classic', { invoice, entity: invoiceEntity, client, totals, parentEntity: invoiceParentEntity })}
-      </Card>
+      {/* Wrapper zorgt voor horizontaal scrollen op mobiel als factuur breder is dan scherm */}
+      <div className="overflow-x-auto scrollable">
+        <Card className="invoice-printable" style={{ maxWidth: 800, margin: '0 auto', overflow: 'hidden', minWidth: 520 }}>
+          {renderTemplate(invoiceEntity?.templateId || 'classic', { invoice, entity: invoiceEntity, client, totals, parentEntity: invoiceParentEntity })}
+        </Card>
+      </div>
 
       {showSendModal && (
         <SendInvoiceModal
@@ -8385,7 +8531,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
         onGoToProfile={() => { setSettingsOpenSection('profile'); setActiveTab('settings'); }}
       />
       <main className="flex-1 min-w-0">
-        <div className="max-w-6xl mx-auto p-5 md:p-8 pb-20 lg:pb-8">
+        <div className="max-w-6xl mx-auto p-5 md:p-8 pb-20 lg:pb-8 mobile-main-inner">
           {activeTab === 'dashboard' && (
             <Dashboard invoices={entityInvoices} expenses={entityExpenses} clients={clients} settings={effectiveSettings} activeEntity={activeEntity} setActiveTab={setActiveTab} onSendReminder={handleSendReminder} />
           )}
