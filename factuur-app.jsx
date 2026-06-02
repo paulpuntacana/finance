@@ -4386,7 +4386,7 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
                 <img src={qrUrl} alt="SEPA betaal-QR" width={84} height={84} style={{ display: 'block' }} />
               </div>
               <div style={{ fontSize: 7.5, color: '#aaa', textAlign: 'center', lineHeight: 1.4, letterSpacing: '0.04em' }}>
-                SEPA betaling<br />scan &amp; betaal
+                Scan met uw bank-app<br />om direct te betalen
               </div>
             </div>
           )}
