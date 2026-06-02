@@ -10,6 +10,7 @@ const AccountantPortal = lazy(() => import('./AccountantPortal'))
 const AdminShell = lazy(() => import('./AdminShell'))
 const App = lazy(() => import('../factuur-app.jsx'))
 const PublicSignPage = lazy(() => import('./PublicSignPage'))
+const SetupWizard = lazy(() => import('./SetupWizard'))
 
 const getSignToken = () => new URLSearchParams(window.location.search).get('sign') || null
 
@@ -55,6 +56,7 @@ if (window.location.pathname === '/admin') {
     if (!user && !signToken) return <LoginPage />
     if (user && profile?.role === 'employee') return <EmployeePortal />
     if (user && profile?.role === 'accountant') return <AccountantPortal />
+    if (user && !user.isLocal && profile && !profile.organization_id) return <SetupWizard />
     return <App signToken={signToken} />
   }
 

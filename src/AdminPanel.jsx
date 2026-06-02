@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
-import { supabase, isSupabaseConfigured } from './supabase'
+import { createClient } from '@supabase/supabase-js'
+import { supabase, isSupabaseConfigured, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase'
 import {
   Users, Shield, CheckCircle, XCircle, RefreshCw,
   Building2, Copy, Check, Plus, Trash2, Search,
@@ -227,10 +228,22 @@ function CreateUserModal({ onClose, onCreated, orgs }) {
     e.preventDefault()
     if (!form.email || !form.full_name || form.password.length < 8) { setError('Vul alle velden in (wachtwoord minimaal 8 tekens)'); return }
     setLoading(true); setError('')
-    const { data, error: err } = await supabase.auth.admin.createUser({ email: form.email, password: form.password, email_confirm: true, user_metadata: { full_name: form.full_name } })
+    // Gebruik aparte client zodat admin-sessie intact blijft
+    const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    })
+    const { data, error: err } = await tempClient.auth.signUp({
+      email: form.email, password: form.password,
+      options: { data: { full_name: form.full_name } }
+    })
     if (err) { setError(err.message); setLoading(false); return }
     if (data?.user) {
-      await supabase.from('profiles').upsert({ id: data.user.id, email: form.email, full_name: form.full_name, role: form.role, organization_id: form.organization_id || null, is_active: true })
+      // Wacht even zodat de DB-trigger de profile heeft aangemaakt
+      await new Promise(r => setTimeout(r, 500))
+      await supabase.from('profiles').upsert({
+        id: data.user.id, email: form.email, full_name: form.full_name,
+        role: form.role, organization_id: form.organization_id || null, is_active: true,
+      })
     }
     setLoading(false); onCreated(); onClose()
   }

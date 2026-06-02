@@ -1373,11 +1373,21 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
           <div style={{ display: 'flex', alignItems: 'center', gap: '11px' }}>
             <div style={{
               width: '34px', height: '34px', borderRadius: '9px', flexShrink: 0,
-              background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+              background: 'linear-gradient(135deg, #4f46e5 0%, #1e1b8b 100%)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 3px 10px rgba(59,130,246,0.4)',
+              boxShadow: '0 3px 10px rgba(79,70,229,0.45)',
             }}>
-              <span style={{ fontWeight: '800', fontSize: '12px', color: '#fff', letterSpacing: '-0.04em' }}>DH</span>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M10 4.5C10 4.5 7 4 3.5 4.5C2.7 4.6 2 5.3 2 6.1V15.5C5.5 14.5 10 15.5 10 15.5V4.5Z" fill="rgba(255,255,255,0.18)" stroke="white" strokeWidth="1.1" strokeLinejoin="round"/>
+                <path d="M10 4.5C10 4.5 13 4 16.5 4.5C17.3 4.6 18 5.3 18 6.1V15.5C14.5 14.5 10 15.5 10 15.5V4.5Z" fill="rgba(255,255,255,0.1)" stroke="white" strokeWidth="1.1" strokeLinejoin="round"/>
+                <line x1="10" y1="4" x2="10" y2="16" stroke="white" strokeWidth="1" strokeOpacity="0.4"/>
+                <line x1="3.5" y1="8" x2="8.5" y2="7.5" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
+                <line x1="3.5" y1="10.5" x2="8.5" y2="10" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
+                <line x1="3.5" y1="13" x2="7" y2="12.7" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.55"/>
+                <line x1="11.5" y1="7.5" x2="16.5" y2="8" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
+                <line x1="11.5" y1="10" x2="16.5" y2="10.5" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
+                <line x1="13" y1="12.7" x2="16.5" y2="13" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.55"/>
+              </svg>
             </div>
             <div>
               <div style={{ fontWeight: '700', fontSize: '14px', color: 'var(--text)', letterSpacing: '-0.02em' }}>DHS Finance</div>
@@ -2329,7 +2339,45 @@ const InvoiceDetail = ({ invoice, clients, settings, activeEntity, entities, onC
     ? entities?.find(e => e.id === invoiceEntity.parentId)
     : null;
 
-  const handlePrint = () => window.print();
+  const handlePrint = () => {
+    // Open dedicated print window with only the invoice — browser shows "Save as PDF"
+    const el = document.querySelector('.invoice-printable')
+    if (!el) { window.print(); return }
+    const w = window.open('', '_blank', 'width=900,height=1200')
+    w.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Factuur ${invoice.number || ''}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,400;9..144,600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"><\/script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; padding: 0; background: #fff; color: #000; }
+    @media print { @page { size: A4; margin: 10mm; } body { margin: 0; } }
+    :root {
+      --text: #000; --text-2: #333; --text-3: #666;
+      --surface: #fff; --surface-2: #f5f5f5; --surface-3: #eee;
+      --border: rgba(0,0,0,0.1); --border-2: rgba(0,0,0,0.15); --border-3: rgba(0,0,0,0.25);
+      --accent: #2563eb; --success: #059669; --danger: #dc2626; --warning: #d97706;
+      --muted: #666; --ink: #000; --ink-2: #333;
+    }
+  </style>
+</head>
+<body>
+${el.innerHTML}
+<script>
+  window.addEventListener('load', function() {
+    setTimeout(function() { window.print(); }, 600);
+  });
+<\/script>
+</body>
+</html>`)
+    w.document.close()
+    w.focus()
+  };
 
   return (
     <div className="space-y-5">
@@ -2339,7 +2387,7 @@ const InvoiceDetail = ({ invoice, clients, settings, activeEntity, entities, onC
         </button>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" onClick={() => onDuplicate(invoice)}><Copy size={13} /> Dupliceren</Button>
-          <Button size="sm" variant="secondary" onClick={handlePrint}><Printer size={13} /> PDF / Print</Button>
+          <Button size="sm" variant="secondary" onClick={handlePrint}><Download size={13} /> Download PDF</Button>
           {status === 'draft' && <Button size="sm" variant="secondary" onClick={() => onEdit(invoice)}><Edit3 size={13} /> Bewerken</Button>}
           {(status === 'draft' || status === 'sent' || status === 'overdue') && (
             <Button size="sm" onClick={() => setShowSendModal(true)}><Send size={13} /> {status === 'draft' ? 'Versturen' : 'Opnieuw versturen'}</Button>
@@ -5359,7 +5407,7 @@ ${buildContext()}`;
 // SETTINGS VIEW
 // ============================================================================
 const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntities, clients }) => {
-  const [section, setSection] = useState('company');
+  const [section, setSection] = useState('jurisdiction');
   const [draft, setDraft] = useState(settings);
   const [savedFlash, setSavedFlash] = useState(false);
 
@@ -6216,8 +6264,18 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
       <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }} data-theme={theme}>
         <ThemeStyles />
         <div style={{ textAlign: 'center' }}>
-          <div style={{ width: '36px', height: '36px', borderRadius: '9px', background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', boxShadow: '0 4px 14px rgba(59,130,246,0.4)' }}>
-            <span style={{ fontWeight: '800', fontSize: '13px', color: '#fff' }}>DH</span>
+          <div style={{ width: '36px', height: '36px', borderRadius: '9px', background: 'linear-gradient(135deg, #4f46e5, #1e1b8b)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', boxShadow: '0 4px 14px rgba(79,70,229,0.45)' }}>
+            <svg width="21" height="21" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M10 4.5C10 4.5 7 4 3.5 4.5C2.7 4.6 2 5.3 2 6.1V15.5C5.5 14.5 10 15.5 10 15.5V4.5Z" fill="rgba(255,255,255,0.18)" stroke="white" strokeWidth="1.1" strokeLinejoin="round"/>
+              <path d="M10 4.5C10 4.5 13 4 16.5 4.5C17.3 4.6 18 5.3 18 6.1V15.5C14.5 14.5 10 15.5 10 15.5V4.5Z" fill="rgba(255,255,255,0.1)" stroke="white" strokeWidth="1.1" strokeLinejoin="round"/>
+              <line x1="10" y1="4" x2="10" y2="16" stroke="white" strokeWidth="1" strokeOpacity="0.4"/>
+              <line x1="3.5" y1="8" x2="8.5" y2="7.5" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
+              <line x1="3.5" y1="10.5" x2="8.5" y2="10" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
+              <line x1="3.5" y1="13" x2="7" y2="12.7" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.55"/>
+              <line x1="11.5" y1="7.5" x2="16.5" y2="8" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
+              <line x1="11.5" y1="10" x2="16.5" y2="10.5" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
+              <line x1="13" y1="12.7" x2="16.5" y2="13" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.55"/>
+            </svg>
           </div>
           <div style={{ fontSize: '13px', color: 'var(--text-3)' }}>Laden…</div>
         </div>
