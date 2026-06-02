@@ -452,9 +452,11 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [profileLoading, setProfileLoading] = useState(false)
 
   const fetchProfile = async (userId) => {
     if (!isSupabaseConfigured) return
+    setProfileLoading(true)
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -468,6 +470,8 @@ export const AuthProvider = ({ children }) => {
       if (data) setProfile(data)
     } catch (e) {
       console.warn('[fetchProfile] Exception:', e.message)
+    } finally {
+      setProfileLoading(false)
     }
   }
 
@@ -576,7 +580,7 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider value={{
-      user, profile, loading,
+      user, profile, loading, profileLoading,
       signIn, signUp, signOut, updateProfile, createOrg,
       isPlatformAdmin, isOrgOwner, isAccountant, isEmployee, isReadOnly,
       isConfigured: isSupabaseConfigured,

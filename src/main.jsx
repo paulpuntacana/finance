@@ -43,7 +43,7 @@ if (window.location.pathname === '/admin') {
   )
 } else {
   function AppShell() {
-    const { user, profile, loading, isConfigured } = useAuth()
+    const { user, profile, loading, profileLoading, isConfigured } = useAuth()
     const signToken = getSignToken()
 
     useEffect(() => {
@@ -51,7 +51,7 @@ if (window.location.pathname === '/admin') {
       document.documentElement.setAttribute('data-theme', saved)
     }, [])
 
-    if (loading) return <Loader />
+    if (loading || profileLoading) return <Loader />
     if (!isConfigured) return <App signToken={signToken} />
     if (!user && !signToken) return <LoginPage />
     if (user && profile?.role === 'employee') return <EmployeePortal />
