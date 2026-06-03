@@ -2219,16 +2219,27 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
   }, [invoices, expenses]);
 
   const chartData = useMemo(() => {
+    const ref = new Date(); // vers binnen memo — geen stale-closure risico
     const months = [];
     for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const next = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
-      const label = d.toLocaleDateString('nl-NL', { month: 'short' });
-      const rev = invoices.filter(inv => {
-        const dateKey = inv.paidAt || inv.issueDate;
-        return inv.status === 'paid' && dateKey && new Date(dateKey) >= d && new Date(dateKey) < next;
-      }).reduce((s, inv) => s + computeInvoice(inv.items).total, 0);
-      const cost = expenses.filter(e => e.status === 'processed' && e.date && new Date(e.date) >= d && new Date(e.date) < next)
+      const mStart = new Date(ref.getFullYear(), ref.getMonth() - i, 1);
+      const mEnd   = new Date(ref.getFullYear(), ref.getMonth() - i + 1, 1);
+      const label  = mStart.toLocaleDateString('nl-NL', { month: 'short' });
+      const rev = invoices
+        .filter(inv => {
+          if (inv.status !== 'paid' && inv.status !== 'partial') return false;
+          const ds = inv.paidAt || inv.issueDate;
+          if (!ds) return false;
+          const t = new Date(ds).getTime();
+          return t >= mStart.getTime() && t < mEnd.getTime();
+        })
+        .reduce((s, inv) => s + computeInvoice(inv.items).total, 0);
+      const cost = expenses
+        .filter(e => {
+          if (e.status !== 'processed' || !e.date) return false;
+          const t = new Date(e.date).getTime();
+          return t >= mStart.getTime() && t < mEnd.getTime();
+        })
         .reduce((s, e) => s + Number(e.amount || 0), 0);
       months.push({ month: label, omzet: rev, kosten: cost });
     }
@@ -3517,6 +3528,15 @@ ${clone.innerHTML}
             >
               <Hash size={13} /> {invoice.qrEnabled === false ? 'QR uit' : invoice.qrEnabled ? (qrMissingIban ? 'QR — geen IBAN' : 'QR aan') : 'QR code'}
             </Button>
+          )}
+          {onUpdateInvoice && !invoice.number && (
+            <Button size="sm" variant="secondary"
+              style={{ borderColor: 'var(--warning)', color: 'var(--warning)' }}
+              onClick={() => {
+                const nr = window.prompt('Voer het factuurnummer in:', '');
+                if (nr && nr.trim()) onUpdateInvoice(invoice.id, { number: nr.trim() });
+              }}
+            ><Edit3 size={13} /> Factuurnummer invoeren</Button>
           )}
           {status === 'draft' && <Button size="sm" variant="secondary" onClick={() => onEdit(invoice)}><Edit3 size={13} /> Bewerken</Button>}
           {status === 'draft' && (
