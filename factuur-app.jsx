@@ -12,6 +12,7 @@ import {
   AlignLeft, AlignCenter, AlignRight,
 } from 'lucide-react';
 import { useAuth, useCloudStorage } from './src/AuthProvider';
+import { useLang } from './src/LangContext';
 import OrgUsersView from './src/OrgUsersView';
 import QuotesView from './src/QuotesView';
 import HorizonPlanner from './src/HorizonPlanner';
@@ -1443,6 +1444,18 @@ const INVOICE_TEMPLATES = [
     description: 'Warm tweedelig — linker paneel met accentrand, portfolio-gevoel',
     preview: { logoPos: 'left-panel', accent: 'left-border' },
   },
+  {
+    id: 'bloom',
+    name: 'Bloom',
+    description: 'Romantisch & elegant — bruiloft, beauty & événement stijl',
+    preview: { logoPos: 'centered', accent: 'thin-top' },
+  },
+  {
+    id: 'velvet',
+    name: 'Velvet',
+    description: 'Luxe donkere kop — high-end makeup & beauty studio stijl',
+    preview: { logoPos: 'header-left', accent: 'dark-header' },
+  },
 ];
 
 // ============================================================================
@@ -1981,34 +1994,35 @@ const EntitySwitcher = ({ activeEntity, entities, onSwitch, onManage }) => {
 // SIDEBAR / NAV
 // ============================================================================
 const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, onSwitchEntity, user, profile, onSignOut, theme, onToggleTheme, onGoToProfile }) => {
+  const { t } = useLang();
   const mainItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'invoices', label: 'Facturen', icon: FileText },
-    { id: 'clients', label: 'Klanten', icon: Users },
-    { id: 'expenses', label: 'Bonnen', icon: ReceiptIcon, badge: openCount },
-    { id: 'inkoop', label: 'Inkoop', icon: ShoppingCart },
-    { id: 'quotes', label: 'Offertes/E-Sign', icon: FileCheck2 },
-    { id: 'import', label: 'Historisch importeren', icon: Upload },
+    { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
+    { id: 'invoices', label: t('nav.invoices'), icon: FileText },
+    { id: 'clients', label: t('nav.clients'), icon: Users },
+    { id: 'expenses', label: t('nav.expenses'), icon: ReceiptIcon, badge: openCount },
+    { id: 'inkoop', label: t('nav.purchase'), icon: ShoppingCart },
+    { id: 'quotes', label: t('nav.quotes'), icon: FileCheck2 },
+    { id: 'import', label: t('nav.import'), icon: Upload },
   ];
   const finItems = [
-    { id: 'entities', label: 'Bedrijven', icon: Network },
-    { id: 'tax', label: 'BTW & Aangifte', icon: FileBarChart },
-    { id: 'boekhouding', label: 'Boekhouding', icon: BookOpen },
-    { id: 'horizonplanner', label: 'HorizonPlanner', icon: TrendingUp },
-    { id: 'ai', label: 'AI Adviseur', icon: Brain },
-    { id: 'credit', label: 'Creditbeheer', icon: ShieldCheck },
-    { id: 'links', label: 'Koppelingen', icon: Globe },
+    { id: 'entities', label: t('nav.entities'), icon: Network },
+    { id: 'tax', label: t('nav.tax'), icon: FileBarChart },
+    { id: 'boekhouding', label: t('nav.accounting'), icon: BookOpen },
+    { id: 'horizonplanner', label: t('nav.horizon'), icon: TrendingUp },
+    { id: 'ai', label: t('nav.ai'), icon: Brain },
+    { id: 'credit', label: t('nav.credit'), icon: ShieldCheck },
+    { id: 'links', label: t('nav.links'), icon: Globe },
   ];
   const accountItems = [
-    { id: 'settings', label: 'Instellingen', icon: SettingsIcon },
-    ...(profile?.role === 'org_owner' ? [{ id: 'admin', label: 'Gebruikers', icon: Users }] : []),
+    { id: 'settings', label: t('nav.settings'), icon: SettingsIcon },
+    ...(profile?.role === 'org_owner' ? [{ id: 'admin', label: t('nav.users'), icon: Users }] : []),
   ];
   const mobileItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'invoices', label: 'Facturen', icon: FileText },
-    { id: 'expenses', label: 'Bonnen', icon: ReceiptIcon, badge: openCount },
-    { id: 'quotes', label: 'Offertes/E-Sign', icon: FileCheck2 },
-    { id: 'settings', label: 'Meer', icon: SettingsIcon },
+    { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
+    { id: 'invoices', label: t('nav.invoices'), icon: FileText },
+    { id: 'expenses', label: t('nav.expenses'), icon: ReceiptIcon, badge: openCount },
+    { id: 'quotes', label: t('nav.quotes'), icon: FileCheck2 },
+    { id: 'settings', label: t('nav.more'), icon: SettingsIcon },
   ];
 
   const NavItem = ({ item }) => {
@@ -2050,7 +2064,7 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
   );
 
   const displayName = profile?.full_name || user?.email?.split('@')[0] || 'Lokaal';
-  const roleLabel = profile?.role === 'platform_admin' ? 'Platform Admin' : profile?.role === 'org_owner' ? 'Eigenaar' : 'Starter';
+  const roleLabel = profile?.role === 'platform_admin' ? 'Platform Admin' : profile?.role === 'org_owner' ? t('nav.roleOwner') : 'Starter';
 
   const allNavItems = [...mainItems, ...finItems, ...accountItems];
   const activeLabel = allNavItems.find(i => i.id === activeTab)?.label || 'Dashboard';
@@ -2142,11 +2156,11 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
 
         {/* Nav */}
         <nav style={{ flex: 1, overflowY: 'auto', padding: '4px 8px 8px' }} className="scrollable">
-          <Section label="Beheer" />
+          <Section label={t('nav.sectionManage')} />
           {mainItems.map(item => <NavItem key={item.id} item={item} />)}
-          <Section label="Financieel" />
+          <Section label={t('nav.sectionFinance')} />
           {finItems.map(item => <NavItem key={item.id} item={item} />)}
-          <Section label="Account" />
+          <Section label={t('nav.sectionAccount')} />
           {accountItems.map(item => <NavItem key={item.id} item={item} />)}
         </nav>
 
@@ -5052,6 +5066,23 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
             className="text-xs mb-4"
             style={{ color: 'var(--ink-2)', fontStyle: 'italic', display: 'block' }}
           />
+        ) : style === 'bloom' ? (
+          <div style={{ textAlign: 'center', padding: '18px 0 14px', margin: '4px 0 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <div style={{ flex: 1, height: 0.5, background: 'linear-gradient(to right, transparent, #ddd)' }} />
+              <span style={{ color: entity.accentColor || '#C9899E', fontSize: 13 }}>✦</span>
+              <div style={{ flex: 1, height: 0.5, background: 'linear-gradient(to left, transparent, #ddd)' }} />
+            </div>
+            <div style={{ fontSize: 11, color: '#888', fontStyle: 'italic', fontFamily: 'Fraunces, Georgia, serif', lineHeight: 1.8 }}>
+              {entity.footerText}
+            </div>
+          </div>
+        ) : style === 'velvet' ? (
+          <div style={{ padding: '12px 18px', marginBottom: 18, background: '#FDF8F4', border: '1px solid #EAD9C8', borderRadius: 6, textAlign: 'center' }}>
+            <div style={{ fontSize: 11, color: '#7a6a5a', fontStyle: 'italic', lineHeight: 1.8, fontFamily: 'Fraunces, Georgia, serif' }}>
+              {entity.footerText}
+            </div>
+          </div>
         ) : (
           <div className="text-xs mb-4" style={{ color: 'var(--ink-2)', fontStyle: 'italic' }}>{entity.footerText}</div>
         )
@@ -5599,6 +5630,109 @@ const TemplateSplit = ({ invoice, entity, client, totals, parentEntity }) => {
   );
 };
 
+// ── Template 9: BLOOM ─────────────────────────────────────────────────────────
+// Romantisch & elegant — bruiloft, beauty & événement facturatie
+const TemplateBloom = ({ invoice, entity, client, totals, parentEntity }) => {
+  const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
+  const accent = entity.accentColor || '#C9899E';
+  const opts = entity?.templateOptions || {};
+  const t = getInvoiceT(invoice.language);
+  return (
+    <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, fontFamily: 'Geist, -apple-system, sans-serif', background: '#fff' }}>
+      {/* Dunne accentlijn bovenaan */}
+      <div style={{ height: 3, background: accent }} />
+
+      {/* Gecentreerde koptekst */}
+      <div style={{ padding: '38px 56px 28px', textAlign: 'center', borderBottom: '1px solid #f0ece8' }}>
+        <EntityBrand entity={entity} fontSize={22} fontWeight={600} fontFamily="Fraunces, Georgia, serif" color="#2c2319" logoHeight={46} />
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
+          <div style={{ height: 0.5, width: 40, background: '#ddd' }} />
+          <div style={{ fontSize: 9, letterSpacing: '0.28em', textTransform: 'uppercase', color: '#b8a8a8', fontWeight: 500 }}>
+            {t.invoice} &nbsp;{invoice.number || '—'}
+          </div>
+          <div style={{ height: 0.5, width: 40, background: '#ddd' }} />
+        </div>
+      </div>
+
+      {/* Klant + factuurdetails */}
+      <div style={{ padding: '28px 56px 0', display: 'flex', justifyContent: 'space-between', gap: 32, alignItems: 'flex-start' }}>
+        <div>
+          <div style={{ fontSize: 8.5, letterSpacing: '0.18em', textTransform: 'uppercase', color: accent, marginBottom: 8, fontWeight: 600 }}>{t.invoiceTo}</div>
+          <InvoiceClientBlock client={client} t={t} />
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 8.5, letterSpacing: '0.18em', textTransform: 'uppercase', color: accent, marginBottom: 8, fontWeight: 600 }}>{t.details}</div>
+          <div style={{ fontSize: 10, color: '#999', lineHeight: 2 }}>
+            <div><span style={{ color: '#ccc' }}>{t.date} </span><span style={{ color: '#555' }}>{fmtDate(invoice.issueDate)}</span></div>
+            <div><span style={{ color: '#ccc' }}>{t.due} </span><span style={{ color: '#555' }}>{fmtDate(invoice.dueDate)}</span></div>
+            {invoice.reference && <div><span style={{ color: '#ccc' }}>{t.ref} </span><span style={{ color: '#555' }}>{invoice.reference}</span></div>}
+          </div>
+        </div>
+      </div>
+
+      {/* Decoratief scheidingsteken */}
+      <div style={{ textAlign: 'center', padding: '18px 0 4px', color: accent, fontSize: 15, opacity: 0.7 }}>✦</div>
+
+      {/* Regels + totalen + notities */}
+      <div style={{ padding: '4px 56px 48px' }}>
+        <InvoiceLineItemsAndTotals invoice={invoice} totals={totals} jur={jur} accent={accent} style="atelier" />
+        <InvoiceFooter entity={entity} jur={jur} parentEntity={parentEntity} style="bloom" invoice={invoice} totals={totals} />
+      </div>
+    </div>
+  );
+};
+
+// ── Template 10: VELVET ────────────────────────────────────────────────────────
+// Luxe donkere kop — high-end makeup & beauty studio stijl
+const TemplateVelvet = ({ invoice, entity, client, totals, parentEntity }) => {
+  const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
+  const accent = entity.accentColor || '#9E6B7A';
+  const opts = entity?.templateOptions || {};
+  const t = getInvoiceT(invoice.language);
+  // Donkere headerkleur: gebruik accent maar verduister het flink
+  const headerBg = accent;
+  return (
+    <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, fontFamily: 'Geist, -apple-system, sans-serif', background: '#FDFAF7' }}>
+      {/* Donkere full-bleed koptekst */}
+      <div style={{ background: headerBg, padding: '36px 52px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <div>
+          <EntityBrand entity={entity} fontSize={20} fontWeight={600} fontFamily="Fraunces, Georgia, serif" color="#fff" logoHeight={44} light />
+          {opts.showAddress !== false && entity.address && (
+            <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.55)', marginTop: 8, lineHeight: 1.7 }}>
+              {entity.address && <div>{entity.address}</div>}
+              {(entity.postal || entity.city) && <div>{entity.postal} {entity.city}</div>}
+            </div>
+          )}
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 9, letterSpacing: '0.28em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)', marginBottom: 6, fontWeight: 500 }}>{t.invoice}</div>
+          <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontSize: 18, fontWeight: 600, color: '#fff', lineHeight: 1 }}>{invoice.number || '—'}</div>
+          <div style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.65)', marginTop: 10, lineHeight: 1.9 }}>
+            <div><span style={{ opacity: 0.7 }}>{t.date} </span>{fmtDate(invoice.issueDate)}</div>
+            <div><span style={{ opacity: 0.7 }}>{t.due} </span>{fmtDate(invoice.dueDate)}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Dunne accentlijn onder header */}
+      <div style={{ height: 2, background: `linear-gradient(to right, ${accent}, transparent)` }} />
+
+      {/* Body */}
+      <div style={{ padding: '32px 52px 48px' }}>
+        {/* Klantgegevens */}
+        <div style={{ marginBottom: 28, padding: '16px 20px', background: '#fff', borderRadius: 6, border: '1px solid #EEE9E3', display: 'inline-block', minWidth: 220 }}>
+          <div style={{ fontSize: 8.5, letterSpacing: '0.18em', textTransform: 'uppercase', color: accent, marginBottom: 8, fontWeight: 600 }}>{t.invoiceTo}</div>
+          <InvoiceClientBlock client={client} t={t} />
+        </div>
+
+        {/* Regels + totalen + notities */}
+        <InvoiceLineItemsAndTotals invoice={invoice} totals={totals} jur={jur} accent={accent} style="executive" />
+        <InvoiceFooter entity={entity} jur={jur} parentEntity={parentEntity} style="velvet" invoice={invoice} totals={totals} />
+      </div>
+    </div>
+  );
+};
+
 const renderTemplate = (templateId, props) => {
   switch (templateId) {
     case 'modern': return <TemplateModern {...props} />;
@@ -5608,6 +5742,8 @@ const renderTemplate = (templateId, props) => {
     case 'bold': return <TemplateBold {...props} />;
     case 'horizon': return <TemplateHorizon {...props} />;
     case 'split': return <TemplateSplit {...props} />;
+    case 'bloom': return <TemplateBloom {...props} />;
+    case 'velvet': return <TemplateVelvet {...props} />;
     default: return <TemplateClassic {...props} />;
   }
 };
@@ -5628,6 +5764,10 @@ const ACCENT_PRESETS = [
   { label: 'Roze', value: '#db2777' },
   { label: 'Antraciet', value: '#374151' },
   { label: 'Zwart', value: '#111827' },
+  { label: 'Blush', value: '#C9899E' },
+  { label: 'Mauve', value: '#9E6B7A' },
+  { label: 'Champagne', value: '#B8966A' },
+  { label: 'Salie', value: '#6B8F7A' },
 ];
 
 const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
@@ -5635,6 +5775,15 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
   const accent = entity.accentColor || '#7C2D2D';
   const [docEditMode, setDocEditMode] = useState(false);
   const [editValues, setEditValues] = useState({});
+  const [hexInput, setHexInput] = useState('');
+  const [hexFocused, setHexFocused] = useState(false);
+
+  const applyHex = (raw) => {
+    const v = raw.replace(/^#/, '').trim();
+    if (/^[0-9a-fA-F]{6}$/.test(v)) {
+      onUpdate({ ...entity, accentColor: '#' + v.toUpperCase() });
+    }
+  };
 
   const handleOpenEdit = () => {
     setEditValues({
@@ -5690,7 +5839,20 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
           </label>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 4 }}>
             <div style={{ width: 20, height: 20, borderRadius: 4, background: accent, border: '1px solid var(--border-2)', flexShrink: 0 }} />
-            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: 'var(--ink-2)' }}>{accent}</span>
+            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--muted)', userSelect: 'none' }}>#</span>
+            <input
+              value={hexFocused ? hexInput : accent.replace('#', '')}
+              onFocus={() => { setHexFocused(true); setHexInput(accent.replace('#', '')); }}
+              onChange={e => setHexInput(e.target.value.replace(/[^0-9a-fA-F]/g, '').slice(0, 6))}
+              onBlur={() => { setHexFocused(false); applyHex(hexInput); }}
+              onKeyDown={e => { if (e.key === 'Enter') { applyHex(hexInput); e.target.blur(); } }}
+              placeholder="bijv. FF0000"
+              style={{
+                fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: 'var(--ink-2)',
+                background: 'var(--surface-2)', border: '1px solid var(--border-2)',
+                borderRadius: 5, padding: '3px 7px', width: 80, outline: 'none',
+              }}
+            />
           </div>
         </div>
       </Card>
@@ -6161,6 +6323,77 @@ const TemplateThumb = ({ templateId, accent = '#7C2D2D' }) => {
         <rect x="38" y="56" width="50" height="2" fill="#ccc" rx="0.5" />
         <rect x="92" y="56" width="20" height="2" fill="#555" rx="0.5" />
         <rect x="76" y="74" width="36" height="4" fill={accent} rx="0.5" />
+      </svg>
+    ),
+    bloom: (
+      <svg viewBox="0 0 120 160" className="w-full h-full bg-white">
+        {/* Bloom: thin top bar, centered header, diamond separator */}
+        <rect x="0" y="0" width="120" height="3" fill={accent} />
+        {/* Bedrijfsnaam gecentreerd */}
+        <rect x="30" y="14" width="60" height="6" fill="#2c2319" rx="1" />
+        <rect x="42" y="23" width="36" height="2" fill="#ddd" rx="0.5" />
+        {/* Horizontale scheidingslijn */}
+        <line x1="10" y1="32" x2="110" y2="32" stroke="#f0ece8" strokeWidth="0.75" />
+        {/* Diamond ✦ */}
+        <polygon points="60,38 62.5,41 60,44 57.5,41" fill={accent} opacity="0.7" />
+        {/* Klant links, details rechts */}
+        <rect x="10" y="50" width="14" height="2" fill={accent} opacity="0.7" rx="0.5" />
+        <rect x="10" y="55" width="28" height="2" fill="#555" rx="0.5" />
+        <rect x="10" y="59" width="22" height="2" fill="#aaa" rx="0.5" />
+        <rect x="10" y="63" width="20" height="2" fill="#aaa" rx="0.5" />
+        <rect x="78" y="50" width="14" height="2" fill={accent} opacity="0.7" rx="0.5" />
+        <rect x="78" y="55" width="30" height="2" fill="#aaa" rx="0.5" />
+        <rect x="78" y="59" width="26" height="2" fill="#aaa" rx="0.5" />
+        {/* Line items */}
+        <line x1="10" y1="76" x2="110" y2="76" stroke="#f0ece8" strokeWidth="0.5" />
+        <rect x="10" y="82" width="50" height="2" fill="#ccc" rx="0.5" />
+        <rect x="88" y="82" width="20" height="2" fill="#555" rx="0.5" />
+        <rect x="10" y="89" width="44" height="2" fill="#ccc" rx="0.5" />
+        <rect x="88" y="89" width="20" height="2" fill="#555" rx="0.5" />
+        <rect x="10" y="96" width="48" height="2" fill="#ccc" rx="0.5" />
+        <rect x="88" y="96" width="20" height="2" fill="#555" rx="0.5" />
+        <rect x="72" y="111" width="36" height="4" fill={accent} rx="0.5" />
+        {/* Decoratief dankwoord */}
+        <line x1="20" y1="124" x2="50" y2="124" stroke="#ddd" strokeWidth="0.5" />
+        <polygon points="60,122 61.5,124 60,126 58.5,124" fill={accent} opacity="0.5" />
+        <line x1="70" y1="124" x2="100" y2="124" stroke="#ddd" strokeWidth="0.5" />
+        <rect x="28" y="128" width="64" height="2" fill="#ccc" rx="0.5" opacity="0.7" />
+      </svg>
+    ),
+    velvet: (
+      <svg viewBox="0 0 120 160" className="w-full h-full" style={{ background: '#FDFAF7' }}>
+        {/* Velvet: donkere full-bleed header */}
+        <rect x="0" y="0" width="120" height="44" fill={accent} />
+        {/* Bedrijfsnaam links in header */}
+        <rect x="8" y="10" width="44" height="6" fill="white" rx="1" />
+        <rect x="8" y="19" width="30" height="2" fill="rgba(255,255,255,0.45)" rx="0.5" />
+        <rect x="8" y="23" width="22" height="2" fill="rgba(255,255,255,0.45)" rx="0.5" />
+        {/* Factuurnummer rechts in header */}
+        <rect x="82" y="9" width="28" height="4.5" fill="white" rx="0.5" />
+        <rect x="88" y="16" width="22" height="2" fill="rgba(255,255,255,0.6)" rx="0.5" />
+        <rect x="88" y="20" width="18" height="2" fill="rgba(255,255,255,0.6)" rx="0.5" />
+        {/* Subtiele accentlijn onder header */}
+        <rect x="0" y="44" width="120" height="1.5" fill={accent} opacity="0.35" />
+        {/* Klantblok in wit kader */}
+        <rect x="10" y="52" width="52" height="26" fill="white" rx="3" />
+        <rect x="15" y="57" width="12" height="2" fill={accent} opacity="0.7" rx="0.5" />
+        <rect x="15" y="61" width="36" height="2" fill="#555" rx="0.5" />
+        <rect x="15" y="65" width="28" height="2" fill="#aaa" rx="0.5" />
+        <rect x="15" y="69" width="24" height="2" fill="#aaa" rx="0.5" />
+        {/* Line items */}
+        <line x1="10" y1="88" x2="110" y2="88" stroke="#ebebeb" strokeWidth="0.75" />
+        <rect x="10" y="94" width="52" height="2" fill="#ccc" rx="0.5" />
+        <rect x="88" y="94" width="20" height="2" fill="#555" rx="0.5" />
+        <rect x="10" y="101" width="46" height="2" fill="#ccc" rx="0.5" />
+        <rect x="88" y="101" width="20" height="2" fill="#555" rx="0.5" />
+        <rect x="10" y="108" width="50" height="2" fill="#ccc" rx="0.5" />
+        <rect x="88" y="108" width="20" height="2" fill="#555" rx="0.5" />
+        <rect x="72" y="122" width="36" height="4" fill={accent} rx="0.5" />
+        {/* Dankwoord box */}
+        <rect x="10" y="133" width="100" height="14" fill="#FDF8F4" rx="3" />
+        <rect x="12" y="133" width="100" height="14" fill="none" stroke="#EAD9C8" strokeWidth="0.75" rx="3" />
+        <rect x="26" y="138" width="68" height="2" fill="#c5b5a8" rx="0.5" opacity="0.8" />
+        <rect x="34" y="142" width="52" height="2" fill="#c5b5a8" rx="0.5" opacity="0.6" />
       </svg>
     ),
   };
@@ -7991,6 +8224,7 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
 // SETTINGS VIEW
 // ============================================================================
 const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntities, clients, initialSection, updateProfile, profile, user, organization, updateOrganization, saveUserApiKeys }) => {
+  const { t, lang, setLang, LANGUAGES } = useLang();
   const [section, setSection] = useState(initialSection || 'jurisdiction');
   const [draft, setDraft] = useState(settings);
   const [savedFlash, setSavedFlash] = useState(false);
@@ -8055,26 +8289,27 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
   };
 
   const sections = [
-    { id: 'profile', label: 'Mijn Profiel' },
-    { id: 'jurisdiction', label: 'Land & Valuta' },
-    { id: 'templates', label: 'Factuur Templates' },
-    { id: 'reminders', label: 'Herinneringen' },
-    { id: 'email', label: 'Email & WhatsApp' },
-    { id: 'categories', label: 'Categorieën' },
-    { id: 'ai', label: 'AI' },
-    { id: 'credit', label: 'Creditbeheer' },
-    { id: 'status', label: 'Status' },
+    { id: 'profile', label: t('settings.profile') },
+    { id: 'jurisdiction', label: t('settings.jurisdiction') },
+    { id: 'templates', label: t('settings.templates') },
+    { id: 'reminders', label: t('settings.reminders') },
+    { id: 'email', label: t('settings.email') },
+    { id: 'categories', label: t('settings.categories') },
+    { id: 'ai', label: t('settings.ai') },
+    { id: 'credit', label: t('settings.credit') },
+    { id: 'status', label: t('settings.status') },
+    { id: 'appearance', label: t('settings.appearance') },
   ];
 
   return (
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="font-display text-4xl font-medium">Instellingen</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Configureer je facturatie en boekhouding</p>
+          <h1 className="font-display text-4xl font-medium">{t('settings.title')}</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{t('settings.subtitle')}</p>
         </div>
         <Button onClick={save}>
-          {savedFlash ? <><Check size={14} /> Opgeslagen</> : <><Save size={14} /> Opslaan</>}
+          {savedFlash ? <><Check size={14} /> {t('settings.saved')}</> : <><Save size={14} /> {t('settings.save')}</>}
         </Button>
       </div>
 
@@ -8771,6 +9006,40 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
           </div>
         );
       })()}
+
+      {section === 'appearance' && (
+        <div className="space-y-5">
+          <Card className="p-6 space-y-5">
+            <h3 className="font-display text-lg font-medium">{t('settings.appearance')}</h3>
+            <div className="space-y-2">
+              <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>{t('settings.language')}</label>
+              <div className="flex flex-wrap gap-2 mt-1">
+                {Object.entries(LANGUAGES).map(([code, name]) => (
+                  <button
+                    key={code}
+                    onClick={() => setLang(code)}
+                    className="px-5 py-2 rounded-lg border-2 text-sm font-semibold transition-all"
+                    style={{
+                      borderColor: lang === code ? 'var(--ink)' : 'var(--border)',
+                      background: lang === code ? 'var(--ink)' : 'transparent',
+                      color: lang === code ? '#fff' : 'var(--text)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
+                {t('settings.languageHint')}
+              </p>
+              <p className="text-xs" style={{ color: 'var(--success)' }}>
+                {t('settings.langSavedImmediately')}
+              </p>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };

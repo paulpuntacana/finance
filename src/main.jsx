@@ -2,6 +2,7 @@ import { StrictMode, useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import { AuthProvider, useAuth } from './AuthProvider'
+import { LangProvider } from './LangContext'
 
 // Lazy load — browser only downloads what's actually needed
 const LoginPage = lazy(() => import('./LoginPage'))
@@ -136,9 +137,11 @@ if (window.location.pathname === '/admin') {
   createRoot(document.getElementById('root')).render(
     <StrictMode>
       <AuthProvider>
-        <Suspense fallback={<Loader />}>
-          <AppShell />
-        </Suspense>
+        <LangProvider>
+          <Suspense fallback={<Loader />}>
+            <AppShell />
+          </Suspense>
+        </LangProvider>
       </AuthProvider>
     </StrictMode>,
   )

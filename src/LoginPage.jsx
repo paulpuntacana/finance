@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from './AuthProvider'
+import { useLang } from './LangContext'
 import { Eye, EyeOff, Loader2, ArrowRight, Check, Shield, TrendingUp, BarChart3 } from 'lucide-react'
 
 function FinanceIllustration() {
@@ -76,7 +77,6 @@ function FinanceIllustration() {
 
       {/* Hair */}
       <path d="M222 142 Q228 116 272 118 Q292 125 282 144 Q266 132 234 135 Z" fill="#1E293B" />
-      {/* Hair side */}
       <path d="M222 142 Q218 155 222 165 Q225 155 228 148 Z" fill="#1E293B" />
       <path d="M278 142 Q282 152 280 162 Q276 153 272 147 Z" fill="#1E293B" />
 
@@ -115,24 +115,24 @@ function FinanceIllustration() {
         <text x="68" y="37" fontSize="10" fill="#94A3B8" textAnchor="middle">Omzet YTD</text>
       </g>
 
-      {/* ── FLOATING CARD: Factuur verzonden ── */}
+      {/* ── FLOATING CARD: Invoice sent ── */}
       <g transform="translate(20, 196)">
         <rect width="106" height="50" rx="12" fill="white" style={{ filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.07))' }} />
         <rect x="10" y="10" width="30" height="30" rx="8" fill="#EFF6FF" />
         <rect x="15" y="16" width="20" height="4" rx="2" fill="#93C5FD" />
         <rect x="15" y="23" width="14" height="3" rx="1.5" fill="#BFDBFE" />
         <rect x="15" y="30" width="18" height="3" rx="1.5" fill="#DBEAFE" />
-        <text x="70" y="27" fontSize="10" fontWeight="600" fill="#1E293B" textAnchor="middle">Factuur</text>
-        <text x="70" y="40" fontSize="9.5" fill="#3B82F6" textAnchor="middle">verzonden ✓</text>
+        <text x="70" y="27" fontSize="10" fontWeight="600" fill="#1E293B" textAnchor="middle">Invoice</text>
+        <text x="70" y="40" fontSize="9.5" fill="#3B82F6" textAnchor="middle">sent ✓</text>
       </g>
 
-      {/* ── FLOATING CARD: BTW ── */}
+      {/* ── FLOATING CARD: VAT ── */}
       <g transform="translate(374, 215)">
         <rect width="102" height="50" rx="12" fill="white" style={{ filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.07))' }} />
         <circle cx="25" cy="25" r="14" fill="#FEF3C7" />
         <path d="M25 17 L25 25 L30 29" stroke="#D97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-        <text x="64" y="22" fontSize="10" fontWeight="600" fill="#1E293B" textAnchor="middle">BTW</text>
-        <text x="64" y="35" fontSize="9" fill="#D97706" textAnchor="middle">aangifte klaar</text>
+        <text x="64" y="22" fontSize="10" fontWeight="600" fill="#1E293B" textAnchor="middle">VAT</text>
+        <text x="64" y="35" fontSize="9" fill="#D97706" textAnchor="middle">ready ✓</text>
       </g>
 
       {/* Decorative dots */}
@@ -147,6 +147,7 @@ function FinanceIllustration() {
 
 export default function LoginPage() {
   const { signIn, signUp, isConfigured } = useAuth()
+  const { t, lang, setLang, LANGUAGES } = useLang()
   const [tab, setTab] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -169,26 +170,22 @@ export default function LoginPage() {
   const handleRegister = async (e) => {
     e.preventDefault()
     setError('')
-    if (!fullName.trim()) { setError('Naam is verplicht'); return }
-    if (password.length < 8) { setError('Wachtwoord minimaal 8 tekens'); return }
+    if (!fullName.trim()) { setError(t('login.nameRequired')); return }
+    if (password.length < 8) { setError(t('login.passwordMin')); return }
     if (inviteCode.trim().toUpperCase() !== 'DHS2026') {
-      setError('Ongeldige uitnodigingscode. Vraag de code op bij de beheerder.')
+      setError(t('login.invalidInvite'))
       return
     }
     setLoading(true)
-    // Lege inviteCode meegeven: DHS2026 is alleen een toegangspoort,
-    // nieuwe gebruikers maken hun eigen organisatie via de SetupWizard
     const { error } = await signUp(email, password, fullName, '')
     setLoading(false)
     if (error) setError(error.message)
-    else setSuccess('Check je e-mail voor de bevestigingslink!')
+    else setSuccess(t('login.emailConfirm'))
   }
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', fontFamily: "'Inter', -apple-system, sans-serif", background: '#ffffff' }}>
       <style>{`
-
-
         .lp-inp {
           background: #ffffff !important;
           border: 1.5px solid #E2E8F0 !important;
@@ -242,6 +239,18 @@ export default function LoginPage() {
           font-family: 'Inter', sans-serif;
         }
 
+        .lp-lang-btn {
+          font-size: 11px;
+          font-weight: 600;
+          padding: 3px 9px;
+          border-radius: 20px;
+          border: 1.5px solid;
+          cursor: pointer;
+          transition: all 0.14s;
+          font-family: 'Inter', sans-serif;
+          letter-spacing: 0.02em;
+        }
+
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes slide-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .lp-animate { animation: slide-in 0.3s ease-out; }
@@ -268,8 +277,8 @@ export default function LoginPage() {
         zIndex: 1,
       }}>
 
-        {/* Logo */}
-        <div style={{ marginBottom: '40px' }}>
+        {/* Logo + Language switcher row */}
+        <div style={{ marginBottom: '40px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{
               width: '40px', height: '40px',
@@ -286,27 +295,45 @@ export default function LoginPage() {
               <div style={{ fontSize: '10px', color: '#94A3B8', letterSpacing: '0.08em', fontWeight: '500', textTransform: 'uppercase', marginTop: '1px' }}>Financial Platform</div>
             </div>
           </div>
+
+          {/* Language switcher */}
+          <div style={{ display: 'flex', gap: '4px', flexShrink: 0, marginTop: '4px' }}>
+            {Object.entries(LANGUAGES).map(([code, name]) => (
+              <button
+                key={code}
+                onClick={() => setLang(code)}
+                className="lp-lang-btn"
+                style={{
+                  borderColor: lang === code ? '#3B82F6' : '#E2E8F0',
+                  background: lang === code ? '#EFF6FF' : 'transparent',
+                  color: lang === code ? '#3B82F6' : '#94A3B8',
+                }}
+              >
+                {code.toUpperCase()}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Heading */}
         <div style={{ marginBottom: '28px' }}>
           <h1 style={{ fontSize: '26px', fontWeight: '700', color: '#0F172A', margin: '0 0 7px', letterSpacing: '-0.03em', lineHeight: 1.25 }}>
-            {tab === 'login' ? 'Welkom terug' : 'Account aanmaken'}
+            {tab === 'login' ? t('login.welcome') : t('login.createAccount')}
           </h1>
           <p style={{ color: '#64748B', fontSize: '14px', margin: 0, lineHeight: 1.6 }}>
-            {tab === 'login' ? 'Log in op je financieel dashboard.' : 'Start met inzicht in je business.'}
+            {tab === 'login' ? t('login.loginSubtitle') : t('login.registerSubtitle')}
           </p>
         </div>
 
         {/* Tab switcher */}
         <div style={{ display: 'flex', gap: '3px', background: '#F8FAFC', borderRadius: '11px', padding: '3px', marginBottom: '20px', border: '1px solid #F1F5F9' }}>
-          {[['login', 'Inloggen'], ['register', 'Registreren']].map(([t, label]) => (
-            <button key={t} onClick={() => { setTab(t); setError(''); setSuccess('') }}
+          {[['login', t('login.loginTab')], ['register', t('login.registerTab')]].map(([tabId, label]) => (
+            <button key={tabId} onClick={() => { setTab(tabId); setError(''); setSuccess('') }}
               className="lp-tab-btn"
               style={{
-                background: tab === t ? '#ffffff' : 'transparent',
-                color: tab === t ? '#1E293B' : '#94A3B8',
-                boxShadow: tab === t ? '0 1px 4px rgba(0,0,0,0.07)' : 'none',
+                background: tab === tabId ? '#ffffff' : 'transparent',
+                color: tab === tabId ? '#1E293B' : '#94A3B8',
+                boxShadow: tab === tabId ? '0 1px 4px rgba(0,0,0,0.07)' : 'none',
               }}>
               {label}
             </button>
@@ -329,11 +356,11 @@ export default function LoginPage() {
         {tab === 'login' && (
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div>
-              <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>E-mailadres</label>
-              <input className="lp-inp" type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="naam@bedrijf.nl" />
+              <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>{t('login.email')}</label>
+              <input className="lp-inp" type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder={t('login.emailPlaceholder')} />
             </div>
             <div>
-              <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>Wachtwoord</label>
+              <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>{t('login.password')}</label>
               <div style={{ position: 'relative' }}>
                 <input className="lp-inp" type={showPass ? 'text' : 'password'} required value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••••" style={{ paddingRight: '42px' }} />
                 <button type="button" onClick={() => setShowPass(!showPass)}
@@ -344,8 +371,8 @@ export default function LoginPage() {
             </div>
             <button type="submit" disabled={loading} className="lp-btn-primary" style={{ marginTop: '4px' }}>
               {loading
-                ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Inloggen…</>
-                : <>Inloggen <ArrowRight size={15} /></>
+                ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> {t('login.loggingIn')}</>
+                : <>{t('login.loginBtn')} <ArrowRight size={15} /></>
               }
             </button>
           </form>
@@ -355,17 +382,17 @@ export default function LoginPage() {
         {tab === 'register' && (
           <form onSubmit={handleRegister} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div>
-              <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>Volledige naam</label>
-              <input className="lp-inp" type="text" required value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Jan de Vries" />
+              <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>{t('login.fullName')}</label>
+              <input className="lp-inp" type="text" required value={fullName} onChange={e => setFullName(e.target.value)} placeholder={t('login.fullNamePlaceholder')} />
             </div>
             <div>
-              <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>E-mailadres</label>
-              <input className="lp-inp" type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="jan@bedrijf.nl" />
+              <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>{t('login.email')}</label>
+              <input className="lp-inp" type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder={t('login.registerEmailPlaceholder')} />
             </div>
             <div>
-              <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>Wachtwoord</label>
+              <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>{t('login.password')}</label>
               <div style={{ position: 'relative' }}>
-                <input className="lp-inp" type={showPass ? 'text' : 'password'} required value={password} onChange={e => setPassword(e.target.value)} placeholder="Minimaal 8 tekens" style={{ paddingRight: '42px' }} />
+                <input className="lp-inp" type={showPass ? 'text' : 'password'} required value={password} onChange={e => setPassword(e.target.value)} placeholder={t('login.passwordPlaceholder')} style={{ paddingRight: '42px' }} />
                 <button type="button" onClick={() => setShowPass(!showPass)}
                   style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 0, display: 'flex' }}>
                   {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -374,14 +401,14 @@ export default function LoginPage() {
             </div>
             <div>
               <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>
-                Uitnodigingscode <span style={{ color: '#EF4444', fontWeight: '600' }}>*</span>
+                {t('login.inviteCode')} <span style={{ color: '#EF4444', fontWeight: '600' }}>{t('login.inviteCodeRequired')}</span>
               </label>
-              <input className="lp-inp" type="text" value={inviteCode} onChange={e => setInviteCode(e.target.value)} placeholder="ABC123" />
+              <input className="lp-inp" type="text" value={inviteCode} onChange={e => setInviteCode(e.target.value)} placeholder={t('login.inviteCodePlaceholder')} />
             </div>
             <button type="submit" disabled={loading} className="lp-btn-primary" style={{ marginTop: '4px' }}>
               {loading
-                ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Laden…</>
-                : <>Account aanmaken <ArrowRight size={15} /></>
+                ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> {t('login.creating')}</>
+                : <>{t('login.createBtn')} <ArrowRight size={15} /></>
               }
             </button>
           </form>
@@ -389,24 +416,24 @@ export default function LoginPage() {
 
         {!isConfigured && (
           <div style={{ marginTop: '16px', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '10px', padding: '10px 14px', color: '#92400E', fontSize: '12px' }}>
-            Supabase niet geconfigureerd — controleer je .env.local bestand.
+            {t('login.supabaseWarning')}
           </div>
         )}
 
         {/* Feature highlights */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '28px' }}>
           {[
-            { icon: BarChart3, label: 'Facturen & BTW', desc: 'Maak, verstuur en volg facturen op', color: '#3B82F6', bg: '#EFF6FF' },
-            { icon: TrendingUp, label: 'HorizonPlanner', desc: 'Plan je financiële toekomst visueel', color: '#7C3AED', bg: '#F5F3FF' },
-            { icon: Shield, label: 'SSL-beveiligd', desc: 'Jouw data veilig en NL-wetgeving compliant', color: '#16A34A', bg: '#F0FDF4' },
-          ].map(({ icon: Icon, label, desc, color, bg }) => (
-            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#F8FAFC', border: '1px solid #F1F5F9', borderRadius: '12px', padding: '10px 14px' }}>
+            { icon: BarChart3, labelKey: 'login.feature1Label', descKey: 'login.feature1Desc', color: '#3B82F6', bg: '#EFF6FF' },
+            { icon: TrendingUp, labelKey: 'login.feature2Label', descKey: 'login.feature2Desc', color: '#7C3AED', bg: '#F5F3FF' },
+            { icon: Shield, labelKey: 'login.feature3Label', descKey: 'login.feature3Desc', color: '#16A34A', bg: '#F0FDF4' },
+          ].map(({ icon: Icon, labelKey, descKey, color, bg }) => (
+            <div key={labelKey} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#F8FAFC', border: '1px solid #F1F5F9', borderRadius: '12px', padding: '10px 14px' }}>
               <div style={{ width: '34px', height: '34px', borderRadius: '9px', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <Icon size={15} style={{ color }} />
               </div>
               <div>
-                <div style={{ fontSize: '13px', fontWeight: '600', color: '#1E293B', lineHeight: 1.2 }}>{label}</div>
-                <div style={{ fontSize: '11.5px', color: '#94A3B8', marginTop: '2px' }}>{desc}</div>
+                <div style={{ fontSize: '13px', fontWeight: '600', color: '#1E293B', lineHeight: 1.2 }}>{t(labelKey)}</div>
+                <div style={{ fontSize: '11.5px', color: '#94A3B8', marginTop: '2px' }}>{t(descKey)}</div>
               </div>
             </div>
           ))}
@@ -440,11 +467,11 @@ export default function LoginPage() {
           {/* Headline */}
           <div style={{ marginBottom: '36px' }}>
             <h2 style={{ fontSize: '32px', fontWeight: '700', color: '#0F172A', lineHeight: 1.25, letterSpacing: '-0.03em', margin: '0 0 14px' }}>
-              Alles op orde.<br />
-              <span style={{ color: '#3B82F6' }}>Overal en altijd.</span>
+              {t('login.heroLine1')}<br />
+              <span style={{ color: '#3B82F6' }}>{t('login.heroLine2')}</span>
             </h2>
             <p style={{ color: '#64748B', fontSize: '15px', margin: 0, lineHeight: 1.65, maxWidth: '380px', marginLeft: 'auto', marginRight: 'auto' }}>
-              Facturen, bonnen, BTW en jaarplanning in één helder overzicht voor jou en je boekhouder.
+              {t('login.heroSubtitle')}
             </p>
           </div>
 
@@ -457,37 +484,39 @@ export default function LoginPage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
             {[
               {
-                label: 'Omzet YTD', value: '€ 147k', delta: '+18.4%',
+                labelKey: 'login.statRevenue', value: '€ 147k', deltaKey: null, delta: '+18.4%',
                 accent: '#16A34A', accentBg: '#F0FDF4', accentBorder: '#BBF7D0',
                 bars: [40, 55, 48, 62, 58, 70, 65, 80, 72, 95],
                 barColor: '#86EFAC', barActive: '#16A34A',
               },
               {
-                label: 'Liquiditeit', value: '+4 mnd', delta: 'Gezond',
+                labelKey: 'login.statLiquidity', valueKey: 'login.statLiquidityVal', deltaKey: 'login.statLiquidityDelta',
                 accent: '#2563EB', accentBg: '#EFF6FF', accentBorder: '#BFDBFE',
                 bars: [60, 62, 65, 64, 68, 70, 72, 74, 76, 78],
                 barColor: '#BFDBFE', barActive: '#3B82F6',
               },
               {
-                label: 'Openstaand', value: '€ 8.4k', delta: '3 facturen',
+                labelKey: 'login.statOpen', valueKey: 'login.statOpenVal', deltaKey: 'login.statOpenDelta',
                 accent: '#D97706', accentBg: '#FFFBEB', accentBorder: '#FDE68A',
                 bars: [80, 75, 82, 70, 68, 72, 65, 60, 55, 50],
                 barColor: '#FDE68A', barActive: '#D97706',
               },
             ].map((m) => (
-              <div key={m.label} style={{ background: '#ffffff', border: '1px solid #F1F5F9', borderRadius: '16px', padding: '16px', boxShadow: '0 2px 12px rgba(0,0,0,0.05)', textAlign: 'left', overflow: 'hidden', position: 'relative' }}>
-                {/* Top accent strip */}
+              <div key={m.labelKey} style={{ background: '#ffffff', border: '1px solid #F1F5F9', borderRadius: '16px', padding: '16px', boxShadow: '0 2px 12px rgba(0,0,0,0.05)', textAlign: 'left', overflow: 'hidden', position: 'relative' }}>
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: m.accent, borderRadius: '16px 16px 0 0' }} />
-                <div style={{ fontSize: '10px', color: '#94A3B8', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '6px', marginTop: '4px' }}>{m.label}</div>
-                <div style={{ fontSize: '20px', fontWeight: '800', color: '#0F172A', letterSpacing: '-0.03em', marginBottom: '8px', lineHeight: 1 }}>{m.value}</div>
-                {/* Mini sparkline */}
+                <div style={{ fontSize: '10px', color: '#94A3B8', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '6px', marginTop: '4px' }}>{t(m.labelKey)}</div>
+                <div style={{ fontSize: '20px', fontWeight: '800', color: '#0F172A', letterSpacing: '-0.03em', marginBottom: '8px', lineHeight: 1 }}>
+                  {m.value || t(m.valueKey)}
+                </div>
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: '24px', marginBottom: '8px' }}>
                   {m.bars.map((h, i) => (
                     <div key={i} style={{ flex: 1, height: `${h}%`, background: i === m.bars.length - 1 ? m.barActive : m.barColor, borderRadius: '2px', minHeight: '3px' }} />
                   ))}
                 </div>
                 <div style={{ display: 'inline-flex', alignItems: 'center', background: m.accentBg, border: `1px solid ${m.accentBorder}`, borderRadius: '20px', padding: '3px 9px' }}>
-                  <span style={{ fontSize: '10.5px', fontWeight: '700', color: m.accent }}>{m.delta}</span>
+                  <span style={{ fontSize: '10.5px', fontWeight: '700', color: m.accent }}>
+                    {m.delta || t(m.deltaKey)}
+                  </span>
                 </div>
               </div>
             ))}
