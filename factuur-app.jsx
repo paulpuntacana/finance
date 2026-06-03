@@ -199,6 +199,15 @@ const fmtEUR = (n) => {
   return '€ ' + num.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
+const CURRENCIES = {
+  EUR: { symbol: '€', locale: 'nl-NL', label: 'Euro (€)' },
+  USD: { symbol: '$', locale: 'en-US', label: 'US Dollar ($)' },
+  GBP: { symbol: '£', locale: 'en-GB', label: 'Pond (£)' },
+  CHF: { symbol: 'Fr.', locale: 'de-CH', label: 'Zwitserse Frank (Fr.)' },
+  DOP: { symbol: 'RD$', locale: 'es-DO', label: 'Dominicaanse Peso (RD$)' },
+};
+
+
 const fmtDate = (iso) => {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -1262,6 +1271,7 @@ const SUPPORTED_CURRENCIES = [
   { code: 'IDR', symbol: 'Rp', name: 'Rupiah (Indonesië)' },
   { code: 'THB', symbol: '฿', name: 'Baht (Thailand)' },
   { code: 'BRL', symbol: 'R$', name: 'Real (Brazilië)' },
+  { code: 'CHF', symbol: 'Fr.', name: 'Zwitserse Frank' },
 ];
 
 const fetchExchangeRates = async (base = 'EUR') => {
@@ -1298,6 +1308,71 @@ const fmtCurrency = (amount, currency = 'EUR') => {
   const num = Number(amount || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return `${meta.symbol} ${num}`;
 };
+
+// ── Invoice translations (NL / EN / ES / DE) ─────────────────────────────────
+const INVOICE_TRANSLATIONS = {
+  nl: {
+    invoice: 'Factuur', invoiceTo: 'Factuur aan', invoiceDetails: 'Factuurdetails',
+    details: 'Gegevens', date: 'Datum', due: 'Vervalt',
+    invoiceDate: 'Factuurdatum', dueDate: 'Vervaldatum', reference: 'Referentie',
+    ref: 'Ref', total: 'Totaal', invoiceNumber: 'Factuurnummer',
+    inclTax: (tax) => `incl. ${tax}`,
+    description: 'Omschrijving', qty: 'Aantal', unitPrice: 'Stukprijs', amount: 'Bedrag',
+    discount: 'korting', subtotalBeforeDiscount: 'Subtotaal (voor korting)',
+    totalDiscount: 'Totale korting', subtotalExcl: (tax) => `Subtotaal (excl. ${tax})`,
+    totalDue: 'Totaal te betalen', notes: 'Opmerkingen',
+    bankDetails: 'Bankgegevens', payableTo: 't.n.v.',
+    companyDetails: 'Bedrijfsgegevens', regNumber: (jur) => jur === 'NL' ? 'KvK' : 'RNC',
+    signature: 'Handtekening', scanQr: 'Scan met uw bank-app\nom direct te betalen',
+    tradingNameOf: (a, b) => `${a} is een handelsnaam van ${b}.`, attn: 'T.a.v.',
+  },
+  en: {
+    invoice: 'Invoice', invoiceTo: 'Invoice to', invoiceDetails: 'Invoice details',
+    details: 'Details', date: 'Date', due: 'Due',
+    invoiceDate: 'Invoice date', dueDate: 'Due date', reference: 'Reference',
+    ref: 'Ref', total: 'Total', invoiceNumber: 'Invoice number',
+    inclTax: (tax) => `incl. ${tax}`,
+    description: 'Description', qty: 'Qty', unitPrice: 'Unit price', amount: 'Amount',
+    discount: 'discount', subtotalBeforeDiscount: 'Subtotal (before discount)',
+    totalDiscount: 'Total discount', subtotalExcl: (tax) => `Subtotal (excl. ${tax})`,
+    totalDue: 'Total due', notes: 'Notes',
+    bankDetails: 'Bank details', payableTo: 'payable to',
+    companyDetails: 'Company details', regNumber: () => 'Chamber of Commerce',
+    signature: 'Signature', scanQr: 'Scan with your banking app\nto pay directly',
+    tradingNameOf: (a, b) => `${a} is a trading name of ${b}.`, attn: 'Attn:',
+  },
+  es: {
+    invoice: 'Factura', invoiceTo: 'Factura a', invoiceDetails: 'Detalles de factura',
+    details: 'Detalles', date: 'Fecha', due: 'Vence',
+    invoiceDate: 'Fecha de emisión', dueDate: 'Fecha de vencimiento', reference: 'Referencia',
+    ref: 'Ref', total: 'Total', invoiceNumber: 'Número de factura',
+    inclTax: (tax) => `incl. ${tax}`,
+    description: 'Descripción', qty: 'Cant.', unitPrice: 'Precio unit.', amount: 'Importe',
+    discount: 'descuento', subtotalBeforeDiscount: 'Subtotal (antes del dto.)',
+    totalDiscount: 'Descuento total', subtotalExcl: (tax) => `Subtotal (excl. ${tax})`,
+    totalDue: 'Total a pagar', notes: 'Notas',
+    bankDetails: 'Datos bancarios', payableTo: 'a nombre de',
+    companyDetails: 'Datos de la empresa', regNumber: () => 'Registro Mercantil',
+    signature: 'Firma', scanQr: 'Escanee con su app bancaria\npara pagar directamente',
+    tradingNameOf: (a, b) => `${a} es nombre comercial de ${b}.`, attn: 'A/A:',
+  },
+  de: {
+    invoice: 'Rechnung', invoiceTo: 'Rechnung an', invoiceDetails: 'Rechnungsdetails',
+    details: 'Details', date: 'Datum', due: 'Fällig',
+    invoiceDate: 'Rechnungsdatum', dueDate: 'Fälligkeitsdatum', reference: 'Referenz',
+    ref: 'Ref', total: 'Gesamt', invoiceNumber: 'Rechnungsnummer',
+    inclTax: (tax) => `inkl. ${tax}`,
+    description: 'Beschreibung', qty: 'Anz.', unitPrice: 'Stückpreis', amount: 'Betrag',
+    discount: 'Rabatt', subtotalBeforeDiscount: 'Zwischensumme (vor Rabatt)',
+    totalDiscount: 'Gesamtrabatt', subtotalExcl: (tax) => `Zwischensumme (excl. ${tax})`,
+    totalDue: 'Gesamtbetrag', notes: 'Hinweise',
+    bankDetails: 'Bankverbindung', payableTo: 'für',
+    companyDetails: 'Firmendaten', regNumber: () => 'Handelsregister',
+    signature: 'Unterschrift', scanQr: 'Scannen Sie mit Ihrer Banking-App\num direkt zu bezahlen',
+    tradingNameOf: (a, b) => `${a} ist ein Handelsname von ${b}.`, attn: 'z.H.',
+  },
+};
+const getInvoiceT = (lang) => INVOICE_TRANSLATIONS[lang] || INVOICE_TRANSLATIONS.nl;
 
 // ============================================================================
 // ENTITY TYPES (Bedrijfsvormen)
@@ -2149,8 +2224,10 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const next = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
       const label = d.toLocaleDateString('nl-NL', { month: 'short' });
-      const rev = invoices.filter(inv => inv.paidAt && new Date(inv.paidAt) >= d && new Date(inv.paidAt) < next)
-        .reduce((s, inv) => s + computeInvoice(inv.items).total, 0);
+      const rev = invoices.filter(inv => {
+        const dateKey = inv.paidAt || inv.issueDate;
+        return inv.status === 'paid' && dateKey && new Date(dateKey) >= d && new Date(dateKey) < next;
+      }).reduce((s, inv) => s + computeInvoice(inv.items).total, 0);
       const cost = expenses.filter(e => e.status === 'processed' && e.date && new Date(e.date) >= d && new Date(e.date) < next)
         .reduce((s, e) => s + Number(e.amount || 0), 0);
       months.push({ month: label, omzet: rev, kosten: cost });
@@ -2937,6 +3014,8 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
     clientId: '', issueDate: todayISO(), dueDate: addDays(todayISO(), paymentTerms),
     items: [{ description: '', quantity: 1, price: 0, btwRate: defaultBtw, discount: null }],
     notes: '', reference: '',
+    currency: settings.invoice?.currency || 'EUR',
+    language: settings.invoice?.language || 'nl',
     ...invoice,
   });
   const [addingClient, setAddingClient] = useState(false);
@@ -3015,6 +3094,27 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                 {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted)' }}>Valuta</label>
+            <select value={form.currency || 'EUR'} onChange={e => update('currency', e.target.value)}
+              className="w-full px-3 py-2 text-sm rounded border"
+              style={{ background: 'var(--bg)', color: 'var(--text)', borderColor: 'var(--border)' }}>
+              {Object.entries(CURRENCIES).map(([code, cfg]) => (
+                <option key={code} value={code}>{cfg.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted)' }}>Taal factuur</label>
+            <select value={form.language || 'nl'} onChange={e => update('language', e.target.value)}
+              className="w-full px-3 py-2 text-sm rounded border"
+              style={{ background: 'var(--bg)', color: 'var(--text)', borderColor: 'var(--border)' }}>
+              <option value="nl">🇳🇱 Nederlands</option>
+              <option value="en">🇬🇧 English</option>
+              <option value="es">🇪🇸 Español</option>
+              <option value="de">🇩🇪 Deutsch</option>
+            </select>
           </div>
           <Input label="Referentie" value={form.reference || ''} onChange={e => update('reference', e.target.value)} placeholder="PO-nummer, etc." />
           <Input label="Factuurdatum *" type="date" value={form.issueDate} onChange={e => {
@@ -3096,8 +3196,8 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                           </select>
                         </td>
                         <td className="py-2 text-right num font-medium">
-                          {fmtEUR(line.net)}
-                          {line.discount > 0 && <div className="text-[10px] line-through" style={{ color: 'var(--muted)' }}>{fmtEUR(line.base)}</div>}
+                          {fmtCurrency(line.net, form.currency)}
+                          {line.discount > 0 && <div className="text-[10px] line-through" style={{ color: 'var(--muted)' }}>{fmtCurrency(line.base, form.currency)}</div>}
                         </td>
                         <td className="py-2 pl-2">
                           <div className="flex items-center gap-1">
@@ -3147,7 +3247,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                                 className="w-20 px-2 py-1 bg-white rounded border text-xs text-right num"
                                 style={{ borderColor: 'var(--border)' }}
                               />
-                              <span className="num text-xs" style={{ color: 'var(--accent)' }}>−{fmtEUR(line.discount)}</span>
+                              <span className="num text-xs" style={{ color: 'var(--accent)' }}>−{fmtCurrency(line.discount, form.currency)}</span>
                             </div>
                           </td>
                         </tr>
@@ -3220,8 +3320,8 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                       {hasDiscount ? '× korting verwijderen' : '+ korting'}
                     </button>
                     <span className="text-sm num font-semibold" style={{ color: 'var(--text)' }}>
-                      {fmtEUR(line.net)}
-                      {line.discount > 0 && <span className="text-[10px] line-through ml-1" style={{ color: 'var(--muted)' }}>{fmtEUR(line.base)}</span>}
+                      {fmtCurrency(line.net, form.currency)}
+                      {line.discount > 0 && <span className="text-[10px] line-through ml-1" style={{ color: 'var(--muted)' }}>{fmtCurrency(line.base, form.currency)}</span>}
                     </span>
                   </div>
                   {hasDiscount && (
@@ -3251,7 +3351,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                           style={{ borderColor: 'var(--border)' }}
                         />
                       </div>
-                      <div className="text-xs num text-right" style={{ color: 'var(--accent)' }}>−{fmtEUR(line.discount)}</div>
+                      <div className="text-xs num text-right" style={{ color: 'var(--accent)' }}>−{fmtCurrency(line.discount, form.currency)}</div>
                     </div>
                   )}
                 </div>
@@ -3269,27 +3369,27 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
               <>
                 <div className="flex justify-between py-1 text-xs" style={{ color: 'var(--muted)' }}>
                   <span>Bruto subtotaal</span>
-                  <span className="num">{fmtEUR(totals.subtotal + totals.totalDiscount)}</span>
+                  <span className="num">{fmtCurrency(totals.subtotal + totals.totalDiscount, form.currency)}</span>
                 </div>
                 <div className="flex justify-between py-1" style={{ color: 'var(--accent)' }}>
                   <span>Totale korting</span>
-                  <span className="num">−{fmtEUR(totals.totalDiscount)}</span>
+                  <span className="num">−{fmtCurrency(totals.totalDiscount, form.currency)}</span>
                 </div>
               </>
             )}
             <div className="flex justify-between py-1.5">
               <span style={{ color: 'var(--muted)' }}>Subtotaal</span>
-              <span className="num font-medium">{fmtEUR(totals.subtotal)}</span>
+              <span className="num font-medium">{fmtCurrency(totals.subtotal, form.currency)}</span>
             </div>
             {Object.entries(totals.btwByRate).map(([rate, amt]) => Number(rate) > 0 && (
               <div key={rate} className="flex justify-between py-1.5">
                 <span style={{ color: 'var(--muted)' }}>{taxName} {rate}%</span>
-                <span className="num font-medium">{fmtEUR(amt)}</span>
+                <span className="num font-medium">{fmtCurrency(amt, form.currency)}</span>
               </div>
             ))}
             <div className="flex justify-between py-2.5 border-t-2 mt-2" style={{ borderColor: 'var(--ink)' }}>
               <span className="font-display text-lg">Totaal</span>
-              <span className="font-display text-xl num font-medium">{fmtEUR(totals.total)}</span>
+              <span className="font-display text-xl num font-medium">{fmtCurrency(totals.total, form.currency)}</span>
             </div>
           </div>
         </div>
@@ -3480,13 +3580,13 @@ ${clone.innerHTML}
                   <span>{fmtDate(p.date)}</span>
                   {p.note && <span style={{ color: 'var(--muted)' }}>— {p.note}</span>}
                 </div>
-                <span className="num font-medium" style={{ color: 'var(--success)' }}>{fmtEUR(p.amount)}</span>
+                <span className="num font-medium" style={{ color: 'var(--success)' }}>{fmtCurrency(p.amount, invoice.currency)}</span>
               </div>
             ))}
           </div>
           <div className="flex justify-between text-sm font-medium pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
             <span>Openstaand</span>
-            <span className="num" style={{ color: remaining > 0 ? 'var(--warning)' : 'var(--success)' }}>{fmtEUR(remaining)}</span>
+            <span className="num" style={{ color: remaining > 0 ? 'var(--warning)' : 'var(--success)' }}>{fmtCurrency(remaining, invoice.currency)}</span>
           </div>
           {remaining > 0 && (
             <div className="mt-2 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface-3)' }}>
@@ -3553,7 +3653,7 @@ const RegisterPaymentModal = ({ invoice, remaining, totals, onSave, onClose }) =
       <div className="px-6 py-5 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
         <div>
           <h2 className="font-display text-xl">Betaling registreren</h2>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Factuur {invoice.number} · openstaand {fmtEUR(remaining)}</p>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Factuur {invoice.number} · openstaand {fmtCurrency(remaining, invoice.currency)}</p>
         </div>
         <button onClick={onClose} className="p-1.5 rounded hover:bg-stone-100"><X size={16} /></button>
       </div>
@@ -3568,7 +3668,7 @@ const RegisterPaymentModal = ({ invoice, remaining, totals, onSave, onClose }) =
         )}
         {!isFullPayment && amountNum > 0 && (
           <div className="rounded p-2 text-xs" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
-            Restbedrag na betaling: {fmtEUR(remaining - amountNum)}
+            Restbedrag na betaling: {fmtCurrency(remaining - amountNum, invoice.currency)}
           </div>
         )}
       </div>
@@ -3596,7 +3696,7 @@ const SendInvoiceModal = ({ invoice, client, settings, onSend, onClose, mode = '
     .replace(/{{number}}/g, invoice.number)
     .replace(/{{contact}}/g, client?.contactName || client?.name || '')
     .replace(/{{company}}/g, settings.company.name)
-    .replace(/{{amount}}/g, fmtEUR(totals.total))
+    .replace(/{{amount}}/g, fmtCurrency(totals.total, invoice.currency))
     .replace(/{{date}}/g, fmtDate(invoice.issueDate))
     .replace(/{{dueDate}}/g, fmtDate(invoice.dueDate))
     .replace(/{{senderName}}/g, settings.email.fromName)
@@ -4351,6 +4451,7 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
 // ── Shared: line items + totals table ────────────────────────────────────────
 const InvoiceLineItemsAndTotals = ({ invoice, totals, jur, accent, style = 'executive' }) => {
   const editCtx = useContext(InvoiceEditContext);
+  const t = getInvoiceT(invoice.language);
   const isMinimal = style === 'atelier';
   const headerBg = style === 'studio' ? accent : 'transparent';
   const headerColor = style === 'studio' ? '#fff' : 'var(--ink)';
@@ -4360,11 +4461,11 @@ const InvoiceLineItemsAndTotals = ({ invoice, totals, jur, accent, style = 'exec
       <table className="w-full text-sm mb-8" style={{ borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ background: headerBg }}>
-            <th className="text-left py-2.5 px-3 text-[10px] uppercase tracking-[0.12em] font-semibold" style={{ color: headerColor || 'var(--muted)', borderBottom: `2px solid ${accent}` }}>Omschrijving</th>
-            <th className="text-right py-2.5 px-2 text-[10px] uppercase tracking-[0.12em] font-semibold w-16" style={{ color: headerColor || 'var(--muted)', borderBottom: `2px solid ${accent}` }}>Aantal</th>
-            <th className="text-right py-2.5 px-2 text-[10px] uppercase tracking-[0.12em] font-semibold w-28" style={{ color: headerColor || 'var(--muted)', borderBottom: `2px solid ${accent}` }}>Stukprijs</th>
+            <th className="text-left py-2.5 px-3 text-[10px] uppercase tracking-[0.12em] font-semibold" style={{ color: headerColor || 'var(--muted)', borderBottom: `2px solid ${accent}` }}>{t.description}</th>
+            <th className="text-right py-2.5 px-2 text-[10px] uppercase tracking-[0.12em] font-semibold w-16" style={{ color: headerColor || 'var(--muted)', borderBottom: `2px solid ${accent}` }}>{t.qty}</th>
+            <th className="text-right py-2.5 px-2 text-[10px] uppercase tracking-[0.12em] font-semibold w-28" style={{ color: headerColor || 'var(--muted)', borderBottom: `2px solid ${accent}` }}>{t.unitPrice}</th>
             <th className="text-right py-2.5 px-2 text-[10px] uppercase tracking-[0.12em] font-semibold w-14" style={{ color: headerColor || 'var(--muted)', borderBottom: `2px solid ${accent}` }}>{jur.salesTax.name}</th>
-            <th className="text-right py-2.5 px-3 text-[10px] uppercase tracking-[0.12em] font-semibold w-28" style={{ color: headerColor || 'var(--muted)', borderBottom: `2px solid ${accent}` }}>Bedrag</th>
+            <th className="text-right py-2.5 px-3 text-[10px] uppercase tracking-[0.12em] font-semibold w-28" style={{ color: headerColor || 'var(--muted)', borderBottom: `2px solid ${accent}` }}>{t.amount}</th>
           </tr>
         </thead>
         <tbody>
@@ -4377,18 +4478,18 @@ const InvoiceLineItemsAndTotals = ({ invoice, totals, jur, accent, style = 'exec
                   <div className="font-medium text-sm" style={{ color: 'var(--ink)', lineHeight: 1.4 }}>{item.description}</div>
                   {item.discount && Number(item.discount.value) > 0 && (
                     <div className="text-[10px] mt-0.5 font-mono" style={{ color: accent }}>
-                      − korting: {item.discount.type === 'percent' ? `${item.discount.value}%` : fmtEUR(item.discount.value)}
+                      − {t.discount}: {item.discount.type === 'percent' ? `${item.discount.value}%` : fmtCurrency(item.discount.value, invoice.currency)}
                       {item.discount.name ? ` (${item.discount.name})` : ''}
                     </div>
                   )}
                 </td>
                 <td className="py-3 px-2 text-right align-top num text-sm" style={{ color: 'var(--ink-2)' }}>{Number(item.quantity).toLocaleString('nl-NL')}</td>
                 <td className="py-3 px-2 text-right align-top num text-sm" style={{ color: 'var(--ink-2)' }}>
-                  {fmtEUR(item.price)}
-                  {line.discount > 0 && <div className="text-[10px]" style={{ color: 'var(--muted)' }}>→ {fmtEUR(line.net / (Number(item.quantity) || 1))}</div>}
+                  {fmtCurrency(item.price, invoice.currency)}
+                  {line.discount > 0 && <div className="text-[10px]" style={{ color: 'var(--muted)' }}>→ {fmtCurrency(line.net / (Number(item.quantity) || 1), invoice.currency)}</div>}
                 </td>
                 <td className="py-3 px-2 text-right align-top num text-xs" style={{ color: 'var(--muted)' }}>{item.btwRate}%</td>
-                <td className="py-3 px-3 text-right align-top num font-semibold text-sm" style={{ color: 'var(--ink)' }}>{fmtEUR(line.net)}</td>
+                <td className="py-3 px-3 text-right align-top num font-semibold text-sm" style={{ color: 'var(--ink)' }}>{fmtCurrency(line.net, invoice.currency)}</td>
               </tr>
             );
           })}
@@ -4400,35 +4501,35 @@ const InvoiceLineItemsAndTotals = ({ invoice, totals, jur, accent, style = 'exec
           {totals.totalDiscount > 0 && (
             <>
               <div className="flex justify-between py-1.5 text-xs" style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-                <span>Subtotaal (voor korting)</span>
-                <span className="num">{fmtEUR(totals.subtotal + totals.totalDiscount)}</span>
+                <span>{t.subtotalBeforeDiscount}</span>
+                <span className="num">{fmtCurrency(totals.subtotal + totals.totalDiscount, invoice.currency)}</span>
               </div>
               <div className="flex justify-between py-1.5 text-xs" style={{ color: accent, borderBottom: '1px solid var(--border)' }}>
-                <span>Totale korting</span>
-                <span className="num">− {fmtEUR(totals.totalDiscount)}</span>
+                <span>{t.totalDiscount}</span>
+                <span className="num">− {fmtCurrency(totals.totalDiscount, invoice.currency)}</span>
               </div>
             </>
           )}
           <div className="flex justify-between py-1.5 text-xs" style={{ color: 'var(--ink-2)', borderBottom: '1px solid var(--border)' }}>
-            <span>Subtotaal (excl. {jur.salesTax.name})</span>
-            <span className="num">{fmtEUR(totals.subtotal)}</span>
+            <span>{t.subtotalExcl(jur.salesTax.name)}</span>
+            <span className="num">{fmtCurrency(totals.subtotal, invoice.currency)}</span>
           </div>
           {Object.entries(totals.btwByRate).filter(([r]) => Number(r) > 0).map(([rate, amt]) => (
             <div key={rate} className="flex justify-between py-1.5 text-xs" style={{ color: 'var(--ink-2)', borderBottom: '1px solid var(--border)' }}>
               <span>{jur.salesTax.name} {rate}%</span>
-              <span className="num">{fmtEUR(amt)}</span>
+              <span className="num">{fmtCurrency(amt, invoice.currency)}</span>
             </div>
           ))}
           <div className="flex justify-between items-center py-3 mt-1" style={{ borderTop: `2px solid ${accent}` }}>
-            <span className="text-base font-semibold" style={{ color: 'var(--ink)' }}>Totaal te betalen</span>
-            <span className="num text-xl font-bold" style={{ color: accent }}>{fmtEUR(totals.total)}</span>
+            <span className="text-base font-semibold" style={{ color: 'var(--ink)' }}>{t.totalDue}</span>
+            <span className="num text-xl font-bold" style={{ color: accent }}>{fmtCurrency(totals.total, invoice.currency)}</span>
           </div>
         </div>
       </div>
 
       {(invoice.notes || editCtx.editMode) && (
         <div className="mb-8 p-4 rounded-md text-xs" style={{ background: '#f9f8f6', border: `1px solid ${editCtx.editMode ? 'rgba(0,0,0,0.12)' : 'var(--border)'}` }}>
-          <div className="uppercase tracking-[0.12em] text-[9px] mb-1.5 font-semibold" style={{ color: 'var(--muted)' }}>Opmerkingen</div>
+          <div className="uppercase tracking-[0.12em] text-[9px] mb-1.5 font-semibold" style={{ color: 'var(--muted)' }}>{t.notes}</div>
           {editCtx.editMode ? (
             <EditableField
               value={editCtx.editValues.notes ?? invoice.notes ?? ''}
@@ -4467,6 +4568,7 @@ const buildEpcQr = ({ iban, bic, name, amount, reference }) => {
 
 const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice, totals }) => {
   const editCtx = useContext(InvoiceEditContext);
+  const t = getInvoiceT(invoice?.language);
   const legalEntity = (entity?.type === 'label' && parentEntity) ? parentEntity : entity;
   const legalJur = (entity?.type === 'label' && parentEntity) ? JURISDICTIONS[parentEntity.jurisdiction || 'NL'] : jur;
   const opts = entity?.templateOptions || {};
@@ -4488,7 +4590,7 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
     <div className="invoice-footer" style={{ borderTop: '1px solid var(--border)', paddingTop: 20, marginTop: 8, pageBreakInside: 'avoid' }}>
       {entity?.type === 'label' && parentEntity && (
         <div className="text-[10px] mb-3 italic" style={{ color: 'var(--muted)' }}>
-          {entity.name} is een handelsnaam van {parentEntity.name}.
+          {t.tradingNameOf(entity.name, parentEntity.name)}
         </div>
       )}
 
@@ -4500,7 +4602,7 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
               ? <img src={opts.signatureImage} alt="Handtekening" style={{ maxHeight: 56, maxWidth: 180, objectFit: 'contain', display: 'block', marginBottom: 4 }} />
               : <div style={{ height: 44, borderBottom: '1px solid #ccc', marginBottom: 4 }} />
             }
-            <div style={{ fontSize: 9, color: 'var(--muted)' }}>{opts.signatureLabel || 'Handtekening'}</div>
+            <div style={{ fontSize: 9, color: 'var(--muted)' }}>{opts.signatureLabel || t.signature}</div>
           </div>
         </div>
       )}
@@ -4521,9 +4623,9 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
       {opts.showBankDetails !== false && (
         <div className="text-xs" style={{ display: 'grid', gridTemplateColumns: qrUrl ? '1fr auto 1fr' : '1fr 1fr', gap: 24, alignItems: 'flex-start', color: 'var(--ink-2)' }}>
           <div>
-            <div className="uppercase tracking-[0.12em] text-[9px] mb-2 font-semibold" style={{ color: 'var(--muted)' }}>Bankgegevens</div>
+            <div className="uppercase tracking-[0.12em] text-[9px] mb-2 font-semibold" style={{ color: 'var(--muted)' }}>{t.bankDetails}</div>
             {legalEntity.iban && <div className="font-mono font-medium" style={{ color: 'var(--ink)', letterSpacing: '0.05em' }}>{legalEntity.iban}</div>}
-            <div className="mt-0.5">t.n.v. {legalEntity.name}</div>
+            <div className="mt-0.5">{t.payableTo} {legalEntity.name}</div>
             {legalEntity.bicCode && <div className="font-mono text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>BIC: {legalEntity.bicCode}</div>}
           </div>
           {qrUrl && (
@@ -4532,14 +4634,14 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
                 <img src={qrUrl} alt="SEPA betaal-QR" width={84} height={84} style={{ display: 'block' }} />
               </div>
               <div style={{ fontSize: 7.5, color: '#aaa', textAlign: 'center', lineHeight: 1.4, letterSpacing: '0.04em' }}>
-                Scan met uw bank-app<br />om direct te betalen
+                {t.scanQr.split('\n').map((line, i) => <span key={i}>{line}{i === 0 && <br />}</span>)}
               </div>
             </div>
           )}
           <div className="text-right">
-            <div className="uppercase tracking-[0.12em] text-[9px] mb-2 font-semibold" style={{ color: 'var(--muted)' }}>Bedrijfsgegevens</div>
+            <div className="uppercase tracking-[0.12em] text-[9px] mb-2 font-semibold" style={{ color: 'var(--muted)' }}>{t.companyDetails}</div>
             <div className="font-medium" style={{ color: 'var(--ink)' }}>{legalEntity.name}</div>
-            {legalEntity.registrationNumber && <div className="mt-0.5">{legalJur.code === 'NL' ? 'KvK' : 'RNC'}: <span className="font-mono">{legalEntity.registrationNumber}</span></div>}
+            {legalEntity.registrationNumber && <div className="mt-0.5">{t.regNumber(legalJur.code)}: <span className="font-mono">{legalEntity.registrationNumber}</span></div>}
             {legalEntity.taxNumber && <div>{legalJur.salesTax.name}-nr: <span className="font-mono">{legalEntity.taxNumber}</span></div>}
             {legalEntity.website && <div className="mt-0.5" style={{ color: 'var(--muted)' }}>{legalEntity.website}</div>}
           </div>
@@ -4550,10 +4652,10 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
 };
 
 // ── Shared: adresblok klant ──────────────────────────────────────────────────
-const InvoiceClientBlock = ({ client }) => (
+const InvoiceClientBlock = ({ client, t }) => (
   <div className="text-xs leading-relaxed" style={{ color: 'var(--ink-2)' }}>
     <div className="font-semibold text-sm mb-0.5" style={{ color: 'var(--ink)' }}>{client?.name || '—'}</div>
-    {client?.contactName && <div>T.a.v. {client.contactName}</div>}
+    {client?.contactName && <div>{(t?.attn || 'T.a.v.')} {client.contactName}</div>}
     {client?.address && <div>{client.address}</div>}
     {(client?.postal || client?.city) && <div>{client.postal} {client.city}</div>}
     {client?.country && <div>{client.country}</div>}
@@ -4599,6 +4701,7 @@ const TemplateClassic = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
+  const t = getInvoiceT(invoice.language);
   return (
     <div className="bg-white" style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Accent top bar */}
@@ -4618,24 +4721,24 @@ const TemplateClassic = ({ invoice, entity, client, totals, parentEntity }) => {
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 600, color: 'var(--muted)', marginBottom: 6 }}>Factuur</div>
+            <div style={{ fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 600, color: 'var(--muted)', marginBottom: 6 }}>{t.invoice}</div>
             <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 20, fontWeight: 500, color: accent, letterSpacing: '0.04em' }}>{invoice.number}</div>
-            {invoice.reference && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>Ref: {invoice.reference}</div>}
+            {invoice.reference && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>{t.ref}: {invoice.reference}</div>}
           </div>
         </div>
 
         {/* Info grid: klant + factuurdata */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, marginBottom: 40, paddingBottom: 32, borderBottom: '1px solid var(--border)' }}>
           <div>
-            <div style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 8 }}>Factuur aan</div>
-            <InvoiceClientBlock client={client} />
+            <div style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 8 }}>{t.invoiceTo}</div>
+            <InvoiceClientBlock client={client} t={t} />
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 8 }}>Factuurdetails</div>
+            <div style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 8 }}>{t.invoiceDetails}</div>
             <div style={{ fontSize: 11, lineHeight: 2, color: 'var(--ink-2)', fontFamily: 'JetBrains Mono, monospace' }}>
-              <div><span style={{ color: 'var(--muted)', fontFamily: 'Geist, sans-serif', fontSize: 10 }}>Datum </span>{fmtDate(invoice.issueDate)}</div>
-              <div><span style={{ color: 'var(--muted)', fontFamily: 'Geist, sans-serif', fontSize: 10 }}>Vervalt </span>{fmtDate(invoice.dueDate)}</div>
-              {invoice.reference && <div><span style={{ color: 'var(--muted)', fontFamily: 'Geist, sans-serif', fontSize: 10 }}>Ref </span>{invoice.reference}</div>}
+              <div><span style={{ color: 'var(--muted)', fontFamily: 'Geist, sans-serif', fontSize: 10 }}>{t.date} </span>{fmtDate(invoice.issueDate)}</div>
+              <div><span style={{ color: 'var(--muted)', fontFamily: 'Geist, sans-serif', fontSize: 10 }}>{t.due} </span>{fmtDate(invoice.dueDate)}</div>
+              {invoice.reference && <div><span style={{ color: 'var(--muted)', fontFamily: 'Geist, sans-serif', fontSize: 10 }}>{t.ref} </span>{invoice.reference}</div>}
             </div>
           </div>
         </div>
@@ -4653,6 +4756,7 @@ const TemplateModern = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
+  const t = getInvoiceT(invoice.language);
   return (
     <div className="bg-white" style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Full-bleed header */}
@@ -4670,7 +4774,7 @@ const TemplateModern = ({ invoice, entity, client, totals, parentEntity }) => {
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)', marginBottom: 6 }}>Invoice / Factuur</div>
+            <div style={{ fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)', marginBottom: 6 }}>{t.invoice}</div>
             <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 22, fontWeight: 500, color: '#fff', letterSpacing: '0.04em' }}>{invoice.number}</div>
             <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.65)', marginTop: 6, fontFamily: 'JetBrains Mono, monospace' }}>
               <div>{fmtDate(invoice.issueDate)}</div>
@@ -4682,15 +4786,15 @@ const TemplateModern = ({ invoice, entity, client, totals, parentEntity }) => {
       {/* Sub-header: klant + data */}
       <div style={{ background: '#f9f8f6', padding: '20px 52px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, borderBottom: '1px solid var(--border)' }}>
         <div>
-          <div style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 6 }}>Factuur aan</div>
-          <InvoiceClientBlock client={client} />
+          <div style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 6 }}>{t.invoiceTo}</div>
+          <InvoiceClientBlock client={client} t={t} />
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 6 }}>Details</div>
+          <div style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 6 }}>{t.invoiceDetails}</div>
           <div style={{ fontSize: 11, lineHeight: 1.9, color: 'var(--ink-2)' }}>
-            <div>Factuurdatum: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.issueDate)}</span></div>
-            <div>Vervaldatum: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.dueDate)}</span></div>
-            {invoice.reference && <div>Referentie: <span style={{ color: 'var(--ink)' }}>{invoice.reference}</span></div>}
+            <div>{t.invoiceDate}: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.issueDate)}</span></div>
+            <div>{t.dueDate}: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.dueDate)}</span></div>
+            {invoice.reference && <div>{t.reference}: <span style={{ color: 'var(--ink)' }}>{invoice.reference}</span></div>}
           </div>
         </div>
       </div>
@@ -4709,6 +4813,7 @@ const TemplateMinimal = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
+  const t = getInvoiceT(invoice.language);
   return (
     <div className="bg-white" style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, padding: '64px 72px 56px', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Decorative accent dot */}
@@ -4727,7 +4832,7 @@ const TemplateMinimal = ({ invoice, entity, client, totals, parentEntity }) => {
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 8 }}>Factuur</div>
+          <div style={{ fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 8 }}>{t.invoice}</div>
           <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontSize: 32, fontWeight: 300, color: 'var(--ink)', letterSpacing: '-0.02em' }}>№{invoice.number}</div>
         </div>
       </div>
@@ -4738,20 +4843,20 @@ const TemplateMinimal = ({ invoice, entity, client, totals, parentEntity }) => {
       {/* Three-column info grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 32, marginBottom: 48 }}>
         <div>
-          <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 10 }}>Aan</div>
-          <InvoiceClientBlock client={client} />
+          <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 10 }}>{t.invoiceTo}</div>
+          <InvoiceClientBlock client={client} t={t} />
         </div>
         <div>
-          <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 10 }}>Datum</div>
+          <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 10 }}>{t.date}</div>
           <div style={{ fontSize: 11, lineHeight: 2, color: 'var(--ink-2)' }}>
-            <div>Factuur: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.issueDate)}</span></div>
-            <div>Vervalt: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.dueDate)}</span></div>
+            <div>{t.invoiceDate}: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.issueDate)}</span></div>
+            <div>{t.dueDate}: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.dueDate)}</span></div>
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 10 }}>Totaal</div>
-          <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontSize: 24, fontWeight: 400, color: accent }}>{fmtEUR(totals.total)}</div>
-          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>incl. {jur.salesTax.name}</div>
+          <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 10 }}>{t.total}</div>
+          <div style={{ fontFamily: 'Fraunces, Georgia, serif', fontSize: 24, fontWeight: 400, color: accent }}>{fmtCurrency(totals.total, invoice.currency)}</div>
+          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{t.inclTax(jur.salesTax.name)}</div>
         </div>
       </div>
 
@@ -4768,6 +4873,7 @@ const TemplateStatement = ({ invoice, entity, client, totals, parentEntity }) =>
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
   const logoScale = (entity.logoScale || 100) / 100;
+  const t = getInvoiceT(invoice.language);
   return (
     <div className="bg-white" style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, display: 'flex', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Left sidebar */}
@@ -4799,7 +4905,7 @@ const TemplateStatement = ({ invoice, entity, client, totals, parentEntity }) =>
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>Factuur</div>
+            <div style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>{t.invoice}</div>
             <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 18, fontWeight: 600, color: accent }}>{invoice.number}</div>
           </div>
         </div>
@@ -4807,15 +4913,15 @@ const TemplateStatement = ({ invoice, entity, client, totals, parentEntity }) =>
         {/* Client + data */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, marginBottom: 36 }}>
           <div>
-            <div style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 8 }}>Factuur aan</div>
-            <InvoiceClientBlock client={client} />
+            <div style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 8 }}>{t.invoiceTo}</div>
+            <InvoiceClientBlock client={client} t={t} />
           </div>
           <div>
-            <div style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 8 }}>Gegevens</div>
+            <div style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--muted)', marginBottom: 8 }}>{t.details}</div>
             <div style={{ fontSize: 11, lineHeight: 2, color: 'var(--ink-2)' }}>
-              <div>Datum: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.issueDate)}</span></div>
-              <div>Vervalt: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.dueDate)}</span></div>
-              {invoice.reference && <div>Ref: <span style={{ color: 'var(--ink)' }}>{invoice.reference}</span></div>}
+              <div>{t.date}: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.issueDate)}</span></div>
+              <div>{t.due}: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.dueDate)}</span></div>
+              {invoice.reference && <div>{t.ref}: <span style={{ color: 'var(--ink)' }}>{invoice.reference}</span></div>}
             </div>
           </div>
         </div>
@@ -4833,6 +4939,7 @@ const TemplateNordic = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
+  const t = getInvoiceT(invoice.language);
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, background: '#fff', fontFamily: 'Geist, -apple-system, sans-serif', position: 'relative', overflow: 'hidden' }}>
       {/* Rechter accentstreep */}
@@ -4850,9 +4957,9 @@ const TemplateNordic = ({ invoice, entity, client, totals, parentEntity }) => {
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 9, letterSpacing: '0.22em', textTransform: 'uppercase', color: '#ccc', marginBottom: 6 }}>Factuur</div>
+            <div style={{ fontSize: 9, letterSpacing: '0.22em', textTransform: 'uppercase', color: '#ccc', marginBottom: 6 }}>{t.invoice}</div>
             <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 20, fontWeight: 600, color: accent, letterSpacing: '0.03em' }}>{invoice.number}</div>
-            {invoice.reference && <div style={{ fontSize: 9, color: '#bbb', marginTop: 4 }}>Ref: {invoice.reference}</div>}
+            {invoice.reference && <div style={{ fontSize: 9, color: '#bbb', marginTop: 4 }}>{t.ref}: {invoice.reference}</div>}
           </div>
         </div>
 
@@ -4862,17 +4969,17 @@ const TemplateNordic = ({ invoice, entity, client, totals, parentEntity }) => {
         {/* Info strip */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', background: '#fafaf8', borderRadius: 10, marginBottom: 40, overflow: 'hidden' }}>
           {[
-            { label: 'Factuur aan', content: <InvoiceClientBlock client={client} /> },
-            { label: 'Datum', content: (
+            { label: t.invoiceTo, content: <InvoiceClientBlock client={client} t={t} /> },
+            { label: t.date, content: (
               <div style={{ fontSize: 11, lineHeight: 2, color: '#555' }}>
                 <div style={{ fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.issueDate)}</div>
-                <div style={{ fontFamily: 'JetBrains Mono, monospace', color: '#999' }}>Vervalt {fmtDate(invoice.dueDate)}</div>
+                <div style={{ fontFamily: 'JetBrains Mono, monospace', color: '#999' }}>{t.due} {fmtDate(invoice.dueDate)}</div>
               </div>
             )},
-            { label: 'Totaal', content: (
+            { label: t.total, content: (
               <div>
-                <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 20, fontWeight: 700, color: accent }}>{fmtEUR(totals.total)}</div>
-                <div style={{ fontSize: 9, color: '#bbb', marginTop: 3 }}>incl. {jur.salesTax.name}</div>
+                <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 20, fontWeight: 700, color: accent }}>{fmtCurrency(totals.total, invoice.currency)}</div>
+                <div style={{ fontSize: 9, color: '#bbb', marginTop: 3 }}>{t.inclTax(jur.salesTax.name)}</div>
               </div>
             )},
           ].map((col, i) => (
@@ -4896,6 +5003,7 @@ const TemplateBold = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
+  const t = getInvoiceT(invoice.language);
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, background: '#fff', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       <div style={{ padding: '48px 56px 0' }}>
@@ -4904,7 +5012,7 @@ const TemplateBold = ({ invoice, entity, client, totals, parentEntity }) => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
             <EntityBrand entity={entity} fontSize={30} fontWeight={700} />
             <div style={{ textAlign: 'right', marginBottom: 2 }}>
-              <div style={{ fontSize: 9, letterSpacing: '0.22em', textTransform: 'uppercase', color: '#bbb', marginBottom: 5 }}>Factuurnummer</div>
+              <div style={{ fontSize: 9, letterSpacing: '0.22em', textTransform: 'uppercase', color: '#bbb', marginBottom: 5 }}>{t.invoiceNumber}</div>
               <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 26, fontWeight: 800, color: accent, letterSpacing: '-0.01em', lineHeight: 1 }}>{invoice.number}</div>
             </div>
           </div>
@@ -4920,17 +5028,17 @@ const TemplateBold = ({ invoice, entity, client, totals, parentEntity }) => {
         {/* Info: client left, details right in card */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, marginBottom: 36 }}>
           <div>
-            <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: '#bbb', marginBottom: 10 }}>Factuur aan</div>
-            <InvoiceClientBlock client={client} />
+            <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: '#bbb', marginBottom: 10 }}>{t.invoiceTo}</div>
+            <InvoiceClientBlock client={client} t={t} />
           </div>
           <div style={{ background: '#f6f5f2', borderRadius: 8, padding: '16px 20px' }}>
-            <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: '#bbb', marginBottom: 10 }}>Factuurdetails</div>
+            <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: '#bbb', marginBottom: 10 }}>{t.invoiceDetails}</div>
             <div style={{ fontSize: 11, lineHeight: 2, color: '#555' }}>
-              <div>Datum <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#1a1a1a', float: 'right' }}>{fmtDate(invoice.issueDate)}</span></div>
-              <div>Vervalt <span style={{ fontFamily: 'JetBrains Mono, monospace', color: accent, float: 'right' }}>{fmtDate(invoice.dueDate)}</span></div>
-              {invoice.reference && <div>Ref <span style={{ color: '#1a1a1a', float: 'right' }}>{invoice.reference}</span></div>}
+              <div>{t.date} <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#1a1a1a', float: 'right' }}>{fmtDate(invoice.issueDate)}</span></div>
+              <div>{t.due} <span style={{ fontFamily: 'JetBrains Mono, monospace', color: accent, float: 'right' }}>{fmtDate(invoice.dueDate)}</span></div>
+              {invoice.reference && <div>{t.ref} <span style={{ color: '#1a1a1a', float: 'right' }}>{invoice.reference}</span></div>}
             </div>
-            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #e4e1db', fontFamily: 'JetBrains Mono, monospace', fontSize: 18, fontWeight: 700, color: accent }}>{fmtEUR(totals.total)}</div>
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #e4e1db', fontFamily: 'JetBrains Mono, monospace', fontSize: 18, fontWeight: 700, color: accent }}>{fmtCurrency(totals.total, invoice.currency)}</div>
           </div>
         </div>
 
@@ -4947,6 +5055,7 @@ const TemplateHorizon = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
+  const t = getInvoiceT(invoice.language);
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, background: '#fff', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Gespleten header */}
@@ -4961,12 +5070,12 @@ const TemplateHorizon = ({ invoice, entity, client, totals, parentEntity }) => {
         </div>
         <div style={{ background: accent, padding: '36px 52px 28px 36px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontSize: 9, letterSpacing: '0.22em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>Factuur</div>
+            <div style={{ fontSize: 9, letterSpacing: '0.22em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>{t.invoice}</div>
             <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 22, fontWeight: 600, color: '#fff', letterSpacing: '0.03em' }}>{invoice.number}</div>
           </div>
           <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.75)', fontFamily: 'JetBrains Mono, monospace', lineHeight: 1.9 }}>
             <div>{fmtDate(invoice.issueDate)}</div>
-            <div style={{ opacity: 0.7 }}>Vervalt {fmtDate(invoice.dueDate)}</div>
+            <div style={{ opacity: 0.7 }}>{t.due} {fmtDate(invoice.dueDate)}</div>
             {invoice.reference && <div style={{ opacity: 0.6, fontFamily: 'Geist, sans-serif', fontSize: 9 }}>Ref: {invoice.reference}</div>}
           </div>
         </div>
@@ -4976,13 +5085,13 @@ const TemplateHorizon = ({ invoice, entity, client, totals, parentEntity }) => {
       <div style={{ padding: '32px 52px 44px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, marginBottom: 32, paddingBottom: 28, borderBottom: '1px solid #ebebeb' }}>
           <div>
-            <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: '#ccc', marginBottom: 8 }}>Factuur aan</div>
-            <InvoiceClientBlock client={client} />
+            <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: '#ccc', marginBottom: 8 }}>{t.invoiceTo}</div>
+            <InvoiceClientBlock client={client} t={t} />
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: '#ccc', marginBottom: 8 }}>Totaal</div>
-            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 24, fontWeight: 700, color: accent }}>{fmtEUR(totals.total)}</div>
-            <div style={{ fontSize: 9, color: '#ccc', marginTop: 3 }}>incl. {jur.salesTax.name}</div>
+            <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: '#ccc', marginBottom: 8 }}>{t.total}</div>
+            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 24, fontWeight: 700, color: accent }}>{fmtCurrency(totals.total, invoice.currency)}</div>
+            <div style={{ fontSize: 9, color: '#ccc', marginTop: 3 }}>{t.inclTax(jur.salesTax.name)}</div>
           </div>
         </div>
         <InvoiceLineItemsAndTotals invoice={invoice} totals={totals} jur={jur} accent={accent} style="horizon" />
@@ -4998,6 +5107,7 @@ const TemplateSplit = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
+  const t = getInvoiceT(invoice.language);
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, display: 'flex', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Links paneel: warm beige, linkerrand in accent */}
@@ -5014,7 +5124,7 @@ const TemplateSplit = ({ invoice, entity, client, totals, parentEntity }) => {
         </div>
 
         <div>
-          <div style={{ fontSize: 8.5, letterSpacing: '0.16em', textTransform: 'uppercase', color: '#c5b9a8', marginBottom: 10, fontWeight: 700 }}>Factuur aan</div>
+          <div style={{ fontSize: 8.5, letterSpacing: '0.16em', textTransform: 'uppercase', color: '#c5b9a8', marginBottom: 10, fontWeight: 700 }}>{t.invoiceTo}</div>
           <div style={{ fontSize: 10, color: '#666', lineHeight: 1.85 }}>
             <div style={{ fontWeight: 700, color: '#3a3530' }}>{client?.name || '—'}</div>
             {client?.contactName && <div>{client.contactName}</div>}
@@ -5024,18 +5134,18 @@ const TemplateSplit = ({ invoice, entity, client, totals, parentEntity }) => {
         </div>
 
         <div>
-          <div style={{ fontSize: 8.5, letterSpacing: '0.16em', textTransform: 'uppercase', color: '#c5b9a8', marginBottom: 10, fontWeight: 700 }}>Details</div>
+          <div style={{ fontSize: 8.5, letterSpacing: '0.16em', textTransform: 'uppercase', color: '#c5b9a8', marginBottom: 10, fontWeight: 700 }}>{t.details}</div>
           <div style={{ fontSize: 10, color: '#666', lineHeight: 1.9 }}>
-            <div><span style={{ color: '#c5b9a8' }}>Nr </span><span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#3a3530', fontSize: 9.5 }}>{invoice.number}</span></div>
-            <div><span style={{ color: '#c5b9a8' }}>Datum </span><span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5 }}>{fmtDate(invoice.issueDate)}</span></div>
-            <div><span style={{ color: '#c5b9a8' }}>Vervalt </span><span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5 }}>{fmtDate(invoice.dueDate)}</span></div>
-            {invoice.reference && <div><span style={{ color: '#c5b9a8' }}>Ref </span>{invoice.reference}</div>}
+            <div><span style={{ color: '#c5b9a8' }}>{t.invoiceNumber} </span><span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#3a3530', fontSize: 9.5 }}>{invoice.number}</span></div>
+            <div><span style={{ color: '#c5b9a8' }}>{t.date} </span><span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5 }}>{fmtDate(invoice.issueDate)}</span></div>
+            <div><span style={{ color: '#c5b9a8' }}>{t.due} </span><span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5 }}>{fmtDate(invoice.dueDate)}</span></div>
+            {invoice.reference && <div><span style={{ color: '#c5b9a8' }}>{t.ref} </span>{invoice.reference}</div>}
           </div>
         </div>
 
         <div style={{ marginTop: 'auto', paddingTop: 18, borderTop: '1px solid #e4ddd3' }}>
-          <div style={{ fontSize: 8.5, letterSpacing: '0.16em', textTransform: 'uppercase', color: '#c5b9a8', marginBottom: 6, fontWeight: 700 }}>Totaal</div>
-          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 17, fontWeight: 700, color: accent }}>{fmtEUR(totals.total)}</div>
+          <div style={{ fontSize: 8.5, letterSpacing: '0.16em', textTransform: 'uppercase', color: '#c5b9a8', marginBottom: 6, fontWeight: 700 }}>{t.total}</div>
+          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 17, fontWeight: 700, color: accent }}>{fmtCurrency(totals.total, invoice.currency)}</div>
         </div>
       </div>
 
@@ -5043,7 +5153,7 @@ const TemplateSplit = ({ invoice, entity, client, totals, parentEntity }) => {
       <div style={{ flex: 1, padding: '44px 44px 44px 32px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 28, paddingBottom: 18, borderBottom: '1px solid #ebebeb' }}>
           <div style={{ width: 20, height: 20, borderRadius: '50%', background: accent, flexShrink: 0 }} />
-          <div style={{ fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', fontWeight: 600, color: '#bbb' }}>Factuur</div>
+          <div style={{ fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', fontWeight: 600, color: '#bbb' }}>{t.invoice}</div>
         </div>
         <InvoiceLineItemsAndTotals invoice={invoice} totals={totals} jur={jur} accent={accent} style="split" />
         <InvoiceFooter entity={entity} jur={jur} parentEntity={parentEntity} style="split" invoice={invoice} totals={totals} />
@@ -7452,6 +7562,15 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
   const [orgName, setOrgName] = useState(organization?.name || '');
   const [orgPlan, setOrgPlan] = useState(organization?.plan || 'starter');
   const [orgSaved, setOrgSaved] = useState(false);
+
+  // Sync API keys from effectiveSettings nadat userApiKeys async geladen is
+  useEffect(() => {
+    setDraft(d => ({
+      ...d,
+      apiKey: settings.apiKey || d.apiKey,
+      openaiApiKey: settings.openaiApiKey || d.openaiApiKey,
+    }));
+  }, [settings.apiKey, settings.openaiApiKey]);
 
   useEffect(() => {
     if (organization) {

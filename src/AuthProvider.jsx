@@ -166,13 +166,25 @@ const expenseToDB = (item, orgId, userId) => ({
   id: item.id, org_id: orgId, entity_id: item.entityId || null,
   description: item.description || '', vendor: item.vendor || null,
   date: item.date || new Date().toISOString().split('T')[0],
-  amount_incl: item.amountIncl ?? item.total ?? 0,
+  amount_incl: item.amountIncl ?? item.amount ?? item.total ?? 0,
   btw_rate: item.btwRate ?? 21, btw_amount: item.btwAmount ?? null,
   amount_excl: item.amountExcl ?? null, category: item.category || null,
-  ledger_code: item.ledgerCode || null, currency: item.currency || 'EUR',
+  ledger_code: item.ledgerCode || item.ledgerAccount || null,
+  currency: item.currency || 'EUR',
   receipt_url: item.receiptUrl || null, receipt_name: item.receiptName || null,
   notes: item.notes || null, created_by: userId || null,
-  extra: {},
+  extra: {
+    status: item.status || 'open',
+    capturedAt: item.capturedAt || null,
+    source: item.source || null,
+    image: item.image || null,
+    attachment: item.attachment || null,
+    attachmentName: item.attachmentName || null,
+    originalAmount: item.originalAmount ?? null,
+    exchangeRate: item.exchangeRate ?? null,
+    amount: item.amount ?? null,
+    ledgerAccount: item.ledgerAccount || item.ledgerCode || null,
+  },
 })
 
 const entityFromDB = (row) => ({

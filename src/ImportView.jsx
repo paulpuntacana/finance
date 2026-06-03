@@ -3,6 +3,7 @@ import { Plus, Trash2, Upload, Download, Check, AlertCircle, FileText, Receipt, 
 
 const YEARS = Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - i)
 const BTW_RATES = [0, 9, 21]
+const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'DOP']
 const CATEGORIES = [
   'Software/SaaS', 'Hosting & Infra', 'Kantoorartikelen', 'Reiskosten',
   'Eten & Drinken', 'Marketing', 'Professionele diensten', 'Hardware', 'Overig'
@@ -12,7 +13,7 @@ const genId = (prefix = 'r') => `${prefix}_${Date.now().toString(36)}${Math.rand
 
 const blankInvoice = (year) => ({
   _id: genId(), number: '', client: '',
-  date: `${year}-01-01`, amountExcl: '', btwRate: '21', status: 'paid', paidAt: `${year}-01-01`,
+  date: `${year}-01-01`, amountExcl: '', btwRate: '21', currency: 'EUR', status: 'paid', paidAt: `${year}-01-01`,
 })
 
 const blankExpense = (year) => ({
@@ -87,6 +88,7 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
         issueDate: row.date, dueDate: row.date,
         status: row.status,
         paidAt: row.status === 'paid' ? (row.paidAt || row.date) : null,
+        currency: row.currency || 'EUR',
         items: [{ description: 'Geïmporteerde factuur', quantity: 1, price: excl, btwRate: rate, discount: null }],
         notes: `Geïmporteerd uit archief (${row.date.slice(0, 4)})`,
         reference: '', imported: true,
@@ -163,6 +165,7 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
             date: get(obj, 'datum', 'date', 'factuurdatum', 'invoice date') || `${year}-01-01`,
             amountExcl: get(obj, 'bedrag excl', 'excl btw', 'bedrag_excl', 'amount_excl', 'excl. btw', 'netto'),
             btwRate: get(obj, 'btw %', 'btw%', 'btw_rate', 'btwrate', 'btw') || '21',
+            currency: CURRENCIES.includes((get(obj, 'valuta', 'currency') || '').toUpperCase()) ? (get(obj, 'valuta', 'currency')).toUpperCase() : 'EUR',
             status: get(obj, 'status', 'betaalstatus').toLowerCase().includes('open') ? 'sent' : 'paid',
             paidAt: get(obj, 'betaaldatum', 'paid_at', 'betaald op') || `${year}-01-01`,
           }
@@ -195,9 +198,9 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
   const downloadTemplate = () => {
     let csv, filename
     if (tab === 'invoices') {
-      csv = 'Nummer;Klant;Datum;Bedrag excl;BTW %;Status;Betaaldatum\r\n'
-      csv += `${year}-001;Voorbeeld BV;${year}-03-15;1000.00;21;Betaald;${year}-03-20\r\n`
-      csv += `${year}-002;Andere Klant BV;${year}-06-10;500.00;21;Open;\r\n`
+      csv = 'Nummer;Klant;Datum;Bedrag excl;BTW %;Valuta;Status;Betaaldatum\r\n'
+      csv += `${year}-001;Voorbeeld BV;${year}-03-15;1000.00;21;EUR;Betaald;${year}-03-20\r\n`
+      csv += `${year}-002;Andere Klant BV;${year}-06-10;500.00;21;USD;Open;\r\n`
       filename = `facturen-template-${year}.csv`
     } else {
       csv = 'Leverancier;Datum;Bedrag incl;BTW %;Categorie;Omschrijving\r\n'
@@ -303,7 +306,7 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '780px' }}>
               <thead>
                 <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
-                  {['Factuurnummer', 'Klant *', 'Datum *', 'Bedrag excl. BTW *', 'BTW %', 'Status', 'Betaaldatum', ''].map(h => (
+                  {['Factuurnummer', 'Klant *', 'Datum *', 'Bedrag excl. BTW *', 'BTW %', 'Valuta', 'Status', 'Betaaldatum', ''].map(h => (
                     <th key={h} style={thStyle}>{h}</th>
                   ))}
                 </tr>
@@ -351,6 +354,11 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
                       <td style={{ ...tdStyle, width: '90px' }}>
                         <select style={cell} value={row.btwRate} onChange={e => updInv(row._id, 'btwRate', e.target.value)}>
                           {BTW_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
+                        </select>
+                      </td>
+                      <td style={{ ...tdStyle, width: '90px' }}>
+                        <select style={cell} value={row.currency || 'EUR'} onChange={e => updInv(row._id, 'currency', e.target.value)}>
+                          {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                       </td>
                       <td style={{ ...tdStyle, width: '110px' }}>
