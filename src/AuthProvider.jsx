@@ -24,7 +24,7 @@ export const OrgDataProvider = ({ orgId, readOnly, children }) => (
 const invoiceFromDB = (row) => ({
   ...row.extra,
   id: row.id, entityId: row.entity_id, clientId: row.client_id,
-  invoiceNumber: row.number, issueDate: row.issue_date, date: row.issue_date,
+  invoiceNumber: row.number, number: row.number, issueDate: row.issue_date, date: row.issue_date,
   dueDate: row.due_date, status: row.status, currency: row.currency,
   notes: row.notes, internalNotes: row.internal_notes, subject: row.subject,
   subtotal: row.subtotal, btwTotal: row.btw_total, total: row.total,

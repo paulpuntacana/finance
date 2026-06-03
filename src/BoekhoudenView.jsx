@@ -107,13 +107,19 @@ function WinstVerliesTab({ invoices, expenses, assets, entries }) {
 
   const years = useMemo(() => {
     const set = new Set([currentYear, currentYear - 1, currentYear - 2])
-    ;(invoices || []).forEach(i => i.paidAt && set.add(new Date(i.paidAt).getFullYear()))
+    ;(invoices || []).forEach(i => {
+      const d = i.issueDate || i.date
+      if (d) set.add(new Date(d).getFullYear())
+    })
     ;(expenses || []).forEach(e => e.date && set.add(new Date(e.date).getFullYear()))
     return [...set].sort((a, b) => b - a)
   }, [invoices, expenses, currentYear])
 
   const paidInvoices = useMemo(() =>
-    (invoices || []).filter(i => i.status === 'paid' && i.paidAt && new Date(i.paidAt).getFullYear() === year),
+    (invoices || []).filter(i => {
+      const d = i.issueDate || i.date
+      return i.status === 'paid' && d && new Date(d).getFullYear() === year
+    }),
     [invoices, year])
 
   const processedExpenses = useMemo(() =>
