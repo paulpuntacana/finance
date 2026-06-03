@@ -4430,7 +4430,7 @@ const ExpensesView = ({ expenses, setExpenses, allExpenses, settings, setSetting
               onClick={() => setFilter(f.id)}
               className="px-3 py-1.5 text-xs font-medium rounded transition-colors"
               style={{
-                background: filter === f.id ? 'var(--ink)' : 'transparent',
+                background: filter === f.id ? 'var(--btn-primary)' : 'transparent',
                 color: filter === f.id ? '#fff' : 'var(--ink-2)',
               }}
             >
@@ -5913,7 +5913,7 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
             return (
               <button key={opt.value} onClick={() => onUpdate({ ...entity, headerMode: opt.value })}
                 className="text-left px-3 py-2 rounded-lg border text-xs transition-all"
-                style={{ borderColor: active ? 'var(--ink)' : 'var(--border)', background: active ? 'var(--ink)' : 'transparent', color: active ? '#fff' : 'var(--ink-2)' }}>
+                style={{ borderColor: active ? 'var(--btn-primary)' : 'var(--border)', background: active ? 'var(--btn-primary)' : 'transparent', color: active ? '#fff' : 'var(--ink-2)' }}>
                 <div className="font-medium">{opt.label}</div>
                 <div className="mt-0.5 opacity-70">{opt.desc}</div>
               </button>
@@ -5939,7 +5939,7 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
             {[60, 80, 100, 130, 160].map(v => (
               <button key={v} onClick={() => onUpdate({ ...entity, logoScale: v })}
                 className="flex-1 py-1 text-xs rounded border"
-                style={{ borderColor: (entity.logoScale || 100) === v ? 'var(--ink)' : 'var(--border)', background: (entity.logoScale || 100) === v ? 'var(--ink)' : 'transparent', color: (entity.logoScale || 100) === v ? '#fff' : 'var(--ink-2)' }}>
+                style={{ borderColor: (entity.logoScale || 100) === v ? 'var(--btn-primary)' : 'var(--border)', background: (entity.logoScale || 100) === v ? 'var(--btn-primary)' : 'transparent', color: (entity.logoScale || 100) === v ? '#fff' : 'var(--ink-2)' }}>
                 {v}%
               </button>
             ))}
@@ -5962,9 +5962,9 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
             return (
               <button key={key} onClick={() => onUpdate({ ...entity, templateOptions: { ...opts, [key]: !active } })}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg border text-xs transition-all text-left"
-                style={{ borderColor: active ? 'var(--ink)' : 'var(--border)', background: active ? 'var(--surface-2)' : 'transparent' }}>
+                style={{ borderColor: active ? 'var(--btn-primary)' : 'var(--border)', background: active ? 'var(--surface-2)' : 'transparent' }}>
                 <div className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center flex-shrink-0 ${active ? 'border-0' : ''}`}
-                  style={{ background: active ? 'var(--ink)' : 'transparent', borderColor: 'var(--border-strong)' }}>
+                  style={{ background: active ? 'var(--btn-primary)' : 'transparent', borderColor: 'var(--border-strong)' }}>
                   {active && <svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 4l2 2 4-4" stroke="#fff" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>}
                 </div>
                 <span style={{ color: 'var(--ink-2)' }}>{label}</span>
@@ -5989,9 +5989,9 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
             return (
               <button key={key} onClick={() => onUpdate({ ...entity, templateOptions: { ...opts, [key]: !active } })}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg border text-xs transition-all text-left"
-                style={{ borderColor: active ? 'var(--ink)' : 'var(--border)', background: active ? 'var(--surface-2)' : 'transparent' }}>
+                style={{ borderColor: active ? 'var(--btn-primary)' : 'var(--border)', background: active ? 'var(--surface-2)' : 'transparent' }}>
                 <div className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center flex-shrink-0 ${active ? 'border-0' : ''}`}
-                  style={{ background: active ? 'var(--ink)' : 'transparent', borderColor: 'var(--border-strong)' }}>
+                  style={{ background: active ? 'var(--btn-primary)' : 'transparent', borderColor: 'var(--border-strong)' }}>
                   {active && <svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 4l2 2 4-4" stroke="#fff" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>}
                 </div>
                 <span style={{ color: 'var(--ink-2)' }}>{label}</span>
@@ -6114,7 +6114,7 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
                         onClick={() => onUpdate({ ...entity, logoAlign: align })}
                         className="flex items-center justify-center w-5 h-5 rounded transition-all"
                         style={{
-                          background: (entity.logoAlign || 'left') === align ? 'var(--ink)' : 'transparent',
+                          background: (entity.logoAlign || 'left') === align ? 'var(--btn-primary)' : 'transparent',
                           color: (entity.logoAlign || 'left') === align ? '#fff' : 'var(--ink-2)',
                           border: 'none', cursor: 'pointer',
                         }}>
@@ -6132,7 +6132,7 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
                 <button
                   onClick={handleSaveEdits}
                   className="flex items-center gap-1.5 text-[10px] px-3 py-1.5 rounded-md"
-                  style={{ background: 'var(--ink)', color: '#fff', border: 'none', cursor: 'pointer' }}
+                  style={{ background: 'var(--btn-primary)', color: '#fff', border: 'none', cursor: 'pointer' }}
                 >
                   <Save size={10} /> Opslaan
                 </button>
@@ -6898,7 +6898,7 @@ const TaxReportView = ({ invoices, expenses, clients, settings, activeEntity }) 
                 onClick={() => setYear(y)}
                 className="px-3 py-1.5 text-sm rounded font-medium num"
                 style={{
-                  background: year === y ? 'var(--ink)' : 'transparent',
+                  background: year === y ? 'var(--btn-primary)' : 'transparent',
                   color: year === y ? '#fff' : 'var(--ink-2)',
                 }}
               >
@@ -7033,7 +7033,7 @@ const TaxReportView = ({ invoices, expenses, clients, settings, activeEntity }) 
                 <div><span className="font-mono font-medium mr-2">5b</span> Voorbelasting</div>
                 <div className="num font-medium w-24 text-right">{fmtCurrency(data.taxOnPurchases, baseCurr)}</div>
               </div>
-              <div className="px-5 py-3 flex items-center justify-between text-sm font-semibold" style={{ background: 'var(--ink)', color: '#fff' }}>
+              <div className="px-5 py-3 flex items-center justify-between text-sm font-semibold" style={{ background: 'var(--btn-primary)', color: '#fff' }}>
                 <div><span className="font-mono mr-2">5c</span> Saldo te betalen / terug</div>
                 <div className="num w-24 text-right">{fmtCurrency(data.saldo, baseCurr)}</div>
               </div>
@@ -7066,7 +7066,7 @@ const TaxReportView = ({ invoices, expenses, clients, settings, activeEntity }) 
                 <div>ITBIS adelantado (compras)</div>
                 <div className="num font-medium w-24 text-right">{fmtCurrency(data.taxOnPurchases, baseCurr)}</div>
               </div>
-              <div className="px-5 py-3 flex items-center justify-between text-sm font-semibold" style={{ background: 'var(--ink)', color: '#fff' }}>
+              <div className="px-5 py-3 flex items-center justify-between text-sm font-semibold" style={{ background: 'var(--btn-primary)', color: '#fff' }}>
                 <div>Saldo a pagar / favor</div>
                 <div className="num w-24 text-right">{fmtCurrency(data.saldo, baseCurr)}</div>
               </div>
@@ -7449,6 +7449,7 @@ const calcCompareTax = (code, eurRevenue, eurCosts, taxProfile = {}) => {
 // AI ADVISOR VIEW (Bedrijfsrapportage + fiscaal advies)
 // ============================================================================
 const AIAdvisorView = ({ entities, activeEntity, invoices, expenses, clients, settings }) => {
+  const { t } = useLang();
   const [mode, setMode] = useState('report'); // 'report' | 'advice' | 'chat' | 'tax'
   const [loading, setLoading] = useState(false);
   const [output, setOutput] = useState('');
@@ -7728,24 +7729,24 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
       <div>
         <h1 className="font-display text-4xl font-medium">AI Adviseur</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-          {activeEntity.name} · {jur.flag} {jur.name} · Live analyse van je cijfers
+          {activeEntity.name} · {jur.flag} {jur.name} · {t('ai.subtitle')}
         </p>
       </div>
 
       <Card className="p-2 flex gap-1 flex-wrap">
         {[
-          { id: 'report', label: 'Bedrijfsrapportage', icon: FileBarChart, action: runReport, desc: 'Snelle analyse van je YTD performance + concrete acties' },
-          { id: 'advice', label: 'Fiscaal advies', icon: Lightbulb, action: runAdvice, desc: `${jur.salesTax.name}-optimalisatie en aftrekposten specifiek voor ${jur.name}` },
-          { id: 'tax', label: 'Belasting prognose', icon: Calculator, action: null, desc: 'Bereken hoeveel je opzij moet zetten + landen vergelijker' },
-          { id: 'deduct', label: 'Aftrekposten gids', icon: Percent, action: null, desc: 'Wat mag je aftrekken in NL/DR/EE + exacte omschrijftips' },
-          { id: 'chat', label: 'Vrije vraag', icon: MessageSquare, action: null, desc: 'Stel zelf een vraag over je financiën of belastingen' },
+          { id: 'report', label: t('ai.tabReport'), icon: FileBarChart, action: runReport, desc: t('ai.tabReportDesc') },
+          { id: 'advice', label: t('ai.tabAdvice'), icon: Lightbulb, action: runAdvice, desc: `${jur.salesTax.name}-optimalisatie en aftrekposten specifiek voor ${jur.name}` },
+          { id: 'tax', label: t('ai.tabTax'), icon: Calculator, action: null, desc: t('ai.tabTaxDesc') },
+          { id: 'deduct', label: t('ai.tabDeduct'), icon: Percent, action: null, desc: t('ai.tabDeductDesc') },
+          { id: 'chat', label: t('ai.tabChat'), icon: MessageSquare, action: null, desc: t('ai.tabChatDesc') },
         ].map(t => (
           <button
             key={t.id}
             onClick={() => { setMode(t.id); setOutput(''); }}
             className="flex-1 min-w-[160px] flex items-center gap-2 px-3 py-2.5 rounded text-sm font-medium transition-colors"
             style={{
-              background: mode === t.id ? 'var(--ink)' : 'transparent',
+              background: mode === t.id ? 'var(--btn-primary)' : 'transparent',
               color: mode === t.id ? '#fff' : 'var(--ink-2)',
             }}
           >
@@ -7759,11 +7760,11 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
       {snapshot && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Card className="p-4">
-            <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>Omzet YTD</div>
+            <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>{t('ai.kpiRevenue')}</div>
             <div className="font-display text-xl mt-1 num">{fmtCurrency(snapshot.revenue, jur.baseCurrency)}</div>
           </Card>
           <Card className="p-4">
-            <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>Winst YTD</div>
+            <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>{t('ai.kpiProfit')}</div>
             <div className="font-display text-xl mt-1 num" style={{ color: snapshot.profit >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtCurrency(snapshot.profit, jur.baseCurrency)}</div>
           </Card>
           <Card className="p-4">
@@ -7771,7 +7772,7 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
             <div className="font-display text-xl mt-1 num" style={{ color: snapshot.btwNet >= 0 ? 'var(--accent)' : 'var(--success)' }}>{fmtCurrency(snapshot.btwNet, jur.baseCurrency)}</div>
           </Card>
           <Card className="p-4">
-            <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>Openstaand</div>
+            <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>{t('ai.kpiOutstanding')}</div>
             <div className="font-display text-xl mt-1 num" style={{ color: snapshot.overdue > 0 ? 'var(--danger)' : 'var(--ink)' }}>{fmtCurrency(snapshot.outstanding, jur.baseCurrency)}</div>
           </Card>
         </div>
@@ -7783,7 +7784,7 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
           <div className="flex items-start gap-3">
             <AlertCircle size={16} className="mt-0.5" style={{ color: 'var(--warning)' }} />
             <div className="text-xs flex-1" style={{ color: 'var(--ink-2)' }}>
-              <strong>AI key niet ingesteld.</strong> Vul een Anthropic (<span className="font-mono">sk-ant-...</span>) of OpenAI (<span className="font-mono">sk-...</span>) key in via <strong>Instellingen → AI</strong>.
+              <strong>{t('ai.keyMissing')}</strong> {t('ai.keyMissingDesc')}
             </div>
           </div>
         </Card>
@@ -7815,7 +7816,7 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
                     <button key={code} onClick={() => setDeductJur(code)}
                       className="px-3 py-1.5 rounded text-xs font-semibold"
                       title={name}
-                      style={{ background: activeJur === code ? 'var(--ink)' : 'var(--surface-2)', color: activeJur === code ? '#fff' : 'var(--ink-2)' }}>
+                      style={{ background: activeJur === code ? 'var(--btn-primary)' : 'var(--surface-2)', color: activeJur === code ? '#fff' : 'var(--ink-2)' }}>
                       {flag} {code}
                     </button>
                   ))}
@@ -8159,7 +8160,7 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
           {chatHistory.length > 0 && (
             <div className="space-y-3 mb-4 max-h-96 overflow-y-auto scrollable">
               {chatHistory.map((msg, i) => (
-                <div key={i} className={`p-3 rounded-lg text-sm ${msg.role === 'user' ? 'ml-8' : 'mr-8'}`} style={{ background: msg.role === 'user' ? 'var(--ink)' : 'var(--surface-2)', color: msg.role === 'user' ? '#fff' : 'var(--ink)' }}>
+                <div key={i} className={`p-3 rounded-lg text-sm ${msg.role === 'user' ? 'ml-8' : 'mr-8'}`} style={{ background: msg.role === 'user' ? 'var(--btn-primary)' : 'var(--surface-2)', color: msg.role === 'user' ? '#fff' : 'var(--ink)' }}>
                   {msg.role === 'user' ? msg.content : renderMarkdown(msg.content)}
                 </div>
               ))}
@@ -8171,7 +8172,7 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
               value={chatInput}
               onChange={e => setChatInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && !loading && sendChat()}
-              placeholder="Stel een vraag over je financiën, belastingen, structuur..."
+              placeholder={t('ai.chatPlaceholder')}
               className="flex-1 px-3 py-2.5 text-sm bg-white rounded-md border"
               style={{ borderColor: 'var(--border-strong)' }}
               disabled={loading}
@@ -8189,14 +8190,14 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex-1">
               <h3 className="font-display text-lg font-medium">
-                {mode === 'report' ? 'Bedrijfsrapportage' : 'Fiscaal advies'}
+                {mode === 'report' ? t('ai.tabReport') : t('ai.tabAdvice')}
               </h3>
               <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
                 {mode === 'report' ? 'Analyse van je YTD performance + concrete acties' : `${jur.salesTax.name}-optimalisatie en aftrekposten specifiek voor ${jur.name}`}
               </p>
             </div>
             <Button onClick={mode === 'report' ? runReport : runAdvice} disabled={loading}>
-              {loading ? <><RefreshCw size={14} className="animate-spin" /> Genereren...</> : <><Wand2 size={14} /> Genereer</>}
+              {loading ? <><RefreshCw size={14} className="animate-spin" /> {t('ai.generating')}</> : <><Wand2 size={14} /> {t('ai.generate')}</>}
             </Button>
           </div>
         </Card>
@@ -8224,7 +8225,7 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
           </div>
           <div className="mt-6 pt-4 border-t flex justify-end gap-2" style={{ borderColor: 'var(--border)' }}>
             <Button size="sm" variant="secondary" onClick={() => { navigator.clipboard?.writeText(output); }}>
-              <Copy size={12} /> Kopieer
+              <Copy size={12} /> {t('ai.copy')}
             </Button>
             <Button size="sm" variant="secondary" onClick={() => window.print()}>
               <Printer size={12} /> Print
@@ -8319,7 +8320,7 @@ function IntegratiesSection({ importToken, generateImportToken }) {
               onClick={handleGenerate}
               disabled={generating}
               className="px-4 py-2 text-sm rounded-lg flex items-center gap-2"
-              style={{ background: 'var(--ink)', color: '#fff', opacity: generating ? 0.6 : 1, cursor: generating ? 'wait' : 'pointer' }}
+              style={{ background: 'var(--btn-primary)', color: '#fff', opacity: generating ? 0.6 : 1, cursor: generating ? 'wait' : 'pointer' }}
             >
               <RefreshCw size={13} className={generating ? 'animate-spin' : ''} />
               {importToken ? 'Vernieuw token' : 'Genereer token'}
@@ -8362,23 +8363,23 @@ function IntegratiesSection({ importToken, generateImportToken }) {
         </h3>
         <ol className="space-y-3 text-sm" style={{ color: 'var(--text-2)' }}>
           <li className="flex gap-3">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--ink)', color: '#fff' }}>1</span>
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: '#fff' }}>1</span>
             <span>Maak een nieuw scenario in Make.com. Voeg module toe: <strong>Gmail → Watch Emails</strong>. Kies label <strong>Facturen</strong>, filter op <em>Ongelezen</em>.</span>
           </li>
           <li className="flex gap-3">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--ink)', color: '#fff' }}>2</span>
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: '#fff' }}>2</span>
             <span>Voeg module toe: <strong>Gmail → Mark as Read</strong> (zodat elke factuur maar één keer verwerkt wordt).</span>
           </li>
           <li className="flex gap-3">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--ink)', color: '#fff' }}>3</span>
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: '#fff' }}>3</span>
             <span>Voeg module toe: <strong>OpenAI → Create a Completion</strong>. Gebruik de e-mailtekst als input met onderstaand JSON-formaat als output (zie veldlijst).</span>
           </li>
           <li className="flex gap-3">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--ink)', color: '#fff' }}>4</span>
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: '#fff' }}>4</span>
             <span>Voeg module toe: <strong>HTTP → Make a request</strong>. Methode: <code className="px-1 rounded" style={{ background: 'var(--surface-2)' }}>POST</code>, URL: de webhook URL hierboven. Header: <code className="px-1 rounded" style={{ background: 'var(--surface-2)' }}>Authorization: Bearer &lt;jouw token&gt;</code>.</span>
           </li>
           <li className="flex gap-3">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--ink)', color: '#fff' }}>5</span>
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: '#fff' }}>5</span>
             <span>Zet de scenario aan en test met een echte factuur-mail in het label.</span>
           </li>
         </ol>
@@ -8487,7 +8488,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
     { id: 'credit', label: t('settings.credit'), icon: ShieldCheck },
     { id: 'status', label: t('settings.status'), icon: CheckCircle2 },
     { id: 'appearance', label: t('settings.appearance'), icon: Sparkles },
-    { id: 'integraties', label: 'Integraties', icon: Link2 },
+    { id: 'integraties', label: t('settings.integrations'), icon: Link2 },
   ];
 
   return (
@@ -8535,7 +8536,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                   background: active ? 'var(--surface-2)' : 'transparent',
                   color: active ? 'var(--ink)' : 'var(--ink-2)',
                   fontWeight: active ? 600 : 400,
-                  borderLeft: `2px solid ${active ? 'var(--ink)' : 'transparent'}`,
+                  borderLeft: `2px solid ${active ? 'var(--btn-primary)' : 'transparent'}`,
                 }}
               >
                 <Icon size={14} style={{ flexShrink: 0, opacity: active ? 1 : 0.5 }} />
@@ -8551,9 +8552,9 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
       {section === 'profile' && (
         <div className="space-y-5">
           <Card className="p-6 space-y-5">
-            <h3 className="font-display text-lg font-medium">Mijn profiel</h3>
+            <h3 className="font-display text-lg font-medium">{t('profile.title')}</h3>
             <div className="flex items-center gap-4">
-              <label style={{ position: 'relative', cursor: 'pointer', flexShrink: 0 }} title="Profielfoto wijzigen">
+              <label style={{ position: 'relative', cursor: 'pointer', flexShrink: 0 }} title={t('profile.avatarTooltip')}>
                 <div style={{
                   width: '64px', height: '64px', borderRadius: '50%', overflow: 'hidden',
                   background: profile?.avatar_url ? 'transparent' : 'linear-gradient(135deg, #4f46e5, #818cf8)',
@@ -8603,20 +8604,20 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                 }} />
               </label>
               <div>
-                <div className="font-semibold" style={{ color: 'var(--text)' }}>{profileName || 'Naam niet ingesteld'}</div>
+                <div className="font-semibold" style={{ color: 'var(--text)' }}>{profileName || t('profile.noName')}</div>
                 <div className="text-sm" style={{ color: 'var(--muted)' }}>{user?.email || ''}</div>
-                <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Klik op foto om te wijzigen</div>
+                <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{t('profile.clickToChange')}</div>
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
-                label="Volledige naam"
+                label={t('profile.fullName')}
                 value={profileName}
                 onChange={e => setProfileName(e.target.value)}
                 placeholder="Jan de Vries"
               />
               <Input
-                label="E-mailadres"
+                label={t('profile.emailField')}
                 value={user?.email || ''}
                 disabled
                 style={{ opacity: 0.6, cursor: 'not-allowed' }}
@@ -8624,20 +8625,20 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
             </div>
             <div className="flex items-center gap-3">
               <Button onClick={saveProfileName}>
-                {profileSaved ? <><Check size={14} /> Opgeslagen</> : <><Save size={14} /> Naam opslaan</>}
+                {profileSaved ? <><Check size={14} /> {t('settings.saved')}</> : <><Save size={14} /> {t('profile.saveBtn')}</>}
               </Button>
-              <span className="text-xs" style={{ color: 'var(--muted)' }}>E-mailadres kan niet worden gewijzigd</span>
+              <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('profile.emailReadonly')}</span>
             </div>
           </Card>
           <Card className="p-6 space-y-4">
-            <h3 className="font-display text-base font-medium">Account info</h3>
+            <h3 className="font-display text-base font-medium">{t('profile.accountInfo')}</h3>
             <div className="grid grid-cols-2 gap-y-2 text-sm">
-              <span style={{ color: 'var(--muted)' }}>Rol</span>
+              <span style={{ color: 'var(--muted)' }}>{t('profile.role')}</span>
               <span style={{ color: 'var(--text)', fontWeight: 500 }}>
-                {profile?.role === 'platform_admin' ? 'Platform Admin' : profile?.role === 'org_owner' ? 'Eigenaar' : profile?.role === 'accountant' ? 'Accountant' : 'Medewerker'}
+                {profile?.role === 'platform_admin' ? t('profile.roleAdmin') : profile?.role === 'org_owner' ? t('profile.roleOwner') : profile?.role === 'accountant' ? t('profile.roleAccountant') : t('profile.roleEmployee')}
               </span>
               {profile?.organization_id && <>
-                <span style={{ color: 'var(--muted)' }}>Organisatie ID</span>
+                <span style={{ color: 'var(--muted)' }}>{t('profile.orgId')}</span>
                 <span style={{ color: 'var(--text)', fontFamily: 'monospace', fontSize: '11px' }}>{profile.organization_id}</span>
               </>}
             </div>
@@ -8645,14 +8646,14 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
               <div className="space-y-4 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Input
-                    label="Organisatienaam"
+                    label={t('profile.orgName')}
                     value={orgName}
                     onChange={e => setOrgName(e.target.value)}
                     placeholder="Mijn Bedrijf BV"
                   />
                   {profile?.role === 'platform_admin' ? (
                     <div className="space-y-1">
-                      <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Pakket</label>
+                      <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>{t('profile.plan')}</label>
                       <select
                         value={orgPlan}
                         onChange={e => setOrgPlan(e.target.value)}
@@ -8666,7 +8667,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                     </div>
                   ) : (
                     <div className="space-y-1">
-                      <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Pakket</label>
+                      <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>{t('profile.plan')}</label>
                       <div className="px-3 py-2 text-sm rounded border capitalize" style={{ background: 'var(--bg-2)', color: 'var(--text)', borderColor: 'var(--border)' }}>
                         {organization.plan || 'starter'}
                       </div>
@@ -8674,7 +8675,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                   )}
                 </div>
                 <Button onClick={saveOrg}>
-                  {orgSaved ? <><Check size={14} /> Opgeslagen</> : <><Save size={14} /> Organisatie opslaan</>}
+                  {orgSaved ? <><Check size={14} /> {t('settings.saved')}</> : <><Save size={14} /> {t('profile.saveOrg')}</>}
                 </Button>
               </div>
             )}
@@ -8685,9 +8686,9 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
       {section === 'jurisdiction' && (
         <div className="space-y-5">
           <Card className="p-6 space-y-5">
-            <h3 className="font-display text-lg font-medium">Belastingjurisdictie</h3>
+            <h3 className="font-display text-lg font-medium">{t('jur.title')}</h3>
             <p className="text-sm" style={{ color: 'var(--muted)' }}>
-              Kies onder welke belastingdienst je je administratie voert. Dit bepaalt BTW-tarieven, grootboekrekeningen, aangiftefrequentie en de basis-valuta.
+              {t('jur.desc')}
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
               {Object.values(JURISDICTIONS).map(j => {
@@ -8719,7 +8720,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                       {j.code !== 'CUSTOM' ? (
                         <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>{j.salesTax.name} {j.salesTax.standard}%</div>
                       ) : (
-                        <div className="text-xs" style={{ color: 'var(--muted)' }}>Eigen regels</div>
+                        <div className="text-xs" style={{ color: 'var(--muted)' }}>{t('jur.customRules')}</div>
                       )}
                     </div>
                     {isActive && <Check size={11} className="shrink-0" style={{ color: 'var(--success)' }} />}
@@ -8732,28 +8733,28 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
           {/* Custom jurisdiction editor */}
           {(draft.jurisdiction || 'NL') === 'CUSTOM' && (
             <Card className="p-6 space-y-4">
-              <h3 className="font-display text-lg font-medium">Handmatige jurisdictie-instellingen</h3>
+              <h3 className="font-display text-lg font-medium">{t('jur.customTitle')}</h3>
               <p className="text-sm" style={{ color: 'var(--muted)' }}>
-                Vul hieronder de belastingregels in voor jouw land of situatie. Deze worden getoond in het Aangifte-overzicht en op facturen.
+                {t('jur.customDesc')}
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input label="Landnaam" value={draft.customJurisdiction?.countryName || ''} onChange={e => update('customJurisdiction.countryName', e.target.value)} placeholder="bijv. Singapore" />
-                <Input label="Belastingtype / naam" value={draft.customJurisdiction?.taxName || ''} onChange={e => update('customJurisdiction.taxName', e.target.value)} placeholder="bijv. GST, VAT, TVA" />
-                <Input label="Standaard belastingtarief (%)" type="number" min="0" max="100" step="0.1" value={draft.customJurisdiction?.standardRate ?? ''} onChange={e => update('customJurisdiction.standardRate', Number(e.target.value))} placeholder="bijv. 9" />
-                <Select label="Basis-valuta" value={draft.customJurisdiction?.currency || 'EUR'} onChange={e => { update('customJurisdiction.currency', e.target.value); update('baseCurrency', e.target.value); }}>
+                <Input label={t('jur.countryName')} value={draft.customJurisdiction?.countryName || ''} onChange={e => update('customJurisdiction.countryName', e.target.value)} placeholder="bijv. Singapore" />
+                <Input label={t('jur.taxType')} value={draft.customJurisdiction?.taxName || ''} onChange={e => update('customJurisdiction.taxName', e.target.value)} placeholder="bijv. GST, VAT, TVA" />
+                <Input label={t('jur.standardRate')} type="number" min="0" max="100" step="0.1" value={draft.customJurisdiction?.standardRate ?? ''} onChange={e => update('customJurisdiction.standardRate', Number(e.target.value))} placeholder="bijv. 9" />
+                <Select label={t('jur.baseCurrencyLabel', t('currency.baseLabel'))} value={draft.customJurisdiction?.currency || 'EUR'} onChange={e => { update('customJurisdiction.currency', e.target.value); update('baseCurrency', e.target.value); }}>
                   {SUPPORTED_CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.symbol} {c.code} — {c.name}</option>)}
                 </Select>
-                <Select label="Aangiftefrequentie" value={draft.customJurisdiction?.filingPeriod || 'quarterly'} onChange={e => update('customJurisdiction.filingPeriod', e.target.value)}>
-                  <option value="quarterly">Per kwartaal</option>
-                  <option value="monthly">Maandelijks</option>
-                  <option value="yearly">Jaarlijks</option>
+                <Select label={t('jur.filingPeriod')} value={draft.customJurisdiction?.filingPeriod || 'quarterly'} onChange={e => update('customJurisdiction.filingPeriod', e.target.value)}>
+                  <option value="quarterly">{t('jur.quarterly')}</option>
+                  <option value="monthly">{t('jur.monthly')}</option>
+                  <option value="yearly">{t('jur.yearly')}</option>
                 </Select>
-                <Input label="Indientermijn" value={draft.customJurisdiction?.filingDeadline || ''} onChange={e => update('customJurisdiction.filingDeadline', e.target.value)} placeholder="bijv. 30 dagen na kwartaaleinde" />
-                <Input label="Registratiegrens" value={draft.customJurisdiction?.registrationThreshold || ''} onChange={e => update('customJurisdiction.registrationThreshold', e.target.value)} placeholder="bijv. € 20.000 omzet/jaar" />
-                <Input label="Bewaarplicht" value={draft.customJurisdiction?.retentionPeriod || ''} onChange={e => update('customJurisdiction.retentionPeriod', e.target.value)} placeholder="bijv. 7 jaar" />
+                <Input label={t('jur.filingDeadline')} value={draft.customJurisdiction?.filingDeadline || ''} onChange={e => update('customJurisdiction.filingDeadline', e.target.value)} placeholder="bijv. 30 dagen na kwartaaleinde" />
+                <Input label={t('jur.regThreshold')} value={draft.customJurisdiction?.registrationThreshold || ''} onChange={e => update('customJurisdiction.registrationThreshold', e.target.value)} placeholder="bijv. € 20.000 omzet/jaar" />
+                <Input label={t('jur.retention')} value={draft.customJurisdiction?.retentionPeriod || ''} onChange={e => update('customJurisdiction.retentionPeriod', e.target.value)} placeholder="bijv. 7 jaar" />
               </div>
               <div className="space-y-3 pt-2">
-                <p className="text-xs font-medium" style={{ color: 'var(--ink-2)' }}>Extra belastingregels (optioneel)</p>
+                <p className="text-xs font-medium" style={{ color: 'var(--ink-2)' }}>{t('jur.extraRules')}</p>
                 {[1, 2, 3].map(n => (
                   <div key={n} className="grid grid-cols-2 gap-3">
                     <Input placeholder={`Regel ${n} — label`} value={draft.customJurisdiction?.[`rule${n}label`] || ''} onChange={e => update(`customJurisdiction.rule${n}label`, e.target.value)} />
@@ -8768,16 +8769,16 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
           <Card className="p-6">
             {(draft.jurisdiction || 'NL') === 'CUSTOM' ? (
               <>
-                <h3 className="font-display text-lg font-medium mb-3">⚙️ Handmatige jurisdictie — {draft.customJurisdiction?.countryName || 'Eigen land'}</h3>
+                <h3 className="font-display text-lg font-medium mb-3">⚙️ {t('jur.customTitle')} — {draft.customJurisdiction?.countryName || t('jur.customRules')}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                   {[
-                    { label: 'Belastingtype', value: draft.customJurisdiction?.taxName || '—' },
-                    { label: 'Standaard tarief', value: draft.customJurisdiction?.standardRate != null ? `${draft.customJurisdiction.standardRate}%` : '—' },
-                    { label: 'Basis-valuta', value: draft.customJurisdiction?.currency || draft.baseCurrency || 'EUR' },
-                    { label: 'Aangiftefrequentie', value: draft.customJurisdiction?.filingPeriod === 'monthly' ? 'Maandelijks' : draft.customJurisdiction?.filingPeriod === 'yearly' ? 'Jaarlijks' : 'Per kwartaal' },
-                    { label: 'Indientermijn', value: draft.customJurisdiction?.filingDeadline || '—' },
-                    { label: 'Registratiegrens', value: draft.customJurisdiction?.registrationThreshold || '—' },
-                    { label: 'Bewaarplicht', value: draft.customJurisdiction?.retentionPeriod || '—' },
+                    { label: t('jur.taxTypeRow'), value: draft.customJurisdiction?.taxName || '—' },
+                    { label: t('jur.standardRateRow'), value: draft.customJurisdiction?.standardRate != null ? `${draft.customJurisdiction.standardRate}%` : '—' },
+                    { label: t('currency.title'), value: draft.customJurisdiction?.currency || draft.baseCurrency || 'EUR' },
+                    { label: t('jur.filingPeriodRow'), value: draft.customJurisdiction?.filingPeriod === 'monthly' ? t('jur.monthly') : draft.customJurisdiction?.filingPeriod === 'yearly' ? t('jur.yearly') : t('jur.quarterly') },
+                    { label: t('jur.filingDeadline'), value: draft.customJurisdiction?.filingDeadline || '—' },
+                    { label: t('jur.regThreshold'), value: draft.customJurisdiction?.registrationThreshold || '—' },
+                    { label: t('jur.retention'), value: draft.customJurisdiction?.retentionPeriod || '—' },
                     ...[1, 2, 3].filter(n => draft.customJurisdiction?.[`rule${n}label`]).map(n => ({
                       label: draft.customJurisdiction[`rule${n}label`],
                       value: draft.customJurisdiction[`rule${n}value`] || '—',
@@ -8792,7 +8793,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
               </>
             ) : (
               <>
-                <h3 className="font-display text-lg font-medium mb-3">Belastingvoorwaarden — {JURISDICTIONS[draft.jurisdiction || 'NL'].flag} {JURISDICTIONS[draft.jurisdiction || 'NL'].name}</h3>
+                <h3 className="font-display text-lg font-medium mb-3">{t('jur.taxConditions')} — {JURISDICTIONS[draft.jurisdiction || 'NL'].flag} {JURISDICTIONS[draft.jurisdiction || 'NL'].name}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                   {JURISDICTIONS[draft.jurisdiction || 'NL'].rules.map((r, i) => (
                     <div key={i} className="flex justify-between py-1.5 border-b" style={{ borderColor: 'var(--border)' }}>
@@ -8804,19 +8805,19 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
               </>
             )}
             <div className="text-xs mt-4 pt-4 border-t" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-              Deze regels worden ook in het Aangifte-overzicht getoond. De app berekent alle bedragen aangifte-ready; je accountant doet de daadwerkelijke indiening.
+              {t('jur.taxRulesNote')}
             </div>
           </Card>
 
           {/* Currency settings */}
           <Card className="p-6 space-y-4">
-            <h3 className="font-display text-lg font-medium">Valuta</h3>
+            <h3 className="font-display text-lg font-medium">{t('currency.title')}</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Select label="Basis-valuta (voor rapportage)" value={draft.baseCurrency || 'EUR'} onChange={e => update('baseCurrency', e.target.value)}>
+              <Select label={t('currency.baseLabel')} value={draft.baseCurrency || 'EUR'} onChange={e => update('baseCurrency', e.target.value)}>
                 {SUPPORTED_CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.symbol} {c.code} — {c.name}</option>)}
               </Select>
               <div>
-                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--ink-2)' }}>Actieve valuta voor bonnen</label>
+                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--ink-2)' }}>{t('currency.activeCurrencies')}</label>
                 <div className="flex gap-1 flex-wrap">
                   {SUPPORTED_CURRENCIES.map(c => {
                     const active = (draft.enabledCurrencies || []).includes(c.code);
@@ -8830,9 +8831,9 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                         }}
                         className="px-3 py-2 text-xs font-medium rounded border"
                         style={{
-                          background: active ? 'var(--ink)' : 'transparent',
-                          color: active ? '#fff' : 'var(--ink-2)',
-                          borderColor: active ? 'var(--ink)' : 'var(--border-strong)',
+                          background: active ? 'var(--accent)' : 'var(--surface-2)',
+                          color: active ? '#fff' : 'var(--text-2)',
+                          borderColor: active ? 'var(--accent)' : 'var(--border-2)',
                         }}
                       >
                         {c.symbol} {c.code}
@@ -8845,12 +8846,12 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
             <div className="rounded-md p-3 text-xs flex items-start gap-2" style={{ background: 'var(--info-soft)', color: 'var(--info)' }}>
               <RefreshCw size={14} className="mt-0.5 shrink-0" />
               <div>
-                Bij het verwerken van een bon in vreemde valuta haalt de app de huidige koers op via een gratis ECB-gebaseerde service. Origineel bedrag, koers en geconverteerd bedrag worden allemaal bewaard voor je administratie.
+                {t('currency.exchangeNote')}
               </div>
             </div>
             {draft.exchangeRates?.fetched && (
               <div className="text-xs" style={{ color: 'var(--muted)' }}>
-                Laatste koersen opgehaald: {fmtDate(draft.exchangeRates.fetched)} ({draft.exchangeRates.base})
+                {t('currency.lastFetched')} {fmtDate(draft.exchangeRates.fetched)} ({draft.exchangeRates.base})
               </div>
             )}
           </Card>
@@ -8863,9 +8864,9 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
             <div className="flex items-start gap-3">
               <Wand2 size={18} style={{ color: 'var(--accent)' }} />
               <div className="text-xs leading-relaxed flex-1" style={{ color: 'var(--ink-2)' }}>
-                <strong>Kies factuur stijl voor: {activeEntity?.name}</strong>
+                <strong>{t('tmpl.chooseFor')} {activeEntity?.name}</strong>
                 <div className="mt-1" style={{ color: 'var(--muted)' }}>
-                  Iedere bedrijfseenheid kan een eigen template hebben. Switch via de selector linksboven naar een ander bedrijf om de template daarvoor in te stellen.
+                  {t('tmpl.switchHint')}
                 </div>
               </div>
             </div>
@@ -8897,15 +8898,13 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
       {section === 'ai' && (
         <Card className="p-6 space-y-5">
           <div>
-            <h3 className="font-display text-lg mb-2 font-medium">AI integratie</h3>
+            <h3 className="font-display text-lg mb-2 font-medium">{t('ai.settingsTitle')}</h3>
             <p className="text-sm" style={{ color: 'var(--muted)' }}>
-              De app gebruikt AI voor bon-scan, bedrijfsrapportage en fiscaal advies. Vul <strong>één</strong> van de onderstaande keys in — Anthropic (Claude) of OpenAI. De app detecteert automatisch welke provider te gebruiken op basis van het key-formaat. <strong>Je key is privé</strong> — hij wordt opgeslagen in jouw eigen account en is niet zichtbaar voor andere gebruikers.
+              {t('ai.settingsDesc')}
             </p>
           </div>
           <div className="rounded-md p-3 text-xs" style={{ background: 'var(--accent-soft)', color: 'var(--ink-2)', border: '1px solid var(--border-2)' }}>
-            <strong>Anthropic key</strong> begint met <span className="font-mono">sk-ant-</span> (console.anthropic.com) ·
-            <strong> OpenAI key</strong> begint met <span className="font-mono">sk-</span> (platform.openai.com) ·
-            Vul er één in — de ander mag leeg blijven
+            {t('ai.keyNote')}
           </div>
           <Input
             label="Anthropic API key (Claude)"
@@ -8926,13 +8925,13 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
           {(draft.apiKey || draft.openaiApiKey) && (
             <div className="rounded-md p-3 text-xs flex items-center gap-2" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
               <CheckCircle2 size={13} />
-              Actief: {draft.apiKey && detectProvider(draft.apiKey) === 'anthropic' ? 'Anthropic (Claude)' : draft.openaiApiKey ? 'OpenAI (GPT)' : '—'}
+              {t('ai.activeLabel')} {draft.apiKey && detectProvider(draft.apiKey) === 'anthropic' ? 'Anthropic (Claude)' : draft.openaiApiKey ? 'OpenAI (GPT)' : '—'}
             </div>
           )}
           <div className="rounded-md p-3 text-xs flex items-start gap-2" style={{ background: 'var(--warning-soft)', color: 'var(--ink-2)' }}>
             <AlertCircle size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--warning)' }} />
             <div>
-              <strong>Jouw key, jouw gebruik:</strong> De key wordt opgeslagen in jouw eigen account en gebruikt voor jouw eigen AI-aanroepen. Geen gedeeld gebruik met andere gebruikers.
+              {t('ai.keyPrivacy')}
             </div>
           </div>
         </Card>
@@ -8945,7 +8944,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
       {section === 'reminders' && (
         <Card className="p-6 space-y-5">
           <div className="flex items-center justify-between">
-            <h3 className="font-display text-lg font-medium">Herinneringen</h3>
+            <h3 className="font-display text-lg font-medium">{t('settings.reminders')}</h3>
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -8953,11 +8952,11 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                 onChange={e => update('reminders.enabled', e.target.checked)}
                 className="w-4 h-4"
               />
-              <span>Auto-herinneringen aan</span>
+              <span>{t('rem.autoEnabled')}</span>
             </label>
           </div>
           <div>
-            <label className="block text-xs font-medium mb-2" style={{ color: 'var(--ink-2)' }}>Schema (dagen na vervaldatum)</label>
+            <label className="block text-xs font-medium mb-2" style={{ color: 'var(--ink-2)' }}>{t('rem.schema')}</label>
             <div className="grid grid-cols-3 gap-3">
               {draft.reminders.schedule.map((days, idx) => (
                 <Input
@@ -8969,29 +8968,29 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                     sched[idx] = Number(e.target.value);
                     update('reminders.schedule', sched);
                   }}
-                  hint={`${idx + 1}e herinnering`}
+                  hint={`${t('rem.reminderN')} ${idx + 1}`}
                 />
               ))}
             </div>
           </div>
           <div className="space-y-4">
-            <h4 className="text-sm font-medium" style={{ color: 'var(--ink-2)' }}>Templates</h4>
+            <h4 className="text-sm font-medium" style={{ color: 'var(--ink-2)' }}>{t('rem.templates')}</h4>
             <p className="text-xs" style={{ color: 'var(--muted)' }}>
               Variabelen: <code>{'{{number}}'}</code> <code>{'{{contact}}'}</code> <code>{'{{amount}}'}</code> <code>{'{{date}}'}</code> <code>{'{{dueDate}}'}</code> <code>{'{{iban}}'}</code> <code>{'{{senderName}}'}</code>
             </p>
             {draft.reminders.templates.map((tmpl, idx) => (
               <Card key={idx} className="p-4 space-y-3" style={{ background: 'var(--surface-2)' }}>
-                <Input label={`Template ${idx + 1} naam`} value={tmpl.name} onChange={e => {
+                <Input label={`Template ${idx + 1} ${t('rem.templateName')}`} value={tmpl.name} onChange={e => {
                   const t = [...draft.reminders.templates];
                   t[idx] = { ...t[idx], name: e.target.value };
                   update('reminders.templates', t);
                 }} />
-                <Input label="Onderwerp" value={tmpl.subject} onChange={e => {
+                <Input label={t('rem.subject')} value={tmpl.subject} onChange={e => {
                   const t = [...draft.reminders.templates];
                   t[idx] = { ...t[idx], subject: e.target.value };
                   update('reminders.templates', t);
                 }} />
-                <Textarea label="Bericht" rows={5} value={tmpl.body} onChange={e => {
+                <Textarea label={t('rem.message')} rows={5} value={tmpl.body} onChange={e => {
                   const t = [...draft.reminders.templates];
                   t[idx] = { ...t[idx], body: e.target.value };
                   update('reminders.templates', t);
@@ -9005,21 +9004,21 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
       {section === 'email' && (
         <div className="space-y-5">
           <Card className="p-6 space-y-5">
-            <h3 className="font-display text-lg font-medium">Email instellingen</h3>
+            <h3 className="font-display text-lg font-medium">{t('email.settingsTitle')}</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input label="Afzender naam" value={draft.email.fromName} onChange={e => update('email.fromName', e.target.value)} />
-              <Input label="Afzender email" value={draft.email.fromEmail} onChange={e => update('email.fromEmail', e.target.value)} placeholder="paul@denhartoghsolutions.com" />
+              <Input label={t('email.fromName')} value={draft.email.fromName} onChange={e => update('email.fromName', e.target.value)} />
+              <Input label={t('email.fromEmail')} value={draft.email.fromEmail} onChange={e => update('email.fromEmail', e.target.value)} placeholder="paul@denhartoghsolutions.com" />
             </div>
             <Input
-              label="Resend API key (voor email verzending)"
+              label={t('email.resendKey')}
               type="password"
               value={draft.email.resendApiKey || ''}
               onChange={e => update('email.resendApiKey', e.target.value)}
               placeholder="re_..."
-              hint="Maak een gratis account aan op resend.com — tot 3.000 mails/maand gratis"
+              hint={t('email.resendHint')}
             />
-            <Input label="Standaard onderwerp factuur" value={draft.email.invoiceSubject} onChange={e => update('email.invoiceSubject', e.target.value)} />
-            <Textarea label="Standaard bericht factuur" rows={5} value={draft.email.invoiceBody} onChange={e => update('email.invoiceBody', e.target.value)} />
+            <Input label={t('email.invoiceSubject')} value={draft.email.invoiceSubject} onChange={e => update('email.invoiceSubject', e.target.value)} />
+            <Textarea label={t('email.invoiceBody')} rows={5} value={draft.email.invoiceBody} onChange={e => update('email.invoiceBody', e.target.value)} />
           </Card>
 
           <Card className="p-6 space-y-5">
@@ -9029,18 +9028,18 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
               </div>
               <div>
                 <h3 className="font-display text-lg font-medium">WhatsApp</h3>
-                <p className="text-xs" style={{ color: 'var(--muted)' }}>Facturen versturen via WhatsApp met een vooraf ingesteld bericht</p>
+                <p className="text-xs" style={{ color: 'var(--muted)' }}>{t('email.waSubtitle')}</p>
               </div>
             </div>
             <Input
-              label="Jouw WhatsApp-nummer (incl. landcode)"
+              label={t('email.waNumber')}
               value={draft.email.whatsappNumber || ''}
               onChange={e => update('email.whatsappNumber', e.target.value)}
               placeholder="+31612345678"
-              hint="Dit is het nummer dat in de facturen als afzender wordt weergegeven"
+              hint={t('email.waNumberHint')}
             />
             <Textarea
-              label="Standaard WhatsApp-bericht"
+              label={t('email.waMessage')}
               rows={4}
               value={draft.email.whatsappMessage || ''}
               onChange={e => update('email.whatsappMessage', e.target.value)}
@@ -9048,7 +9047,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
             />
             <div className="rounded-md p-3 text-xs flex items-start gap-2" style={{ background: 'rgba(37,211,102,0.08)', color: '#16a34a' }}>
               <MessageSquare size={13} className="mt-0.5 shrink-0" />
-              <div>Wanneer je op "Verstuur via WhatsApp" klikt op een factuur, opent WhatsApp Web automatisch met het ingevulde bericht. Geen API-koppeling nodig.</div>
+              <div>{t('email.waNote')}</div>
             </div>
           </Card>
         </div>
@@ -9056,8 +9055,8 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
 
       {section === 'categories' && (
         <Card className="p-6 space-y-4">
-          <h3 className="font-display text-lg font-medium">Kosten-categorieën</h3>
-          <p className="text-sm" style={{ color: 'var(--muted)' }}>Gebruikt bij het verwerken van bonnen voor je BTW-aangifte.</p>
+          <h3 className="font-display text-lg font-medium">{t('cat.title')}</h3>
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>{t('cat.desc')}</p>
           <div className="space-y-2">
             {draft.categories.map((cat, idx) => (
               <div key={idx} className="flex gap-2">
@@ -9077,7 +9076,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
               </div>
             ))}
             <Button size="sm" variant="secondary" onClick={() => update('categories', [...draft.categories, ''])}>
-              <Plus size={12} /> Categorie toevoegen
+              <Plus size={12} /> {t('cat.add')}
             </Button>
           </div>
         </Card>
@@ -9088,71 +9087,71 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
           <Card className="p-6 space-y-5">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="font-display text-lg font-medium">Creditbeheer</h3>
-                <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Volg laattijdige betalingen en stel escalatiedrempels in.</p>
+                <h3 className="font-display text-lg font-medium">{t('credit.title')}</h3>
+                <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{t('credit.desc')}</p>
               </div>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={draft.creditManagement?.enabled ?? true} onChange={e => update('creditManagement.enabled', e.target.checked)} className="w-4 h-4" />
-                <span>Ingeschakeld</span>
+                <span>{t('credit.enabled')}</span>
               </label>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
-                label="Escalatiegrens (aantal te late betalingen)"
+                label={t('credit.escalationThreshold')}
                 type="number"
                 min="1"
                 value={draft.creditManagement?.latePaymentThreshold ?? 3}
                 onChange={e => update('creditManagement.latePaymentThreshold', Number(e.target.value))}
-                hint="Aanbeveling voor dossieraanmaak na dit aantal te late betalingen"
+                hint={t('credit.escalationHint')}
               />
               <Input
-                label="Hoge factuurgrens (€) — bel-aanbeveling"
+                label={t('credit.highValueThreshold')}
                 type="number"
                 min="0"
                 value={draft.creditManagement?.highValueThreshold ?? 5000}
                 onChange={e => update('creditManagement.highValueThreshold', Number(e.target.value))}
-                hint="Aanbeveling voor telefonisch contact bij openstaande bedragen boven dit bedrag"
+                hint={t('credit.highValueHint')}
               />
             </div>
           </Card>
 
           <Card className="p-6 space-y-4">
-            <h3 className="font-display text-lg font-medium">Deurwaarder / Incassobureau</h3>
-            <p className="text-sm" style={{ color: 'var(--muted)' }}>Gegevens van de partij waarnaar dossiers worden gestuurd. Wordt automatisch ingevuld in dossier-emails.</p>
+            <h3 className="font-display text-lg font-medium">{t('credit.collectorTitle')}</h3>
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>{t('credit.collectorDesc')}</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input label="Contactpersoon naam" value={draft.creditManagement?.debtCollector?.name || ''} onChange={e => update('creditManagement.debtCollector.name', e.target.value)} placeholder="Jan de Vries" />
-              <Input label="Bedrijfsnaam" value={draft.creditManagement?.debtCollector?.company || ''} onChange={e => update('creditManagement.debtCollector.company', e.target.value)} placeholder="Incasso Groep BV" />
-              <Input label="E-mailadres" type="email" value={draft.creditManagement?.debtCollector?.email || ''} onChange={e => update('creditManagement.debtCollector.email', e.target.value)} placeholder="incasso@bureau.nl" />
-              <Input label="Telefoon" value={draft.creditManagement?.debtCollector?.phone || ''} onChange={e => update('creditManagement.debtCollector.phone', e.target.value)} placeholder="+31 20 123 4567" />
-              <Input label="Website" value={draft.creditManagement?.debtCollector?.website || ''} onChange={e => update('creditManagement.debtCollector.website', e.target.value)} placeholder="https://incasso.nl" />
+              <Input label={t('credit.collectorName')} value={draft.creditManagement?.debtCollector?.name || ''} onChange={e => update('creditManagement.debtCollector.name', e.target.value)} placeholder="Jan de Vries" />
+              <Input label={t('credit.collectorCompany')} value={draft.creditManagement?.debtCollector?.company || ''} onChange={e => update('creditManagement.debtCollector.company', e.target.value)} placeholder="Incasso Groep BV" />
+              <Input label={t('credit.collectorEmail')} type="email" value={draft.creditManagement?.debtCollector?.email || ''} onChange={e => update('creditManagement.debtCollector.email', e.target.value)} placeholder="incasso@bureau.nl" />
+              <Input label={t('credit.collectorPhone')} value={draft.creditManagement?.debtCollector?.phone || ''} onChange={e => update('creditManagement.debtCollector.phone', e.target.value)} placeholder="+31 20 123 4567" />
+              <Input label={t('credit.collectorWebsite')} value={draft.creditManagement?.debtCollector?.website || ''} onChange={e => update('creditManagement.debtCollector.website', e.target.value)} placeholder="https://incasso.nl" />
             </div>
             <div>
               <Textarea
-                label="Notities / instructies"
+                label={t('credit.collectorNotes')}
                 rows={3}
                 value={draft.creditManagement?.debtCollector?.notes || ''}
                 onChange={e => update('creditManagement.debtCollector.notes', e.target.value)}
-                placeholder="Eventuele instructies of opmerkingen voor het incassobureau..."
+                placeholder={t('credit.collectorNotesPlaceholder')}
               />
             </div>
           </Card>
 
           <Card className="p-6 space-y-4">
-            <h3 className="font-display text-lg font-medium">AI Credit Check (Graydon / extern)</h3>
+            <h3 className="font-display text-lg font-medium">{t('credit.aiCheckTitle')}</h3>
             <p className="text-sm" style={{ color: 'var(--muted)' }}>
-              Voeg een Graydon API-key toe voor externe bedrijfsdata in de AI-creditanalyse. Zonder key analyseert Claude op basis van de lokale betalingshistorie.
+              {t('credit.aiCheckDesc')}
             </p>
             <Input
-              label="Graydon API key (optioneel)"
+              label={t('credit.graydonKey')}
               type="password"
               value={draft.creditManagement?.graydonApiKey || ''}
               onChange={e => update('creditManagement.graydonApiKey', e.target.value)}
               placeholder="graydon_live_..."
-              hint="Verkrijgbaar via graydon.nl — verrijkt de AI-analyse met externe kredietdata"
+              hint={t('credit.graydonHint')}
             />
             <div className="rounded-md p-3 text-xs flex items-start gap-2" style={{ background: 'var(--info-soft)', color: 'var(--info)' }}>
               <AlertCircle size={13} className="mt-0.5 shrink-0" />
-              <div>Ga naar <strong>Creditbeheer</strong> in de navigatie om klantrisico's te bekijken, dossiers aan te maken en AI-analyses uit te voeren.</div>
+              <div>{t('credit.navHint')}</div>
             </div>
           </Card>
         </div>
@@ -9253,8 +9252,8 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                     onClick={() => setLang(code)}
                     className="px-5 py-2 rounded-lg border-2 text-sm font-semibold transition-all"
                     style={{
-                      borderColor: lang === code ? 'var(--ink)' : 'var(--border)',
-                      background: lang === code ? 'var(--ink)' : 'transparent',
+                      borderColor: lang === code ? 'var(--btn-primary)' : 'var(--border)',
+                      background: lang === code ? 'var(--btn-primary)' : 'transparent',
                       color: lang === code ? '#fff' : 'var(--text)',
                       cursor: 'pointer',
                     }}
@@ -9445,7 +9444,7 @@ const LinksView = () => {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-opacity hover:opacity-80 self-start"
-                    style={{ background: 'var(--ink)', color: '#fff' }}
+                    style={{ background: 'var(--btn-primary)', color: '#fff' }}
                   >
                     <Globe size={13} />
                     Openen

@@ -31,6 +31,8 @@
   --ink-2: var(--text-2);
   --muted: var(--text-3);
   --muted-2: #1a2f4a;
+  --btn-primary: #3b82f6;
+  --btn-primary-text: #fff;
 }
 
 [data-theme="light"] {
@@ -63,6 +65,8 @@
   --ink-2: var(--text-2);
   --muted: var(--text-3);
   --muted-2: #c0d4f4;
+  --btn-primary: #1d4ed8;
+  --btn-primary-text: #fff;
 }
 
 *, *::before, *::after { box-sizing: border-box; }

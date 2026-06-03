@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import { useLang } from './LangContext'
 import {
   TrendingUp, TrendingDown, Target, Droplets, Bell, BarChart3,
   ChevronRight, AlertTriangle, CheckCircle2, Clock, Plus, Trash2,
@@ -86,6 +87,7 @@ const customTooltip = ({ active, payload, label }) => {
 // 1. BEGROTING vs REALISATIE
 // ─────────────────────────────────────────────────────────────────
 function BudgetSection({ invoices, expenses, horizonData, setHorizonData }) {
+  const { t } = useLang()
   const [activeScenario, setActiveScenario] = useState('base')
   const [editingMonth, setEditingMonth] = useState(null)
 
@@ -109,10 +111,10 @@ function BudgetSection({ invoices, expenses, horizonData, setHorizonData }) {
 
   const chartData = MONTHS.map((m, i) => ({
     month: m,
-    'Realisatie': i <= currentMonth ? Math.round(actuals[i].omzet) : null,
-    'Begroting': Math.round(scenario.monthly[i]?.omzet || 0),
-    'Kosten (doel)': Math.round(scenario.monthly[i]?.kosten || 0),
-    'Kosten (act.)': i <= currentMonth ? Math.round(actuals[i].kosten) : null,
+    [t('horizon.actuals')]: i <= currentMonth ? Math.round(actuals[i].omzet) : null,
+    [t('horizon.budget')]: Math.round(scenario.monthly[i]?.omzet || 0),
+    [t('horizon.costsTarget')]: Math.round(scenario.monthly[i]?.kosten || 0),
+    [t('horizon.costsAct')]: i <= currentMonth ? Math.round(actuals[i].kosten) : null,
   }))
 
   const ytdOmzet = actuals.slice(0, currentMonth+1).reduce((s,m) => s + m.omzet, 0)
@@ -131,7 +133,7 @@ function BudgetSection({ invoices, expenses, horizonData, setHorizonData }) {
 
   return (
     <div>
-      <SectionHeader icon={Target} title="Begroting vs Realisatie" sub={`${currentYear} · Voortgang ten opzichte van jouw doelstellingen`} />
+      <SectionHeader icon={Target} title={t('horizon.budgetTitle')} sub={`${currentYear} · ${t('horizon.budgetSubtitle')}`} />
 
       {/* Scenario switcher */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
@@ -148,13 +150,13 @@ function BudgetSection({ invoices, expenses, horizonData, setHorizonData }) {
 
       {/* KPI grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '20px' }}>
-        <StatCard label="Omzet YTD" value={fmtK(ytdOmzet)} icon={TrendingUp} color="#6366f1"
-          delta={ytdBegrotingOmzet ? parseFloat(pct(ytdOmzet, ytdBegrotingOmzet)) : undefined} sub="vs begroting" />
-        <StatCard label="Kosten YTD" value={fmtK(ytdKosten)} icon={TrendingDown} color="#ef4444"
-          delta={ytdBegrotingKosten ? parseFloat(pct(ytdKosten, ytdBegrotingKosten)) : undefined} sub="vs begroting" positive={false} />
-        <StatCard label="Winst YTD" value={fmtK(ytdOmzet-ytdKosten)} icon={Zap} color="#22c55e"
-          delta={ytdBegrotingOmzet > 0 ? parseFloat(pct(ytdOmzet-ytdKosten, ytdBegrotingOmzet-ytdBegrotingKosten)) : undefined} sub="voor belasting" />
-        <StatCard label="Jaarforecast" value={fmtK(currentMonth > 0 ? Math.round(ytdOmzet/(currentMonth+1)*12) : 0)} icon={Target} color="#f97316" sub="bij huidig tempo" />
+        <StatCard label={t('horizon.revenueYtd')} value={fmtK(ytdOmzet)} icon={TrendingUp} color="#6366f1"
+          delta={ytdBegrotingOmzet ? parseFloat(pct(ytdOmzet, ytdBegrotingOmzet)) : undefined} sub={t('horizon.vsBudget')} />
+        <StatCard label={t('horizon.costsYtd')} value={fmtK(ytdKosten)} icon={TrendingDown} color="#ef4444"
+          delta={ytdBegrotingKosten ? parseFloat(pct(ytdKosten, ytdBegrotingKosten)) : undefined} sub={t('horizon.vsBudget')} positive={false} />
+        <StatCard label={t('horizon.profitYtd')} value={fmtK(ytdOmzet-ytdKosten)} icon={Zap} color="#22c55e"
+          delta={ytdBegrotingOmzet > 0 ? parseFloat(pct(ytdOmzet-ytdKosten, ytdBegrotingOmzet-ytdBegrotingKosten)) : undefined} sub={t('horizon.beforeTax')} />
+        <StatCard label={t('horizon.forecastYear')} value={fmtK(currentMonth > 0 ? Math.round(ytdOmzet/(currentMonth+1)*12) : 0)} icon={Target} color="#f97316" sub={t('horizon.atPace')} />
       </div>
 
       {/* Chart */}
@@ -167,10 +169,10 @@ function BudgetSection({ invoices, expenses, horizonData, setHorizonData }) {
             <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtK(v)} />
             <Tooltip content={customTooltip} />
             <Legend wrapperStyle={{ fontSize: 11, color: C.muted }} />
-            <Bar dataKey="Realisatie" fill="#6366f1" radius={[4,4,0,0]} />
-            <Bar dataKey="Begroting" fill="rgba(99,102,241,0.25)" radius={[4,4,0,0]} />
-            <Bar dataKey="Kosten (act.)" fill="#ef4444" radius={[4,4,0,0]} />
-            <Bar dataKey="Kosten (doel)" fill="rgba(239,68,68,0.2)" radius={[4,4,0,0]} />
+            <Bar dataKey={t('horizon.actuals')} fill="#6366f1" radius={[4,4,0,0]} />
+            <Bar dataKey={t('horizon.budget')} fill="rgba(99,102,241,0.25)" radius={[4,4,0,0]} />
+            <Bar dataKey={t('horizon.costsAct')} fill="#ef4444" radius={[4,4,0,0]} />
+            <Bar dataKey={t('horizon.costsTarget')} fill="rgba(239,68,68,0.2)" radius={[4,4,0,0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -178,8 +180,8 @@ function BudgetSection({ invoices, expenses, horizonData, setHorizonData }) {
       {/* Monthly budget table */}
       <div style={card}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-          <h3 style={{ margin: 0, fontSize: '13px', fontWeight: '600', color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Maanddoelen invoeren — {scenarios[activeScenario].name}</h3>
-          <span style={{ fontSize: '11px', color: C.muted }}>Klik om te bewerken</span>
+          <h3 style={{ margin: 0, fontSize: '13px', fontWeight: '600', color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t('horizon.monthlyGoals').replace('BASE CASE', scenarios[activeScenario].name)}</h3>
+          <span style={{ fontSize: '11px', color: C.muted }}>{t('horizon.editLink')}</span>
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -235,6 +237,7 @@ function BudgetSection({ invoices, expenses, horizonData, setHorizonData }) {
 // 2. LIQUIDITEITSPROGNOSE
 // ─────────────────────────────────────────────────────────────────
 function LiquiditySection({ invoices, expenses, horizonData, setHorizonData }) {
+  const { t } = useLang()
   const startBalance = horizonData.startBalance || 0
   const monthlyFixed = horizonData.monthlyFixed || 0 // recurring monthly costs
   const btwQuarter = horizonData.btwQuarter || 0
@@ -275,7 +278,7 @@ function LiquiditySection({ invoices, expenses, horizonData, setHorizonData }) {
 
   return (
     <div>
-      <SectionHeader icon={Droplets} title="Liquiditeitsprognose" sub="12 maanden vooruit — wanneer loop je droog?" color={C.info} />
+      <SectionHeader icon={Droplets} title={t('horizon.liquidTitle')} sub="12 maanden vooruit — wanneer loop je droog?" color={C.info} />
 
       {/* Config */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '12px', marginBottom: '20px' }}>
@@ -457,6 +460,7 @@ function RatiosSection({ invoices, expenses, horizonData, setHorizonData }) {
 // 4. AGING DEBITEUREN
 // ─────────────────────────────────────────────────────────────────
 function AgingSection({ invoices, clients }) {
+  const { t } = useLang()
   const today = new Date()
   const aged = useMemo(() => {
     const buckets = { '0-30': [], '31-60': [], '61-90': [], '90+': [] }
@@ -485,7 +489,7 @@ function AgingSection({ invoices, clients }) {
 
   return (
     <div>
-      <SectionHeader icon={Clock} title="Ouderdomsanalyse Debiteuren" sub="Hoelang staat geld open — per klant, per bucket" color={C.warning} />
+      <SectionHeader icon={Clock} title={t('horizon.agingTitle')} sub="Hoelang staat geld open — per klant, per bucket" color={C.warning} />
 
       {grandTotal === 0 ? (
         <div style={{ ...card, textAlign: 'center', padding: '48px', color: C.muted }}>
@@ -552,6 +556,7 @@ function AgingSection({ invoices, clients }) {
 // 5. ALERTS
 // ─────────────────────────────────────────────────────────────────
 function AlertsSection({ invoices, expenses, horizonData, setHorizonData }) {
+  const { t } = useLang()
   const [newAlert, setNewAlert] = useState({ type: 'cashflow', threshold: '', message: '' })
 
   const alerts = horizonData.alerts || []
@@ -596,7 +601,7 @@ function AlertsSection({ invoices, expenses, horizonData, setHorizonData }) {
 
   return (
     <div>
-      <SectionHeader icon={Bell} title="Alerts & Signalen" sub="Proactieve meldingen op basis van jouw drempelwaarden" color={C.warning} />
+      <SectionHeader icon={Bell} title={t('horizon.alertsTitle')} sub="Proactieve meldingen op basis van jouw drempelwaarden" color={C.warning} />
 
       {triggered.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
@@ -664,7 +669,7 @@ function AlertsSection({ invoices, expenses, horizonData, setHorizonData }) {
       ) : (
         <div style={{ ...card, textAlign: 'center', padding: '40px', color: C.muted }}>
           <Bell size={28} style={{ margin: '0 auto 10px', display: 'block', opacity: 0.4 }} />
-          <p style={{ margin: 0 }}>Nog geen alerts ingesteld. Voeg een alert toe om proactief gesignaleerd te worden.</p>
+          <p style={{ margin: 0 }}>{t('horizon.noAlerts')}</p>
         </div>
       )}
     </div>
@@ -674,17 +679,18 @@ function AlertsSection({ invoices, expenses, horizonData, setHorizonData }) {
 // ─────────────────────────────────────────────────────────────────
 // MAIN HorizonPlanner component
 // ─────────────────────────────────────────────────────────────────
-const TABS = [
-  { id: 'begroting',  label: 'Begroting',    icon: Target,    color: C.accent },
-  { id: 'liquiditeit',label: 'Liquiditeit',  icon: Droplets,  color: C.info },
-  { id: 'ratios',     label: "Ratio's & KPI's", icon: BarChart3, color: '#f97316' },
-  { id: 'aging',      label: 'Aging Debiteuren', icon: Clock,   color: C.warning },
-  { id: 'alerts',     label: 'Alerts',        icon: Bell,      color: C.success },
-]
-
 export default function HorizonPlanner({ invoices, expenses, clients, horizonData, setHorizonData }) {
+  const { t } = useLang()
   const [tab, setTab] = useState('begroting')
   const now = new Date()
+
+  const TABS = [
+    { id: 'begroting',  label: t('horizon.tabBudget'),    icon: Target,    color: C.accent },
+    { id: 'liquiditeit',label: t('horizon.tabLiquidity'), icon: Droplets,  color: C.info },
+    { id: 'ratios',     label: t('horizon.tabRatios'),    icon: BarChart3, color: '#f97316' },
+    { id: 'aging',      label: t('horizon.tabAging'),     icon: Clock,     color: C.warning },
+    { id: 'alerts',     label: t('horizon.tabAlerts'),    icon: Bell,      color: C.success },
+  ]
 
   // Jaarforecast
   const ytdOmzet = invoices.filter(i => i.paidAt && new Date(i.paidAt).getFullYear() === currentYear)
@@ -707,13 +713,13 @@ export default function HorizonPlanner({ invoices, expenses, clients, horizonDat
             <h1 style={{ fontSize: '32px', fontWeight: '700', color: 'var(--text)', margin: '0 0 4px', letterSpacing: '-0.03em' }}>
               HorizonPlanner
             </h1>
-            <p style={{ color: 'var(--text-3)', fontSize: '13px', margin: 0 }}>Begroting · Prognose · Ratio's · Alerts — forward-looking finance voor groei</p>
+            <p style={{ color: 'var(--text-3)', fontSize: '13px', margin: 0 }}>{t('horizon.subtitle')}</p>
           </div>
           {/* Live jaarforecast banner */}
           <div style={{ background: 'var(--accent-soft)', border: '1px solid var(--border-2)', borderRadius: '12px', padding: '12px 18px', display: 'flex', gap: '24px' }}>
             {[
-              { label: 'Forecast omzet', value: fmtK(forecastOmzet), color: C.accent },
-              { label: 'Forecast winst', value: fmtK(forecastWinst), color: C.success },
+              { label: t('horizon.forecastRevenue'), value: fmtK(forecastOmzet), color: C.accent },
+              { label: t('horizon.forecastProfit'), value: fmtK(forecastWinst), color: C.success },
             ].map(f => (
               <div key={f.label}>
                 <div style={{ fontSize: '10px', color: C.muted, fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '3px' }}>{f.label} {currentYear}</div>
@@ -721,7 +727,7 @@ export default function HorizonPlanner({ invoices, expenses, clients, horizonDat
               </div>
             ))}
             <div style={{ borderLeft: `1px solid ${C.border}`, paddingLeft: '20px' }}>
-              <div style={{ fontSize: '10px', color: C.muted, fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '3px' }}>Voortgang</div>
+              <div style={{ fontSize: '10px', color: C.muted, fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '3px' }}>{t('horizon.progressLabel')}</div>
               <div style={{ fontFamily: 'monospace', fontSize: '18px', fontWeight: '700', color: C.warning }}>{Math.round(currentMonth/12*100)}%</div>
             </div>
           </div>

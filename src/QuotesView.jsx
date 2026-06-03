@@ -1381,7 +1381,7 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
           <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap', alignItems: 'center' }}>
             {[{ key: 'all', label: `Alles (${quotes.length})` }, ...Object.entries(STATUSES).map(([k, s]) => ({ key: k, label: `${s.label} (${counts[k] || 0})` }))].map(({ key, label }) => (
               <button key={key} onClick={() => setFilter(key)}
-                style={{ padding: '6px 14px', borderRadius: 20, border: 'none', fontSize: 12, fontWeight: filter === key ? 700 : 500, cursor: 'pointer', background: filter === key ? '#6366f1' : 'var(--surface-2)', color: filter === key ? '#fff' : 'var(--text-2)', transition: 'all 0.12s' }}>
+                style={{ padding: '6px 14px', borderRadius: 20, border: 'none', fontSize: 12, fontWeight: filter === key ? 700 : 500, cursor: 'pointer', background: filter === key ? 'var(--btn-primary)' : 'var(--surface-2)', color: filter === key ? '#fff' : 'var(--text-2)', transition: 'all 0.12s' }}>
                 {label}
               </button>
             ))}

@@ -643,7 +643,7 @@ export default function CreditManagementView({ clients, invoices, settings, enti
           ].map(f => (
             <button key={f.id} onClick={() => setFilter(f.id)}
               style={{ padding: '6px 14px', borderRadius: '7px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: filter === f.id ? '600' : '500',
-                background: filter === f.id ? 'var(--text)' : 'transparent', color: filter === f.id ? 'var(--bg)' : 'var(--text-3)' }}>
+                background: filter === f.id ? 'var(--btn-primary)' : 'transparent', color: filter === f.id ? '#fff' : 'var(--text-3)' }}>
               {f.label}
             </button>
           ))}

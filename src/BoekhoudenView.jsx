@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useLang } from './LangContext'
 import {
   Plus, Trash2, Edit3, TrendingUp, RotateCcw,
   ChevronDown, ChevronRight, Car, Monitor, Building2, Package,
@@ -100,6 +101,7 @@ const Label = ({ children }) => (
 
 // ── Winst/Verlies tab ─────────────────────────────────────────────────────────
 function WinstVerliesTab({ invoices, expenses, assets, entries, clients }) {
+  const { t } = useLang()
   const currentYear = new Date().getFullYear()
   const [year, setYear] = useState(currentYear)
   const [open, setOpen] = useState({ revenue: true, costs: true, depreciation: true, memo: true })
@@ -172,16 +174,16 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients }) {
       {/* Header bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '13px', color: 'var(--text-3)' }}>Boekjaar:</span>
+          <span style={{ fontSize: '13px', color: 'var(--text-3)' }}>{t('bk.fiscalYear')}:</span>
           <select style={{ ...inp, width: 'auto', padding: '6px 12px' }} value={year} onChange={e => setYear(Number(e.target.value))}>
             {years.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
           {[
-            { label: 'Omzet', value: totalRevenue, color: 'var(--success)' },
-            { label: 'Kosten', value: totalCosts, color: 'var(--danger)' },
-            { label: 'Resultaat', value: result, color: result >= 0 ? 'var(--success)' : 'var(--danger)' },
+            { label: t('bk.revenueLabel'), value: totalRevenue, color: 'var(--success)' },
+            { label: t('bk.costsLabel'), value: totalCosts, color: 'var(--danger)' },
+            { label: t('bk.resultLabel'), value: result, color: result >= 0 ? 'var(--success)' : 'var(--danger)' },
           ].map(s => (
             <div key={s.label} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 16px', textAlign: 'right' }}>
               <div style={{ fontSize: '10px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: '3px' }}>{s.label}</div>
@@ -195,11 +197,11 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients }) {
       <Card>
         <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <TrendingUp size={15} style={{ color: 'var(--accent)' }} />
-          <span style={{ fontWeight: '600', color: 'var(--text)', fontSize: '14px' }}>Winst- en Verliesrekening {year}</span>
+          <span style={{ fontWeight: '600', color: 'var(--text)', fontSize: '14px' }}>{t('bk.plTitle')} {year}</span>
         </div>
 
         {/* Revenue */}
-        <SectionHeader label="Omzet (excl. BTW)" value={totalRevenue} sectionKey="revenue" color="var(--success)" />
+        <SectionHeader label={t('bk.revenue')} value={totalRevenue} sectionKey="revenue" color="var(--success)" />
         {open.revenue && (
           <>
             {paidInvoices.length === 0
@@ -209,12 +211,12 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients }) {
                 return <SubRow key={inv.id} label={`${inv.number || inv.id} — ${clientName}`} value={invoiceExBtw(inv.items)} color="var(--success)" />
               })
             }
-            <TotalRow label="Totaal omzet" value={totalRevenue} color="var(--success)" />
+            <TotalRow label={t('bk.totalRevenue')} value={totalRevenue} color="var(--success)" />
           </>
         )}
 
         {/* Costs */}
-        <SectionHeader label="Bedrijfskosten" value={totalCosts} sectionKey="costs" color="var(--danger)" />
+        <SectionHeader label={t('bk.costs')} value={totalCosts} sectionKey="costs" color="var(--danger)" />
         {open.costs && (
           <>
             {processedExpenses.length === 0
@@ -223,17 +225,17 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients }) {
                 <SubRow key={exp.id} label={`${exp.vendor || '—'}${exp.category ? ` (${exp.category})` : ''}`} value={exp.amount} color="var(--danger)" />
               ))
             }
-            <TotalRow label="Totaal kosten" value={totalCosts} color="var(--danger)" />
-            <TotalRow label="Brutomarge" value={brutomarge} color={brutomarge >= 0 ? 'var(--text)' : 'var(--danger)'} />
+            <TotalRow label={t('bk.totalCosts')} value={totalCosts} color="var(--danger)" />
+            <TotalRow label={t('bk.grossMargin')} value={brutomarge} color={brutomarge >= 0 ? 'var(--text)' : 'var(--danger)'} />
           </>
         )}
 
         {/* Depreciation */}
-        <SectionHeader label="Afschrijvingen" value={totalDepreciation} sectionKey="depreciation" color="var(--warning)" />
+        <SectionHeader label={t('bk.depreciation')} value={totalDepreciation} sectionKey="depreciation" color="var(--warning)" />
         {open.depreciation && (
           <>
             {(assets || []).filter(a => a.is_active !== false).length === 0
-              ? <div style={{ padding: '10px 32px', fontSize: '12px', color: 'var(--text-3)', fontStyle: 'italic', borderBottom: '1px solid var(--border)' }}>Geen activa geregistreerd</div>
+              ? <div style={{ padding: '10px 32px', fontSize: '12px', color: 'var(--text-3)', fontStyle: 'italic', borderBottom: '1px solid var(--border)' }}>{t('bk.noAssets')}</div>
               : (assets || []).filter(a => a.is_active !== false).map(asset => {
                 const { schedule } = computeAsset(asset)
                 const entry = schedule.find(s => s.year === year)
@@ -261,7 +263,7 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients }) {
 
         {/* Net result */}
         <TotalRow
-          label={result >= 0 ? `Nettowinst ${year}` : `Nettoverlies ${year}`}
+          label={`${result >= 0 ? t('bk.netProfit') : t('bk.netLoss')} ${year}`}
           value={Math.abs(result)}
           color={result >= 0 ? 'var(--success)' : 'var(--danger)'}
           large
@@ -273,6 +275,7 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients }) {
 
 // ── Vaste Activa tab ──────────────────────────────────────────────────────────
 function VasteActivaTab({ assets, setAssets }) {
+  const { t } = useLang()
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState(null)
   const [expandedId, setExpandedId] = useState(null)
@@ -338,7 +341,7 @@ function VasteActivaTab({ assets, setAssets }) {
           onClick={() => { setEditId(null); resetForm(); setShowForm(v => !v) }}
           style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '8px 14px', color: '#fff', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}
         >
-          <Plus size={14} /> Activum toevoegen
+          <Plus size={14} /> {t('bk.addAsset')}
         </button>
       </div>
 
@@ -523,6 +526,7 @@ function VasteActivaTab({ assets, setAssets }) {
 
 // ── Memoriaal tab ─────────────────────────────────────────────────────────────
 function MemoriaalTab({ entries, setEntries }) {
+  const { t } = useLang()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ date: todayISO(), description: '', amount: '', type: 'debet', category: 'Correctie' })
 
@@ -567,7 +571,7 @@ function MemoriaalTab({ entries, setEntries }) {
         </div>
         <button onClick={() => setShowForm(v => !v)}
           style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '8px 14px', color: '#fff', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>
-          <Plus size={14} /> Boeking toevoegen
+          <Plus size={14} /> {t('bk.addEntry')}
         </button>
       </div>
 
@@ -675,18 +679,19 @@ function MemoriaalTab({ entries, setEntries }) {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 export default function BoekhoudenView({ invoices, expenses, assets, setAssets, entries, setEntries, clients }) {
+  const { t } = useLang()
   const [tab, setTab] = useState('wv')
   const tabs = [
-    { id: 'wv', label: 'Winst/Verlies' },
-    { id: 'activa', label: 'Vaste Activa' },
-    { id: 'memoriaal', label: 'Memoriaal' },
+    { id: 'wv', label: t('bk.tabPL') },
+    { id: 'activa', label: t('bk.tabAssets') },
+    { id: 'memoriaal', label: t('bk.tabJournal') },
   ]
 
   return (
     <div>
       <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '26px', fontWeight: '700', color: 'var(--text)', margin: '0 0 4px', letterSpacing: '-0.02em' }}>Boekhouding</h1>
-        <p style={{ color: 'var(--text-3)', fontSize: '13px', margin: 0 }}>Winst/verlies, vaste activa & memoriaalboekingen</p>
+        <h1 style={{ fontSize: '26px', fontWeight: '700', color: 'var(--text)', margin: '0 0 4px', letterSpacing: '-0.02em' }}>{t('bk.title')}</h1>
+        <p style={{ color: 'var(--text-3)', fontSize: '13px', margin: 0 }}>{t('bk.subtitle')}</p>
       </div>
 
       <div style={{ display: 'flex', gap: '2px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '10px', padding: '4px', marginBottom: '20px', width: 'fit-content' }}>
