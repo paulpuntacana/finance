@@ -2206,7 +2206,11 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const stats = useMemo(() => {
-    const paidThisMonth = invoices.filter(i => i.paidAt && new Date(i.paidAt) >= monthStart);
+    const paidThisMonth = invoices.filter(i => {
+      if (i.status !== 'paid' && i.status !== 'partial') return false;
+      const ds = i.issueDate || i.date || i.paidAt;
+      return ds && new Date(ds) >= monthStart;
+    });
     const revenue = paidThisMonth.reduce((sum, i) => sum + computeInvoice(i.items).total, 0);
     const expensesThisMonth = expenses.filter(e => e.status === 'processed' && e.date && new Date(e.date) >= monthStart);
     const costs = expensesThisMonth.reduce((sum, e) => sum + Number(e.amount || 0), 0);
