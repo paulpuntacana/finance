@@ -177,6 +177,10 @@ const ThemeStyles = () => (
     @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
     .animate-in { animation: fadeIn 0.2s ease-out; }
     .animate-slide { animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+    @keyframes dotWave {
+      0%, 60%, 100% { transform: scale(1); opacity: 0.7; }
+      30% { transform: scale(1.55); opacity: 1; }
+    }
 
     .card-hover { transition: border-color 0.15s, box-shadow 0.15s; }
     .card-hover:hover { border-color: var(--border-2) !important; box-shadow: 0 2px 16px rgba(0,0,0,0.2); }
@@ -1731,6 +1735,36 @@ const createDefaultEntity = (settings) => ({
 // ============================================================================
 // UI PRIMITIVES
 // ============================================================================
+// 9-dot Grok-style icon with diagonal wave animation
+const NineDotsIcon = ({ size = 16, color = 'white', animated = false }) => {
+  const positions = [
+    [4, 4], [12, 4], [20, 4],
+    [4, 12], [12, 12], [20, 12],
+    [4, 20], [12, 20], [20, 20],
+  ];
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'block' }}>
+      {positions.map(([cx, cy], i) => {
+        const diagonal = Math.floor(cx / 8) + Math.floor(cy / 8);
+        return (
+          <circle
+            key={i}
+            cx={cx}
+            cy={cy}
+            r={2.4}
+            fill={color}
+            style={animated ? {
+              animation: `dotWave 1.8s ease-in-out infinite`,
+              animationDelay: `${diagonal * 0.18}s`,
+              transformOrigin: `${cx}px ${cy}px`,
+            } : { opacity: 0.9 }}
+          />
+        );
+      })}
+    </svg>
+  );
+};
+
 const Button = ({ variant = 'primary', size = 'md', className = '', children, ...props }) => {
   const base = 'inline-flex items-center justify-center gap-2 font-medium transition-all rounded-lg disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap';
   const sizes = {
@@ -2204,26 +2238,41 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
 const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setActiveTab, onSendReminder }) => {
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [aiInput, setAiInput] = useState('');
+  const [aiMessages, setAiMessages] = useState([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const aiBottomRef = useRef(null);
+  const msgContainerRef = useRef(null);
+  const autoAnalyzed = useRef(false);
 
   const stats = useMemo(() => {
-    const paidThisMonth = invoices.filter(i => {
-      if (i.status !== 'paid' && i.status !== 'partial') return false;
-      const ds = i.issueDate || i.date || i.paidAt;
+    // Omzet = alle gefactureerde bedragen deze maand (niet draft/cancelled)
+    const issuedThisMonth = invoices.filter(i => {
+      if (['draft', 'cancelled'].includes(i.status)) return false;
+      const ds = i.issueDate || i.date;
       return ds && new Date(ds) >= monthStart;
     });
-    const revenue = paidThisMonth.reduce((sum, i) => sum + computeInvoice(i.items).total, 0);
+    const omzet = issuedThisMonth.reduce((sum, i) => sum + computeInvoice(i.items).total, 0);
+    const btwOwed = issuedThisMonth.reduce((sum, i) => sum + computeInvoice(i.items).btwTotal, 0);
+
     const expensesThisMonth = expenses.filter(e => e.status === 'processed' && e.date && new Date(e.date) >= monthStart);
     const costs = expensesThisMonth.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-    const btwOwed = paidThisMonth.reduce((sum, i) => sum + computeInvoice(i.items).btwTotal, 0);
     const btwReclaim = expensesThisMonth.reduce((sum, e) => sum + Number(e.btwAmount || 0), 0);
-    const outstanding = invoices.filter(i => i.status === 'sent').reduce((sum, i) => sum + computeInvoice(i.items).total, 0);
-    const overdue = invoices.filter(i => computeInvoiceStatus(i) === 'overdue').reduce((sum, i) => sum + computeInvoice(i.items).total, 0);
+
+    const outstanding = invoices
+      .filter(i => ['sent', 'partial', 'overdue'].includes(computeInvoiceStatus(i)))
+      .reduce((sum, i) => sum + computeInvoice(i.items).total - (i.paidAmount || 0), 0);
+    const overdue = invoices
+      .filter(i => computeInvoiceStatus(i) === 'overdue')
+      .reduce((sum, i) => sum + computeInvoice(i.items).total - (i.paidAmount || 0), 0);
     const openExpenses = expenses.filter(e => e.status === 'open').length;
-    return { revenue, costs, btwOwed, btwReclaim, btwNet: btwOwed - btwReclaim, outstanding, overdue, openExpenses, profit: revenue - costs };
+
+    return { omzet, costs, btwOwed, btwReclaim, btwNet: btwOwed - btwReclaim, outstanding, overdue, openExpenses, profit: omzet - costs };
   }, [invoices, expenses]);
 
+  // Grafiek: gefactureerde omzet per maand (niet alleen betaald)
   const chartData = useMemo(() => {
-    const ref = new Date(); // vers binnen memo — geen stale-closure risico
+    const ref = new Date();
     const months = [];
     for (let i = 5; i >= 0; i--) {
       const mStart = new Date(ref.getFullYear(), ref.getMonth() - i, 1);
@@ -2231,8 +2280,8 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
       const label  = mStart.toLocaleDateString('nl-NL', { month: 'short' });
       const rev = invoices
         .filter(inv => {
-          if (inv.status !== 'paid' && inv.status !== 'partial') return false;
-          const ds = inv.paidAt || inv.issueDate;
+          if (['draft', 'cancelled'].includes(inv.status)) return false;
+          const ds = inv.issueDate || inv.date;
           if (!ds) return false;
           const t = new Date(ds).getTime();
           return t >= mStart.getTime() && t < mEnd.getTime();
@@ -2251,7 +2300,7 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
   }, [invoices, expenses]);
 
   const dueReminders = useMemo(() => {
-    if (!settings.reminders.enabled) return [];
+    if (!settings.reminders?.enabled) return [];
     const due = [];
     invoices.forEach(inv => {
       if (inv.status !== 'sent' || !inv.dueDate) return;
@@ -2267,222 +2316,505 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
     return due.filter((d, i, arr) => arr.findIndex(x => x.invoice.id === d.invoice.id) === i);
   }, [invoices, settings]);
 
-  const recentInvoices = [...invoices].sort((a, b) => new Date(b.issueDate) - new Date(a.issueDate)).slice(0, 5);
-  const openExpensesList = expenses.filter(e => e.status === 'open').slice(0, 4);
+  // Auto-insights: slimme observaties zonder API-call
+  const insights = useMemo(() => {
+    const list = [];
+    const overdueInvs = invoices.filter(i => computeInvoiceStatus(i) === 'overdue');
+    const overdueTotal = overdueInvs.reduce((s, i) => s + computeInvoice(i.items).total - (i.paidAmount || 0), 0);
+    if (overdueInvs.length > 0) {
+      list.push({
+        level: 'danger',
+        icon: AlertCircle,
+        title: `${overdueInvs.length} factuur${overdueInvs.length !== 1 ? 'en' : ''} achterstallig`,
+        text: `${fmtEUR(overdueTotal)} nog te ontvangen — stuur een herinnering`,
+        action: 'Bekijk',
+        tab: 'invoices',
+      });
+    }
+    if (stats.openExpenses > 0) {
+      list.push({
+        level: 'warning',
+        icon: ReceiptIcon,
+        title: `${stats.openExpenses} bon${stats.openExpenses !== 1 ? 'nen' : ''} wachten op verwerking`,
+        text: 'Scan en categoriseer je bonnen voor correcte BTW',
+        action: 'Verwerken',
+        tab: 'expenses',
+      });
+    }
+    if (dueReminders.length > 0) {
+      list.push({
+        level: 'warning',
+        icon: Bell,
+        title: `${dueReminders.length} herinnering${dueReminders.length !== 1 ? 'en' : ''} klaar om te versturen`,
+        text: 'Klanten hebben je herinneringsschema bereikt',
+        action: 'Verstuur',
+        onAction: () => onSendReminder(dueReminders[0].invoice, dueReminders[0].level),
+      });
+    }
+    if (stats.profit < 0 && stats.omzet > 0) {
+      list.push({
+        level: 'danger',
+        icon: TrendingUp,
+        title: 'Kosten hoger dan omzet deze maand',
+        text: `Verlies van ${fmtEUR(Math.abs(stats.profit))} — controleer je uitgaven`,
+        action: null,
+      });
+    }
+    if (list.length === 0 && stats.omzet > 0) {
+      list.push({
+        level: 'ok',
+        icon: CheckCircle2,
+        title: 'Alles ziet er goed uit',
+        text: `${fmtEUR(stats.omzet)} gefactureerd · geen achterstallige facturen`,
+        action: null,
+      });
+    }
+    return list;
+  }, [invoices, expenses, stats, dueReminders]);
+
+  const recentInvoices = [...invoices]
+    .sort((a, b) => new Date(b.issueDate || b.date || 0) - new Date(a.issueDate || a.date || 0))
+    .slice(0, 5);
+
+  const hasApiKey = !!(settings.apiKey || settings.openaiApiKey);
+
+  // Scroll alleen binnen het chat-venster, niet de hele pagina
+  useEffect(() => {
+    if (msgContainerRef.current) {
+      msgContainerRef.current.scrollTop = msgContainerRef.current.scrollHeight;
+    }
+  }, [aiMessages, aiLoading]);
+
+  // Volgende NL kwartaal-BTW deadline
+  const nextBTWDeadline = useMemo(() => {
+    const y = now.getFullYear();
+    const candidates = [
+      new Date(y, 0, 31), new Date(y, 3, 30),
+      new Date(y, 6, 31), new Date(y, 9, 31),
+      new Date(y + 1, 0, 31),
+    ];
+    return candidates.find(d => d > now);
+  }, []);
+  const daysToBTW = nextBTWDeadline
+    ? Math.ceil((nextBTWDeadline - now) / 86400000)
+    : null;
+
+  const buildFinancialContext = () => {
+    const topClients = [...clients]
+      .map(c => {
+        const inv = invoices.filter(i => i.clientId === c.id);
+        const total = inv.reduce((s, i) => s + computeInvoice(i.items).total, 0);
+        return { name: c.name, total, count: inv.length };
+      })
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5)
+      .map(c => `${c.name}: ${fmtEUR(c.total)} (${c.count} facturen)`)
+      .join(', ');
+    const monthName = now.toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
+    const btwDeadlineStr = nextBTWDeadline
+      ? `${nextBTWDeadline.toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' })} (over ${daysToBTW} dagen)`
+      : 'onbekend';
+    return `Financieel overzicht ${activeEntity?.name || 'Den Hartogh Solutions'} — ${monthName}:
+• Omzet (gefactureerd): ${fmtEUR(stats.omzet)}
+• Kosten (verwerkt): ${fmtEUR(stats.costs)}
+• Nettowinst: ${fmtEUR(stats.profit)}
+• BTW saldo: ${fmtEUR(Math.abs(stats.btwNet))} (${stats.btwNet > 0 ? 'af te dragen' : 'terug te vorderen'})
+• Volgende BTW-aangifte deadline: ${btwDeadlineStr}
+• Openstaand: ${fmtEUR(stats.outstanding)} | Achterstallig: ${fmtEUR(stats.overdue)}
+• Open bonnen: ${stats.openExpenses}
+• Totaal facturen: ${invoices.length} | Klanten: ${clients.length}
+• Top klanten: ${topClients || 'geen data'}`;
+  };
+
+  const AI_SYSTEM = (context) =>
+    `Je bent een proactieve, slimme financiële assistent voor Nederlandse ondernemers. Je denkt ACTIEF mee en attendeert op kansen, risico's en aankomende verplichtingen. Antwoord altijd in het Nederlands.
+
+Actuele data:
+${context}
+
+Wanneer je antwoordt:
+- Wees concreet en gebruik de echte bedragen uit de data
+- Wijs proactief op aankomende deadlines of risico's
+- Geef 1-2 concrete actiepunten als dat relevant is
+- Houd antwoorden beknopt (max 150 woorden)`;
+
+  const sendAiMessage = async (question) => {
+    const q = (question || aiInput).trim();
+    if (!q || aiLoading) return;
+    if (!hasApiKey) {
+      setAiMessages(prev => [...prev,
+        { role: 'user', content: q },
+        { role: 'assistant', content: 'Stel eerst een AI API key in via Instellingen → AI om de assistent te gebruiken.' },
+      ]);
+      setAiInput('');
+      return;
+    }
+    const userMsg = { role: 'user', content: q };
+    setAiMessages(prev => [...prev, userMsg]);
+    setAiInput('');
+    setAiLoading(true);
+    try {
+      const context = buildFinancialContext();
+      const history = [...aiMessages, userMsg].map(m => ({ role: m.role, content: m.content }));
+      const reply = await callAI({
+        system: AI_SYSTEM(context),
+        messages: history,
+        apiKey: settings.apiKey,
+        openaiApiKey: settings.openaiApiKey,
+        maxTokens: 700,
+      });
+      setAiMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+    } catch (e) {
+      setAiMessages(prev => [...prev, { role: 'assistant', content: `Fout: ${e.message}` }]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  // Proactieve analyse bij eerste open (eén keer per sessie)
+  useEffect(() => {
+    if (!hasApiKey || autoAnalyzed.current || invoices.length === 0) return;
+    autoAnalyzed.current = true;
+    const context = buildFinancialContext();
+    const prompt = `Geef me een beknopt proactief financieel dagoverzicht. Noem: 1) de belangrijkste aandachtspunten van dit moment, 2) wat ik deze week nog kan of moet doen, 3) een aankomende deadline of wijziging waar ik op moet letten. Gebruik mijn actuele data.`;
+    setAiLoading(true);
+    callAI({
+      system: AI_SYSTEM(context),
+      messages: [{ role: 'user', content: prompt }],
+      apiKey: settings.apiKey,
+      openaiApiKey: settings.openaiApiKey,
+      maxTokens: 700,
+    }).then(reply => {
+      setAiMessages([{ role: 'assistant', content: reply }]);
+    }).catch(e => {
+      setAiMessages([{ role: 'assistant', content: `Kon geen analyse laden: ${e.message}` }]);
+    }).finally(() => setAiLoading(false));
+  }, [hasApiKey]);
+
+  const quickQuestions = [
+    'Geef een financieel overzicht',
+    'Welke facturen zijn achterstallig?',
+    'Hoe staat mijn BTW er voor?',
+    'Tips om cashflow te verbeteren',
+  ];
+
+  const INSIGHT_STYLE = {
+    danger: { bg: '#fef2f2', border: '#fecaca', iconColor: '#ef4444', textColor: '#991b1b', btnBg: '#fee2e2' },
+    warning: { bg: '#fffbeb', border: '#fde68a', iconColor: '#d97706', textColor: '#92400e', btnBg: '#fef3c7' },
+    ok:      { bg: '#f0fdf4', border: '#bbf7d0', iconColor: '#16a34a', textColor: '#166534', btnBg: '#dcfce7' },
+    info:    { bg: '#eff6ff', border: '#bfdbfe', iconColor: '#3b82f6', textColor: '#1e40af', btnBg: '#dbeafe' },
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="font-display text-4xl font-medium" style={{ color: 'var(--ink)' }}>{activeEntity?.name || 'Overzicht'}</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+    <div className="space-y-4">
+      {/* ── Header ── */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="font-display text-2xl md:text-4xl font-medium truncate" style={{ color: 'var(--ink)' }}>
+            {activeEntity?.name || 'Overzicht'}
+          </h1>
+          <p className="text-xs md:text-sm mt-0.5" style={{ color: 'var(--muted)' }}>
             {activeEntity && (
-              <>
-                {JURISDICTIONS[activeEntity.jurisdiction || 'NL'].flag} {getEntityType(activeEntity.type).label} ·{' '}
-              </>
+              <>{JURISDICTIONS[activeEntity.jurisdiction || 'NL'].flag} {getEntityType(activeEntity.type).label} · </>
             )}
             {now.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
         </div>
+        {/* Grote touch-targets op mobiel */}
+        <div className="flex gap-2 flex-shrink-0">
+          <button
+            onClick={() => setActiveTab('expenses')}
+            className="w-10 h-10 md:w-auto md:h-auto md:px-3 md:py-2 rounded-xl flex items-center justify-center gap-1.5 text-sm font-medium border transition-colors active:scale-95"
+            style={{ borderColor: 'var(--border-2)', background: 'var(--surface-2)', color: 'var(--text)' }}
+          >
+            <ReceiptIcon size={16} />
+            <span className="hidden md:inline">Bon</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('invoices')}
+            className="w-10 h-10 md:w-auto md:h-auto md:px-3 md:py-2 rounded-xl flex items-center justify-center gap-1.5 text-sm font-medium transition-colors active:scale-95"
+            style={{ background: 'var(--accent)', color: '#fff' }}
+          >
+            <Plus size={16} />
+            <span className="hidden md:inline">Factuur</span>
+          </button>
+        </div>
       </div>
 
-      {/* KPI Cards */}
+      {/* ── KPI Cards — 2×2 mobiel, 4 desktop ── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: 'Omzet', value: fmtEUR(stats.revenue), sub: 'deze maand', icon: TrendingUp, iconColor: '#f97316', accentVar: '#f97316' },
-          { label: 'Kosten', value: fmtEUR(stats.costs), sub: `${expenses.filter(e => e.status === 'processed' && e.date && new Date(e.date) >= monthStart).length} bonnen`, icon: Wallet, iconColor: 'var(--danger)', accentVar: '#ef4444' },
-          { label: 'BTW saldo', value: fmtEUR(stats.btwNet), sub: stats.btwNet > 0 ? 'Af te dragen' : 'Terug te vorderen', icon: Percent, iconColor: 'var(--warning)', accentVar: '#f59e0b' },
-          { label: 'Nettowinst', value: fmtEUR(stats.profit), sub: 'voor belasting', icon: Zap, iconColor: stats.profit >= 0 ? 'var(--success)' : 'var(--danger)', accentVar: stats.profit >= 0 ? '#10b981' : '#ef4444' },
+          { label: 'Omzet', value: fmtEUR(stats.omzet), sub: 'gefactureerd', icon: TrendingUp, color: '#3b82f6' },
+          { label: 'Openstaand', value: fmtEUR(stats.outstanding), sub: stats.overdue > 0 ? `${fmtEUR(stats.overdue)} te laat` : 'Alles op tijd', icon: Clock, color: stats.overdue > 0 ? '#ef4444' : '#10b981' },
+          { label: 'BTW', value: fmtEUR(Math.abs(stats.btwNet)), sub: stats.btwNet >= 0 ? 'af te dragen' : 'terug', icon: Percent, color: '#f59e0b' },
+          { label: 'Winst', value: fmtEUR(stats.profit), sub: 'deze maand', icon: Zap, color: stats.profit >= 0 ? '#10b981' : '#ef4444' },
         ].map((k, i) => (
-          <Card key={i} className="p-5" style={{ borderTop: `2px solid ${k.accentVar}22` }}>
-            <div className="flex items-center justify-between mb-4">
+          <Card key={i} className="p-4">
+            <div className="flex items-center justify-between mb-2">
               <div className="text-[10px] uppercase tracking-[0.08em] font-semibold" style={{ color: 'var(--text-3)' }}>{k.label}</div>
-              <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${k.accentVar}18` }}>
-                <k.icon size={14} style={{ color: k.iconColor }} />
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${k.color}18` }}>
+                <k.icon size={12} style={{ color: k.color }} />
               </div>
             </div>
-            <div className="num font-bold" style={{ fontSize: '22px', color: 'var(--text)', letterSpacing: '-0.03em' }}>{k.value}</div>
-            <div className="text-xs mt-1.5" style={{ color: 'var(--text-3)' }}>{k.sub}</div>
+            <div className="num font-bold" style={{ fontSize: '18px', color: 'var(--text)', letterSpacing: '-0.03em', lineHeight: 1.1 }}>{k.value}</div>
+            <div className="text-[11px] mt-1.5" style={{ color: 'var(--text-3)' }}>{k.sub}</div>
           </Card>
         ))}
       </div>
 
-      {/* Reminders Banner */}
-      {dueReminders.length > 0 && (
-        <Card className="p-5" style={{ background: 'var(--warning-soft)', borderColor: '#E5C088' }}>
-          <div className="flex items-start gap-4">
-            <div className="rounded-full p-2" style={{ background: 'rgba(180, 83, 9, 0.15)' }}>
-              <Bell size={18} style={{ color: 'var(--warning)' }} />
+      {/* ── Insights / Actiepunten ── */}
+      <div className="space-y-2">
+        {insights.map((ins, i) => {
+          const s = INSIGHT_STYLE[ins.level] || INSIGHT_STYLE.info;
+          return (
+            <div
+              key={i}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl"
+              style={{ background: s.bg, border: `1px solid ${s.border}` }}
+            >
+              <ins.icon size={16} style={{ color: s.iconColor, flexShrink: 0 }} />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold leading-tight" style={{ color: s.textColor }}>{ins.title}</div>
+                <div className="text-[11px] mt-0.5 leading-snug" style={{ color: s.textColor, opacity: 0.8 }}>{ins.text}</div>
+              </div>
+              {ins.action && (
+                <button
+                  onClick={ins.onAction ? ins.onAction : () => setActiveTab(ins.tab)}
+                  className="text-xs font-semibold flex-shrink-0 px-3 py-1.5 rounded-lg transition-colors active:scale-95"
+                  style={{ background: s.btnBg, color: s.textColor }}
+                >
+                  {ins.action}
+                </button>
+              )}
             </div>
-            <div className="flex-1">
-              <h3 className="font-medium" style={{ color: 'var(--ink)' }}>
-                {dueReminders.length} herinnering{dueReminders.length !== 1 ? 'en' : ''} klaar om te versturen
-              </h3>
-              <p className="text-sm mt-1" style={{ color: 'var(--ink-2)' }}>
-                Volgens je herinneringsschema staan deze klaar voor verzending.
-              </p>
-              <div className="mt-3 space-y-2">
-                {dueReminders.slice(0, 3).map((d, i) => {
-                  const client = clients.find(c => c.id === d.invoice.clientId);
-                  return (
-                    <div key={i} className="flex items-center justify-between bg-white rounded-md p-3 text-sm" style={{ border: '1px solid var(--border)' }}>
-                      <div>
-                        <span className="font-mono font-medium">{d.invoice.number}</span>
-                        <span className="mx-2" style={{ color: 'var(--muted)' }}>·</span>
-                        <span>{client?.name || 'Onbekend'}</span>
-                        <span className="ml-2 text-xs" style={{ color: 'var(--warning)' }}>{d.daysOverdue} dagen te laat</span>
-                      </div>
-                      <Button size="sm" onClick={() => onSendReminder(d.invoice, d.level)}>
-                        <Send size={12} /> {settings.reminders.templates[d.level]?.name || `Herinnering ${d.level + 1}`}
-                      </Button>
-                    </div>
-                  );
-                })}
+          );
+        })}
+      </div>
+
+      {/* ── AI Assistent — full width, prominent ── */}
+      <Card className="flex flex-col overflow-hidden">
+        <div className="px-4 py-3 border-b flex items-center gap-3" style={{ borderColor: 'var(--border)' }}>
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
+          >
+            <NineDotsIcon size={16} color="white" animated={true} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-sm" style={{ color: 'var(--ink)' }}>AI Assistent</h3>
+            <p className="text-[11px]" style={{ color: 'var(--muted)' }}>
+              {hasApiKey ? 'Vraag iets over je financiën' : 'Stel een API key in via Instellingen → AI'}
+            </p>
+          </div>
+          {aiMessages.length > 0 && (
+            <button
+              onClick={() => setAiMessages([])}
+              className="text-[11px] px-2 py-1 rounded-lg transition-colors hover:opacity-70"
+              style={{ color: 'var(--muted)' }}
+            >
+              Wis
+            </button>
+          )}
+          {!hasApiKey && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold flex-shrink-0" style={{ background: '#fef3c7', color: '#92400e' }}>
+              Geen key
+            </span>
+          )}
+        </div>
+
+        {/* Berichten */}
+        <div ref={msgContainerRef} className="px-4 py-3 overflow-y-auto space-y-2.5" style={{ minHeight: 72, maxHeight: 240 }}>
+          {aiMessages.length === 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {quickQuestions.map((q, i) => (
+                <button
+                  key={i}
+                  onClick={() => sendAiMessage(q)}
+                  disabled={aiLoading}
+                  className="text-xs px-3 py-1.5 rounded-full border transition-colors hover:bg-stone-50 active:scale-95 disabled:opacity-50"
+                  style={{ borderColor: 'var(--border)', color: 'var(--ink-2)' }}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          ) : (
+            aiMessages.map((m, i) => (
+              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div
+                  className="rounded-2xl px-3 py-2 text-sm max-w-[88%] leading-relaxed"
+                  style={m.role === 'user'
+                    ? { background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', color: 'white' }
+                    : { background: 'var(--surface-2)', color: 'var(--ink)', border: '1px solid var(--border)' }
+                  }
+                >
+                  {m.content}
+                </div>
+              </div>
+            ))
+          )}
+          {aiLoading && (
+            <div className="flex justify-start">
+              <div className="rounded-2xl px-4 py-2.5 flex gap-1.5" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                <span className="animate-bounce inline-block font-bold text-lg leading-none" style={{ animationDelay: '0ms', color: 'var(--muted)' }}>·</span>
+                <span className="animate-bounce inline-block font-bold text-lg leading-none" style={{ animationDelay: '150ms', color: 'var(--muted)' }}>·</span>
+                <span className="animate-bounce inline-block font-bold text-lg leading-none" style={{ animationDelay: '300ms', color: 'var(--muted)' }}>·</span>
               </div>
             </div>
-          </div>
-        </Card>
-      )}
+          )}
+          <div ref={aiBottomRef} />
+        </div>
 
-      {/* Chart + Side Panel */}
+        {/* Input */}
+        <div className="px-4 py-3 border-t" style={{ borderColor: 'var(--border)' }}>
+          <div className="flex gap-2 items-center">
+            <input
+              type="text"
+              value={aiInput}
+              onChange={e => setAiInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendAiMessage()}
+              placeholder="Stel een vraag over je financiën..."
+              disabled={aiLoading}
+              className="flex-1 text-sm rounded-xl border px-3 py-2.5 outline-none"
+              style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--ink)' }}
+            />
+            <button
+              onClick={() => sendAiMessage()}
+              disabled={!aiInput.trim() || aiLoading}
+              className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-30 transition-all active:scale-95"
+              style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
+            >
+              <Send size={14} color="white" />
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      {/* ── Grafiek + rechterkolom (desktop) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="p-5 lg:col-span-2">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="font-display text-lg font-medium" style={{ color: 'var(--ink)' }}>Omzet & Kosten</h2>
-              <p className="text-xs" style={{ color: 'var(--muted)' }}>Laatste 6 maanden</p>
-            </div>
+          <div className="mb-3">
+            <h2 className="font-display text-base font-semibold" style={{ color: 'var(--ink)' }}>Omzet & Kosten</h2>
+            <p className="text-[11px]" style={{ color: 'var(--muted)' }}>Laatste 6 maanden · gefactureerd</p>
           </div>
-          <ResponsiveContainer width="100%" height={240}>
-            <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+          <ResponsiveContainer width="100%" height={170}>
+            <AreaChart data={chartData} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>
               <defs>
                 <linearGradient id="omzetGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25}/>
                   <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
                 </linearGradient>
                 <linearGradient id="kostenGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#ef4444" stopOpacity={0.18}/>
+                  <stop offset="5%" stopColor="#ef4444" stopOpacity={0.15}/>
                   <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="2 6" stroke="rgba(59,130,246,0.08)" vertical={false} />
-              <XAxis dataKey="month" stroke="var(--text-3)" fontSize={11} tickLine={false} axisLine={false} />
-              <YAxis stroke="var(--text-3)" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `€${(v/1000).toFixed(0)}k`} />
+              <CartesianGrid strokeDasharray="2 6" stroke="rgba(59,130,246,0.07)" vertical={false} />
+              <XAxis dataKey="month" stroke="var(--text-3)" fontSize={10} tickLine={false} axisLine={false} />
+              <YAxis
+                stroke="var(--text-3)"
+                fontSize={10}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(v) => v >= 1000 ? `€${(v / 1000).toFixed(0)}k` : `€${v}`}
+              />
               <Tooltip
                 contentStyle={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 10, fontSize: 12, color: 'var(--text)' }}
-                formatter={(v) => fmtEUR(v)}
+                formatter={(v, name) => [fmtEUR(v), name === 'omzet' ? 'Omzet' : 'Kosten']}
               />
-              <Area type="monotone" dataKey="omzet" stroke="#1A1612" strokeWidth={2} fill="url(#omzetGrad)" />
-              <Area type="monotone" dataKey="kosten" stroke="#7C2D2D" strokeWidth={2} fill="url(#kostenGrad)" />
+              <Area type="monotone" dataKey="omzet" stroke="#3b82f6" strokeWidth={2} fill="url(#omzetGrad)" name="omzet" />
+              <Area type="monotone" dataKey="kosten" stroke="#ef4444" strokeWidth={1.5} fill="url(#kostenGrad)" name="kosten" />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
 
-        <div className="space-y-4">
-          <Card className="p-5">
-            <h3 className="text-sm font-medium mb-3" style={{ color: 'var(--ink)' }}>Openstaand</h3>
-            <div className="space-y-3">
-              <div className="flex items-baseline justify-between">
-                <span className="text-xs" style={{ color: 'var(--muted)' }}>Verstuurd</span>
-                <span className="font-display text-xl num">{fmtEUR(stats.outstanding)}</span>
-              </div>
-              <div className="flex items-baseline justify-between">
-                <span className="text-xs" style={{ color: 'var(--muted)' }}>Te laat</span>
-                <span className="font-display text-xl num" style={{ color: 'var(--danger)' }}>{fmtEUR(stats.overdue)}</span>
-              </div>
+        {/* Desktop right panel */}
+        <div className="hidden lg:flex flex-col gap-4">
+          <Card className="p-4 flex-1">
+            <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--ink)' }}>Te vorderen</h3>
+            <div className="space-y-2.5">
+              {[
+                { label: 'Openstaand', value: fmtEUR(stats.outstanding), danger: false },
+                { label: 'Achterstallig', value: fmtEUR(stats.overdue), danger: stats.overdue > 0 },
+              ].map(r => (
+                <div key={r.label} className="flex items-center justify-between">
+                  <span className="text-xs" style={{ color: 'var(--muted)' }}>{r.label}</span>
+                  <span className="font-display text-base num font-semibold" style={{ color: r.danger ? 'var(--danger)' : 'var(--text)' }}>{r.value}</span>
+                </div>
+              ))}
             </div>
+            <button onClick={() => setActiveTab('invoices')} className="mt-3 text-xs font-medium flex items-center gap-1 hover:underline" style={{ color: 'var(--accent)' }}>
+              Bekijk facturen <ChevronRight size={12} />
+            </button>
           </Card>
-
-          <Card className="p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-medium" style={{ color: 'var(--ink)' }}>Bonnen wachten</h3>
-              <span className="text-xs num font-medium px-2 py-0.5 rounded" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
-                {stats.openExpenses}
-              </span>
+          <Card className="p-4 flex-1">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Open bonnen</h3>
+              <span className="text-sm num font-bold" style={{ color: stats.openExpenses > 0 ? 'var(--warning)' : 'var(--muted)' }}>{stats.openExpenses}</span>
             </div>
             <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
-              {stats.openExpenses === 0 ? 'Geen open bonnen' : 'Te verwerken inkomende bonnen'}
+              {stats.openExpenses === 0 ? 'Alle bonnen verwerkt' : `${stats.openExpenses} bon${stats.openExpenses !== 1 ? 'nen' : ''} wachten`}
             </p>
-            <button
-              onClick={() => setActiveTab('expenses')}
-              className="text-xs font-medium flex items-center gap-1 hover:underline"
-              style={{ color: 'var(--accent)' }}
-            >
+            <button onClick={() => setActiveTab('expenses')} className="text-xs font-medium flex items-center gap-1 hover:underline" style={{ color: 'var(--accent)' }}>
               Naar bonnen <ChevronRight size={12} />
             </button>
           </Card>
         </div>
       </div>
 
-      {/* Recent invoices + open receipts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
-            <h3 className="font-display text-lg font-medium">Recente facturen</h3>
-            <button onClick={() => setActiveTab('invoices')} className="text-xs font-medium hover:underline flex items-center gap-1" style={{ color: 'var(--accent)' }}>
-              Alles bekijken <ChevronRight size={12} />
-            </button>
+      {/* ── Mobiel: compacte stats onder grafiek ── */}
+      <div className="grid grid-cols-2 gap-3 lg:hidden">
+        <Card className="p-4">
+          <div className="text-[10px] uppercase tracking-[0.08em] font-semibold mb-1.5" style={{ color: 'var(--text-3)' }}>Openstaand</div>
+          <div className="num font-bold" style={{ fontSize: '17px', color: 'var(--text)', letterSpacing: '-0.02em' }}>{fmtEUR(stats.outstanding)}</div>
+          <div className="text-[11px] mt-1" style={{ color: stats.overdue > 0 ? 'var(--danger)' : 'var(--text-3)' }}>
+            {stats.overdue > 0 ? `${fmtEUR(stats.overdue)} te laat` : 'Alles op tijd'}
           </div>
-          {recentInvoices.length === 0 ? (
-            <div className="p-8 text-center text-sm" style={{ color: 'var(--muted)' }}>Nog geen facturen</div>
-          ) : (
-            <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-              {recentInvoices.map(inv => {
-                const c = clients.find(x => x.id === inv.clientId);
-                const total = computeInvoice(inv.items).total;
-                const status = computeInvoiceStatus(inv);
-                return (
-                  <div key={inv.id} className="px-5 py-3 flex items-center justify-between">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-mono font-medium">{inv.number}</span>
-                        <Badge status={status} />
-                      </div>
-                      <div className="text-sm truncate">{c?.name || '—'}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-display text-base num font-medium">{fmtEUR(total)}</div>
-                      <div className="text-xs" style={{ color: 'var(--muted)' }}>{fmtDate(inv.issueDate)}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </Card>
-
-        <Card>
-          <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
-            <h3 className="font-display text-lg font-medium">Open bonnen</h3>
-            <button onClick={() => setActiveTab('expenses')} className="text-xs font-medium hover:underline flex items-center gap-1" style={{ color: 'var(--accent)' }}>
-              Verwerken <ChevronRight size={12} />
-            </button>
+        <Card className="p-4">
+          <div className="text-[10px] uppercase tracking-[0.08em] font-semibold mb-1.5" style={{ color: 'var(--text-3)' }}>Open bonnen</div>
+          <div className="num font-bold" style={{ fontSize: '17px', color: stats.openExpenses > 0 ? 'var(--warning)' : 'var(--text)', letterSpacing: '-0.02em' }}>{stats.openExpenses}</div>
+          <div className="text-[11px] mt-1" style={{ color: 'var(--text-3)' }}>
+            {stats.openExpenses === 0 ? 'Alles verwerkt' : 'wachten op verwerking'}
           </div>
-          {openExpensesList.length === 0 ? (
-            <div className="p-8 text-center text-sm" style={{ color: 'var(--muted)' }}>Geen open bonnen</div>
-          ) : (
-            <div className="grid grid-cols-2 gap-2 p-3">
-              {openExpensesList.map(e => (
-                <button
-                  key={e.id}
-                  onClick={() => setActiveTab('expenses')}
-                  className="aspect-square rounded-md overflow-hidden border bg-stone-50 relative group"
-                  style={{ borderColor: 'var(--border)' }}
-                >
-                  {e.image ? (
-                    <img src={e.image} alt="bon" className="w-full h-full object-cover" />
-                  ) : (
-                    <ImageIcon className="w-full h-full p-4" style={{ color: 'var(--muted)' }} />
-                  )}
-                  <div className="absolute top-1 right-1">
-                    <Badge status="open" />
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
         </Card>
       </div>
+
+      {/* ── Recente facturen ── */}
+      <Card>
+        <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+          <h3 className="font-display text-base font-semibold" style={{ color: 'var(--ink)' }}>Recente facturen</h3>
+          <button onClick={() => setActiveTab('invoices')} className="text-xs font-medium hover:underline flex items-center gap-1" style={{ color: 'var(--accent)' }}>
+            Alles <ChevronRight size={12} />
+          </button>
+        </div>
+        {recentInvoices.length === 0 ? (
+          <div className="p-8 text-center text-sm" style={{ color: 'var(--muted)' }}>Nog geen facturen</div>
+        ) : (
+          <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+            {recentInvoices.map(inv => {
+              const c = clients.find(x => x.id === inv.clientId);
+              const total = computeInvoice(inv.items).total;
+              const status = computeInvoiceStatus(inv);
+              return (
+                <div key={inv.id} className="px-5 py-3.5 flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-xs font-mono font-medium">{inv.number}</span>
+                      <Badge status={status} />
+                    </div>
+                    <div className="text-sm truncate" style={{ color: 'var(--ink-2)' }}>{c?.name || '—'}</div>
+                  </div>
+                  <div className="text-right ml-3 flex-shrink-0">
+                    <div className="font-display text-sm num font-semibold">{fmtEUR(total)}</div>
+                    <div className="text-[11px]" style={{ color: 'var(--muted)' }}>{fmtDate(inv.issueDate)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
     </div>
   );
 };
@@ -3426,6 +3758,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
 const InvoiceDetail = ({ invoice, clients, settings, activeEntity, entities, onClose, onEdit, onDelete, onStatusChange, onDuplicate, onSendReminder, onCreateCreditNote, onRegisterPayment, onUpdateInvoice }) => {
   const [showSendModal, setShowSendModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [changingClient, setChangingClient] = useState(false);
   const client = clients.find(c => c.id === invoice.clientId);
   const totals = computeInvoice(invoice.items);
 
@@ -3533,14 +3866,37 @@ ${clone.innerHTML}
               <Hash size={13} /> {invoice.qrEnabled === false ? 'QR uit' : invoice.qrEnabled ? (qrMissingIban ? 'QR — geen IBAN' : 'QR aan') : 'QR code'}
             </Button>
           )}
-          {onUpdateInvoice && !invoice.number && (
+          {onUpdateInvoice && (
             <Button size="sm" variant="secondary"
-              style={{ borderColor: 'var(--warning)', color: 'var(--warning)' }}
+              style={!invoice.number ? { borderColor: 'var(--warning)', color: 'var(--warning)' } : {}}
               onClick={() => {
-                const nr = window.prompt('Voer het factuurnummer in:', '');
-                if (nr && nr.trim()) onUpdateInvoice(invoice.id, { number: nr.trim() });
+                const nr = window.prompt('Factuurnummer:', invoice.number || '');
+                if (nr !== null && nr.trim() !== '') onUpdateInvoice(invoice.id, { number: nr.trim() });
               }}
-            ><Edit3 size={13} /> Factuurnummer invoeren</Button>
+            ><Edit3 size={13} /> {invoice.number ? 'Wijzig nr.' : 'Factuurnummer invoeren'}</Button>
+          )}
+          {onUpdateInvoice && (
+            changingClient ? (
+              <div className="flex items-center gap-1">
+                <select
+                  defaultValue={invoice.clientId || ''}
+                  autoFocus
+                  style={{ fontSize: '13px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--ink)' }}
+                  onChange={e => {
+                    onUpdateInvoice(invoice.id, { clientId: e.target.value || null });
+                    setChangingClient(false);
+                  }}
+                >
+                  <option value="">— Geen klant —</option>
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name || c.company || c.email || c.id}</option>)}
+                </select>
+                <button onClick={() => setChangingClient(false)} style={{ fontSize: '13px', color: 'var(--muted)', padding: '2px 6px' }}>✕</button>
+              </div>
+            ) : (
+              <Button size="sm" variant="secondary" onClick={() => setChangingClient(true)}>
+                <Edit3 size={13} /> Wijzig klant
+              </Button>
+            )
           )}
           {status === 'draft' && <Button size="sm" variant="secondary" onClick={() => onEdit(invoice)}><Edit3 size={13} /> Bewerken</Button>}
           {status === 'draft' && (
