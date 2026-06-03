@@ -610,8 +610,13 @@ export const AuthProvider = ({ children }) => {
 
   const updateProfile = async (updates) => {
     if (!user || !isSupabaseConfigured) return
-    await supabase.from('profiles').update(updates).eq('id', user.id)
+    const { error } = await supabase.from('profiles').update(updates).eq('id', user.id)
+    if (error) {
+      console.error('[updateProfile] Supabase error:', error.message)
+      return { error }
+    }
     setProfile(p => ({ ...p, ...updates }))
+    return { error: null }
   }
 
   const createOrg = async (name) => {

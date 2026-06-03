@@ -280,20 +280,11 @@ export default function LoginPage() {
         {/* Logo + Language switcher row */}
         <div style={{ marginBottom: '40px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{
-              width: '40px', height: '40px',
-              background: 'linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%)',
-              borderRadius: '11px',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 4px 12px rgba(59,130,246,0.30)',
-              flexShrink: 0,
-            }}>
-              <span style={{ fontWeight: '800', fontSize: '13px', color: '#fff', letterSpacing: '-0.05em' }}>DH</span>
-            </div>
-            <div>
-              <div style={{ fontWeight: '700', fontSize: '16px', color: '#0F172A', letterSpacing: '-0.025em' }}>DHS Finance</div>
-              <div style={{ fontSize: '10px', color: '#94A3B8', letterSpacing: '0.08em', fontWeight: '500', textTransform: 'uppercase', marginTop: '1px' }}>Financial Platform</div>
-            </div>
+            <img
+              src="/logo.png"
+              alt="DHS Finance"
+              style={{ height: '40px', width: 'auto', objectFit: 'contain', flexShrink: 0 }}
+            />
           </div>
 
           {/* Language switcher */}

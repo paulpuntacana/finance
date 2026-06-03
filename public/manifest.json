@@ -10,22 +10,28 @@
   "theme_color": "#3b82f6",
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "/favicon/favicon-96x96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon/web-app-manifest-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "maskable"
     },
     {
-      "src": "/icon-512.png",
+      "src": "/favicon/web-app-manifest-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "maskable"
     },
     {
-      "src": "/icon.svg",
+      "src": "/favicon/favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ],
   "shortcuts": [
@@ -34,14 +40,14 @@
       "short_name": "Bon",
       "description": "Voeg een bon toe",
       "url": "/?tab=expenses",
-      "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+      "icons": [{ "src": "/favicon/favicon-96x96.png", "sizes": "96x96" }]
     },
     {
       "name": "Nieuwe factuur",
       "short_name": "Factuur",
       "description": "Maak een nieuwe factuur",
       "url": "/?tab=invoices",
-      "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+      "icons": [{ "src": "/favicon/favicon-96x96.png", "sizes": "96x96" }]
     }
   ]
 }

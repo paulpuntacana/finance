@@ -2082,24 +2082,8 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
           height: 'calc(44px + env(safe-area-inset-top))',
         }}>
         {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div style={{
-            width: '28px', height: '28px', borderRadius: '7px', flexShrink: 0,
-            background: 'linear-gradient(135deg, #4f46e5 0%, #1e1b8b 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 2px 8px rgba(79,70,229,0.4)',
-          }}>
-            <svg width="17" height="17" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M10 4.5C10 4.5 7 4 3.5 4.5C2.7 4.6 2 5.3 2 6.1V15.5C5.5 14.5 10 15.5 10 15.5V4.5Z" fill="rgba(255,255,255,0.18)" stroke="white" strokeWidth="1.1" strokeLinejoin="round"/>
-              <path d="M10 4.5C10 4.5 13 4 16.5 4.5C17.3 4.6 18 5.3 18 6.1V15.5C14.5 14.5 10 15.5 10 15.5V4.5Z" fill="rgba(255,255,255,0.1)" stroke="white" strokeWidth="1.1" strokeLinejoin="round"/>
-              <line x1="10" y1="4" x2="10" y2="16" stroke="white" strokeWidth="1" strokeOpacity="0.4"/>
-              <line x1="3.5" y1="8" x2="8.5" y2="7.5" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
-              <line x1="3.5" y1="10.5" x2="8.5" y2="10" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
-              <line x1="11.5" y1="7.5" x2="16.5" y2="8" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
-              <line x1="11.5" y1="10" x2="16.5" y2="10.5" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
-            </svg>
-          </div>
-          <span style={{ fontWeight: '700', fontSize: '14px', color: 'var(--text)', letterSpacing: '-0.02em' }}>DHS Finance</span>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <img src="/logo.png" alt="DHS Finance" style={{ height: '28px', width: 'auto', objectFit: 'contain' }} />
         </div>
         {/* Huidige sectie */}
         <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-2)', position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
@@ -2120,31 +2104,8 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
         style={{ width: '224px', flexShrink: 0, background: 'var(--surface)', borderRight: '1px solid var(--border)' }}
       >
         {/* Logo */}
-        <div style={{ padding: '18px 16px 14px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '11px' }}>
-            <div style={{
-              width: '34px', height: '34px', borderRadius: '9px', flexShrink: 0,
-              background: 'linear-gradient(135deg, #4f46e5 0%, #1e1b8b 100%)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 3px 10px rgba(79,70,229,0.45)',
-            }}>
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M10 4.5C10 4.5 7 4 3.5 4.5C2.7 4.6 2 5.3 2 6.1V15.5C5.5 14.5 10 15.5 10 15.5V4.5Z" fill="rgba(255,255,255,0.18)" stroke="white" strokeWidth="1.1" strokeLinejoin="round"/>
-                <path d="M10 4.5C10 4.5 13 4 16.5 4.5C17.3 4.6 18 5.3 18 6.1V15.5C14.5 14.5 10 15.5 10 15.5V4.5Z" fill="rgba(255,255,255,0.1)" stroke="white" strokeWidth="1.1" strokeLinejoin="round"/>
-                <line x1="10" y1="4" x2="10" y2="16" stroke="white" strokeWidth="1" strokeOpacity="0.4"/>
-                <line x1="3.5" y1="8" x2="8.5" y2="7.5" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
-                <line x1="3.5" y1="10.5" x2="8.5" y2="10" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
-                <line x1="3.5" y1="13" x2="7" y2="12.7" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.55"/>
-                <line x1="11.5" y1="7.5" x2="16.5" y2="8" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
-                <line x1="11.5" y1="10" x2="16.5" y2="10.5" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.9"/>
-                <line x1="13" y1="12.7" x2="16.5" y2="13" stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeOpacity="0.55"/>
-              </svg>
-            </div>
-            <div>
-              <div style={{ fontWeight: '700', fontSize: '14px', color: 'var(--text)', letterSpacing: '-0.02em' }}>DHS Finance</div>
-              <div style={{ fontSize: '10px', color: 'var(--text-3)', marginTop: '1px' }}>Finance Intelligence</div>
-            </div>
-          </div>
+        <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid var(--border)' }}>
+          <img src="/logo.png" alt="DHS Finance" style={{ height: '32px', width: 'auto', objectFit: 'contain', display: 'block' }} />
         </div>
 
         {/* Entity switcher */}
@@ -8364,8 +8325,23 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                   const file = e.target.files?.[0];
                   if (!file) return;
                   const reader = new FileReader();
-                  reader.onload = async ev => {
-                    if (updateProfile) await updateProfile({ avatar_url: ev.target.result });
+                  reader.onload = ev => {
+                    const img = new Image();
+                    img.onload = async () => {
+                      const SIZE = 160;
+                      const canvas = document.createElement('canvas');
+                      canvas.width = SIZE;
+                      canvas.height = SIZE;
+                      const ctx = canvas.getContext('2d');
+                      // Crop naar vierkant vanuit het midden
+                      const side = Math.min(img.width, img.height);
+                      const sx = (img.width - side) / 2;
+                      const sy = (img.height - side) / 2;
+                      ctx.drawImage(img, sx, sy, side, side, 0, 0, SIZE, SIZE);
+                      const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+                      if (updateProfile) await updateProfile({ avatar_url: dataUrl });
+                    };
+                    img.src = ev.target.result;
                   };
                   reader.readAsDataURL(file);
                 }} />
