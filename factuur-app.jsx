@@ -1870,8 +1870,8 @@ const Modal = ({ open, onClose, children, size = 'md' }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto" style={{ background: 'rgba(26, 22, 18, 0.4)' }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div
-        className={`${sizes[size]} w-full bg-white rounded-xl shadow-2xl my-8 animate-slide`}
-        style={{ border: '1px solid var(--border)' }}
+        className={`${sizes[size]} w-full rounded-xl shadow-2xl my-8 animate-slide`}
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
       >
         {children}
       </div>
@@ -3267,7 +3267,7 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
               onClick={() => setStatusFilter(f.id)}
               className="px-3 py-1.5 text-xs font-medium rounded transition-colors"
               style={{
-                background: statusFilter === f.id ? 'var(--ink)' : 'transparent',
+                background: statusFilter === f.id ? 'var(--accent)' : 'transparent',
                 color: statusFilter === f.id ? '#fff' : 'var(--ink-2)',
               }}
             >
@@ -3348,32 +3348,46 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
                       >{c?.name || '— klant —'}</div>
                     )}
                   </div>
-                  <div className="hidden md:block text-xs text-right" style={{ color: 'var(--muted)' }} onClick={e => { e.stopPropagation(); setView({ mode: 'view', invoice: inv }); }}>
-                    <div>Factuurdatum: {fmtDate(inv.issueDate)}</div>
-                    <div>Vervalt: {fmtDate(inv.dueDate)}</div>
+                  <div className="hidden md:block text-xs text-right" style={{ color: 'var(--muted)' }}>
+                    {listEdit?.invId === inv.id && listEdit?.field === 'issueDate' ? (
+                      <div onClick={e => e.stopPropagation()}>
+                        <input type="date" defaultValue={inv.issueDate || ''} autoFocus
+                          style={{ fontSize: '11px', padding: '1px 4px', borderRadius: '4px', border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--ink)' }}
+                          onChange={e => { if (e.target.value) { handleUpdateInvoice(inv.id, { issueDate: e.target.value }); setListEdit(null); } }}
+                          onBlur={() => setListEdit(null)} />
+                      </div>
+                    ) : (
+                      <div style={{ cursor: 'pointer' }} title="Klik om factuurdatum te wijzigen"
+                        onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field: 'issueDate' }); }}>
+                        Factuurdatum: {fmtDate(inv.issueDate)}
+                      </div>
+                    )}
+                    {listEdit?.invId === inv.id && listEdit?.field === 'dueDate' ? (
+                      <div onClick={e => e.stopPropagation()}>
+                        <input type="date" defaultValue={inv.dueDate || ''} autoFocus
+                          style={{ fontSize: '11px', padding: '1px 4px', borderRadius: '4px', border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--ink)' }}
+                          onChange={e => { if (e.target.value) { handleUpdateInvoice(inv.id, { dueDate: e.target.value }); setListEdit(null); } }}
+                          onBlur={() => setListEdit(null)} />
+                      </div>
+                    ) : (
+                      <div style={{ cursor: 'pointer' }} title="Klik om vervaldatum te wijzigen"
+                        onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field: 'dueDate' }); }}>
+                        Vervalt: {fmtDate(inv.dueDate)}
+                      </div>
+                    )}
                     {(status === 'paid' || status === 'partial') && (
                       listEdit?.invId === inv.id && listEdit?.field === 'paidAt' ? (
                         <div onClick={e => e.stopPropagation()}>
-                          <input
-                            type="date"
-                            defaultValue={inv.paidAt ? inv.paidAt.slice(0, 10) : ''}
-                            autoFocus
+                          <input type="date" defaultValue={inv.paidAt ? inv.paidAt.slice(0, 10) : ''} autoFocus
                             style={{ fontSize: '11px', padding: '1px 4px', borderRadius: '4px', border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--ink)' }}
-                            onChange={e => {
-                              if (e.target.value) {
-                                handleUpdateInvoice(inv.id, { paidAt: new Date(e.target.value).toISOString() });
-                                setListEdit(null);
-                              }
-                            }}
-                            onBlur={() => setListEdit(null)}
-                          />
+                            onChange={e => { if (e.target.value) { handleUpdateInvoice(inv.id, { paidAt: new Date(e.target.value).toISOString() }); setListEdit(null); } }}
+                            onBlur={() => setListEdit(null)} />
                         </div>
                       ) : (
-                        <div
-                          style={{ color: 'var(--success)', cursor: 'pointer' }}
-                          title="Klik om betaaldatum te wijzigen"
-                          onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field: 'paidAt' }); }}
-                        >Betaald: {inv.paidAt ? fmtDate(inv.paidAt) : '—'}</div>
+                        <div style={{ color: 'var(--success)', cursor: 'pointer' }} title="Klik om betaaldatum te wijzigen"
+                          onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field: 'paidAt' }); }}>
+                          Betaald: {inv.paidAt ? fmtDate(inv.paidAt) : '—'}
+                        </div>
                       )
                     )}
                   </div>
@@ -3617,8 +3631,8 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                                 value={item.discount.name || ''}
                                 onChange={e => updateItemDiscount(idx, 'name', e.target.value)}
                                 placeholder="Naam (bv. 'Vroege betaler')"
-                                className="flex-1 min-w-[120px] px-2 py-1 bg-white rounded border text-xs"
-                                style={{ borderColor: 'var(--border)' }}
+                                className="flex-1 min-w-[120px] px-2 py-1 rounded border text-xs"
+                                style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--ink)' }}
                               />
                               <select
                                 value={item.discount.type}

@@ -209,7 +209,7 @@ const SignaturePad = ({ onSave, onCancel }) => {
       </div>
       <canvas
         ref={canvasRef} width={480} height={130}
-        style={{ background: '#fff', borderRadius: 8, border: '2px solid #e2e8f0', cursor: 'crosshair', touchAction: 'none', display: 'block', maxWidth: '100%' }}
+        style={{ background: '#fff', borderRadius: 8, border: '2px solid #e2e8f0', cursor: 'crosshair', touchAction: 'none', display: 'block', width: '100%', maxWidth: 480, height: 130 }}
         onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
         onTouchStart={start} onTouchMove={move} onTouchEnd={end}
       />
@@ -471,7 +471,7 @@ const QuoteEditor = ({ quote, clients, settings, activeEntity, companyTemplate, 
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16, marginBottom: 16 }}>
         {/* Left col */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={C.card}>
@@ -549,13 +549,13 @@ const QuoteEditor = ({ quote, clients, settings, activeEntity, companyTemplate, 
             <Plus size={13} /> Regel
           </button>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '3fr 70px 100px 70px 28px', gap: 8, marginBottom: 8 }}>
+        <div className="hidden sm:grid" style={{ gridTemplateColumns: '3fr 70px 100px 70px 28px', gap: 8, marginBottom: 8, display: 'none' }}>
           {['Omschrijving', 'Aantal', 'Prijs (excl.)', 'BTW %', ''].map(h => (
             <div key={h} style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</div>
           ))}
         </div>
         {form.items.map((item, idx) => (
-          <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '3fr 70px 100px 70px 28px', gap: 8, alignItems: 'start', marginBottom: 8 }}>
+          <div key={item.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,3fr) 60px 90px 60px 28px', gap: 6, alignItems: 'start', marginBottom: 8 }}>
             {form.quoteStyle === 'narratief'
               ? <textarea style={{ ...C.inp, minHeight: 60, resize: 'vertical', lineHeight: 1.5 }} value={item.description} onChange={e => setItem(idx, 'description', e.target.value)} placeholder="Omschrijving (uitgebreid)" />
               : <input style={C.inp} value={item.description} onChange={e => setItem(idx, 'description', e.target.value)} placeholder="Omschrijving" />
@@ -586,7 +586,7 @@ const QuoteEditor = ({ quote, clients, settings, activeEntity, companyTemplate, 
 // ─────────────────────────────────────────────────────────────────────────────
 // Quote detail
 // ─────────────────────────────────────────────────────────────────────────────
-const QuoteDetail = ({ quote, client, companyTemplate, onClose, onEdit, onDelete, onStatusChange, onConvertToInvoice }) => {
+const QuoteDetail = ({ quote, client, companyTemplate, activeEntity, onClose, onEdit, onDelete, onStatusChange, onConvertToInvoice }) => {
   const totals = computeQuote(quote.items)
   const shareUrl = `${window.location.origin}${window.location.pathname}?sign=${quote.signToken}`
   const [copied, setCopied] = useState(false)
@@ -606,7 +606,7 @@ const QuoteDetail = ({ quote, client, companyTemplate, onClose, onEdit, onDelete
             <span style={{ color: 'var(--text-3)', fontSize: 12 }}>{client?.name} · {fmtDate(quote.date)}</span>
           </div>
         </div>
-        <button onClick={() => printQuotePDF(quote, client, null, companyTemplate)} style={{ ...C.btn('var(--accent)', 'var(--accent-soft)', 'rgba(59,130,246,0.25)') }}>
+        <button onClick={() => printQuotePDF(quote, client, activeEntity, companyTemplate)} style={{ ...C.btn('var(--accent)', 'var(--accent-soft)', 'rgba(59,130,246,0.25)') }}>
           <Printer size={14} /> PDF
         </button>
         <button onClick={() => onEdit(quote)} style={C.btn()}>
@@ -749,7 +749,7 @@ const SignView = ({ token, quotes, clients, onSign }) => {
   const already = quote.status === 'accepted' || quote.status === 'declined'
 
   return (
-    <div style={{ maxWidth: 660, margin: '0 auto', padding: '32px 20px', fontFamily: 'Inter, sans-serif' }}>
+    <div style={{ maxWidth: 660, margin: '0 auto', padding: '24px 16px', fontFamily: 'Inter, sans-serif' }}>
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px' }}>
           <FileCheck2 size={20} color="#fff" />
@@ -757,7 +757,7 @@ const SignView = ({ token, quotes, clients, onSign }) => {
         <div style={{ fontSize: 12, color: 'var(--text-3)' }}>DHS Finance · Offertebeheer</div>
       </div>
 
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: 16, padding: 28, boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }}>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: 16, padding: '20px 16px', boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }}>
         <StatusBadge status={quote.status} />
         <h2 style={{ fontSize: 24, fontWeight: 700, color: 'var(--text)', margin: '12px 0 4px' }}>Offerte {quote.number}</h2>
         <p style={{ color: 'var(--text-3)', fontSize: 13, margin: '0 0 20px' }}>{client?.name} · Geldig tot {fmtDate(quote.validUntil)}</p>
@@ -1318,6 +1318,7 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
   if (view === 'detail' && selected) return (
     <QuoteDetail
       quote={selected} client={clients.find(c => c.id === selected.clientId)} companyTemplate={companyTemplate}
+      activeEntity={activeEntity}
       onClose={() => setView('list')} onEdit={q => { setSelected(q); setView('edit') }}
       onDelete={deleteQuote} onStatusChange={changeStatus} onConvertToInvoice={convertToInvoice}
     />
