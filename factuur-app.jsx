@@ -2082,8 +2082,9 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
           height: 'calc(44px + env(safe-area-inset-top))',
         }}>
         {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <img src="/logo.png" alt="DHS Finance" style={{ height: '28px', width: 'auto', objectFit: 'contain' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
+          <img src="/logo.png" alt="DHS Finance" style={{ height: '26px', width: 'auto', objectFit: 'contain' }} />
+          <span style={{ fontWeight: '700', fontSize: '14px', color: 'var(--text)', letterSpacing: '-0.02em' }}>DHS Finance</span>
         </div>
         {/* Huidige sectie */}
         <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-2)', position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
@@ -2105,7 +2106,13 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
       >
         {/* Logo */}
         <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid var(--border)' }}>
-          <img src="/logo.png" alt="DHS Finance" style={{ height: '32px', width: 'auto', objectFit: 'contain', display: 'block' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <img src="/logo.png" alt="DHS Finance" style={{ height: '30px', width: 'auto', objectFit: 'contain', flexShrink: 0 }} />
+            <div>
+              <div style={{ fontWeight: '700', fontSize: '14px', color: 'var(--text)', letterSpacing: '-0.02em' }}>DHS Finance</div>
+              <div style={{ fontSize: '10px', color: 'var(--text-3)', marginTop: '1px' }}>Finance Intelligence</div>
+            </div>
+          </div>
         </div>
 
         {/* Entity switcher */}
