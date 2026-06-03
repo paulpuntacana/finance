@@ -99,7 +99,7 @@ const Label = ({ children }) => (
 )
 
 // ── Winst/Verlies tab ─────────────────────────────────────────────────────────
-function WinstVerliesTab({ invoices, expenses, assets, entries }) {
+function WinstVerliesTab({ invoices, expenses, assets, entries, clients }) {
   const currentYear = new Date().getFullYear()
   const [year, setYear] = useState(currentYear)
   const [open, setOpen] = useState({ revenue: true, costs: true, depreciation: true, memo: true })
@@ -204,9 +204,10 @@ function WinstVerliesTab({ invoices, expenses, assets, entries }) {
           <>
             {paidInvoices.length === 0
               ? <div style={{ padding: '10px 32px', fontSize: '12px', color: 'var(--text-3)', fontStyle: 'italic', borderBottom: '1px solid var(--border)' }}>Geen betaalde facturen in {year}</div>
-              : paidInvoices.map(inv => (
-                <SubRow key={inv.id} label={`${inv.number || inv.id} — ${inv.clientName || '—'}`} value={invoiceExBtw(inv.items)} color="var(--success)" />
-              ))
+              : paidInvoices.map(inv => {
+                const clientName = (clients || []).find(c => c.id === inv.clientId)?.name || inv.clientName || '—'
+                return <SubRow key={inv.id} label={`${inv.number || inv.id} — ${clientName}`} value={invoiceExBtw(inv.items)} color="var(--success)" />
+              })
             }
             <TotalRow label="Totaal omzet" value={totalRevenue} color="var(--success)" />
           </>
@@ -673,7 +674,7 @@ function MemoriaalTab({ entries, setEntries }) {
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
-export default function BoekhoudenView({ invoices, expenses, assets, setAssets, entries, setEntries }) {
+export default function BoekhoudenView({ invoices, expenses, assets, setAssets, entries, setEntries, clients }) {
   const [tab, setTab] = useState('wv')
   const tabs = [
     { id: 'wv', label: 'Winst/Verlies' },
@@ -704,7 +705,7 @@ export default function BoekhoudenView({ invoices, expenses, assets, setAssets, 
         ))}
       </div>
 
-      {tab === 'wv' && <WinstVerliesTab invoices={invoices} expenses={expenses} assets={assets} entries={entries} />}
+      {tab === 'wv' && <WinstVerliesTab invoices={invoices} expenses={expenses} assets={assets} entries={entries} clients={clients} />}
       {tab === 'activa' && <VasteActivaTab assets={assets} setAssets={setAssets} />}
       {tab === 'memoriaal' && <MemoriaalTab entries={entries} setEntries={setEntries} />}
     </div>

@@ -2471,28 +2471,8 @@ Wanneer je antwoordt:
     }
   };
 
-  // Proactieve analyse bij eerste open (eén keer per sessie)
-  useEffect(() => {
-    if (!hasApiKey || autoAnalyzed.current || invoices.length === 0) return;
-    autoAnalyzed.current = true;
-    const context = buildFinancialContext();
-    const prompt = `Geef me een beknopt proactief financieel dagoverzicht. Noem: 1) de belangrijkste aandachtspunten van dit moment, 2) wat ik deze week nog kan of moet doen, 3) een aankomende deadline of wijziging waar ik op moet letten. Gebruik mijn actuele data.`;
-    setAiLoading(true);
-    callAI({
-      system: AI_SYSTEM(context),
-      messages: [{ role: 'user', content: prompt }],
-      apiKey: settings.apiKey,
-      openaiApiKey: settings.openaiApiKey,
-      maxTokens: 700,
-    }).then(reply => {
-      setAiMessages([{ role: 'assistant', content: reply }]);
-    }).catch(e => {
-      setAiMessages([{ role: 'assistant', content: `Kon geen analyse laden: ${e.message}` }]);
-    }).finally(() => setAiLoading(false));
-  }, [hasApiKey]);
-
   const quickQuestions = [
-    'Geef een financieel overzicht',
+    'Geef mij een dagelijks inzicht',
     'Welke facturen zijn achterstallig?',
     'Hoe staat mijn BTW er voor?',
     'Tips om cashflow te verbeteren',
@@ -3069,6 +3049,7 @@ const ClientForm = ({ client, onSave, onClose, settings }) => {
 const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients, settings, setSettings, activeEntity, setEntities, entities, onSendReminder }) => {
   const [view, setView] = useState({ mode: 'list' });
   const [statusFilter, setStatusFilter] = useState('all');
+  const [listEdit, setListEdit] = useState(null); // { invId, field: 'client' }
 
   const [showAging, setShowAging] = useState(false);
   const filtered = invoices
@@ -3146,6 +3127,9 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
   const handleUpdateInvoice = async (id, fields) => {
     const allInv = allInvoices || invoices;
     await setInvoices(allInv.map(i => i.id === id ? { ...i, ...fields } : i));
+    if (view.invoice?.id === id) {
+      setView(v => ({ ...v, invoice: { ...v.invoice, ...fields } }));
+    }
   };
 
   const handleDuplicate = (inv) => {
@@ -3314,31 +3298,90 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
               const status = computeInvoiceStatus(inv);
               const total = computeInvoice(inv.items).total;
               const overdueDays = inv.dueDate ? daysBetween(inv.dueDate, todayISO()) : 0;
+              const editingClient = listEdit?.invId === inv.id && listEdit?.field === 'client';
               return (
-                <button
+                <div
                   key={inv.id}
-                  onClick={() => setView({ mode: 'view', invoice: inv })}
                   className="w-full px-5 py-4 hover:bg-stone-50 transition-colors flex items-center gap-4 text-left"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => { if (!listEdit) setView({ mode: 'view', invoice: inv }); }}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="font-mono text-sm font-medium">{inv.number}</span>
+                      <span
+                        className="font-mono text-sm font-medium hover:underline"
+                        style={{ cursor: 'text' }}
+                        title="Klik om factuurnummer te wijzigen"
+                        onClick={e => {
+                          e.stopPropagation();
+                          const nr = window.prompt('Factuurnummer:', inv.number || '');
+                          if (nr !== null && nr.trim() !== '') handleUpdateInvoice(inv.id, { number: nr.trim() });
+                        }}
+                      >{inv.number || <span style={{ color: 'var(--warning)' }}>— nr. —</span>}</span>
                       <Badge status={status} />
                       {status === 'overdue' && overdueDays > 0 && (
                         <span className="text-[10px]" style={{ color: 'var(--danger)' }}>{overdueDays}d te laat</span>
                       )}
                     </div>
-                    <div className="text-sm truncate">{c?.name || '—'}</div>
+                    {editingClient ? (
+                      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                        <select
+                          defaultValue={inv.clientId || ''}
+                          autoFocus
+                          style={{ fontSize: '12px', padding: '2px 6px', borderRadius: '5px', border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--ink)' }}
+                          onChange={e => {
+                            handleUpdateInvoice(inv.id, { clientId: e.target.value || null });
+                            setListEdit(null);
+                          }}
+                          onBlur={() => setListEdit(null)}
+                        >
+                          <option value="">— Geen klant —</option>
+                          {clients.map(cl => <option key={cl.id} value={cl.id}>{cl.name || cl.company || cl.email || cl.id}</option>)}
+                        </select>
+                      </div>
+                    ) : (
+                      <div
+                        className="text-sm truncate hover:underline"
+                        style={{ cursor: 'text', color: c ? 'inherit' : 'var(--muted)' }}
+                        title="Klik om klant te wijzigen"
+                        onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field: 'client' }); }}
+                      >{c?.name || '— klant —'}</div>
+                    )}
                   </div>
-                  <div className="hidden md:block text-xs text-right" style={{ color: 'var(--muted)' }}>
+                  <div className="hidden md:block text-xs text-right" style={{ color: 'var(--muted)' }} onClick={e => { e.stopPropagation(); setView({ mode: 'view', invoice: inv }); }}>
                     <div>Factuurdatum: {fmtDate(inv.issueDate)}</div>
                     <div>Vervalt: {fmtDate(inv.dueDate)}</div>
+                    {(status === 'paid' || status === 'partial') && (
+                      listEdit?.invId === inv.id && listEdit?.field === 'paidAt' ? (
+                        <div onClick={e => e.stopPropagation()}>
+                          <input
+                            type="date"
+                            defaultValue={inv.paidAt ? inv.paidAt.slice(0, 10) : ''}
+                            autoFocus
+                            style={{ fontSize: '11px', padding: '1px 4px', borderRadius: '4px', border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--ink)' }}
+                            onChange={e => {
+                              if (e.target.value) {
+                                handleUpdateInvoice(inv.id, { paidAt: new Date(e.target.value).toISOString() });
+                                setListEdit(null);
+                              }
+                            }}
+                            onBlur={() => setListEdit(null)}
+                          />
+                        </div>
+                      ) : (
+                        <div
+                          style={{ color: 'var(--success)', cursor: 'pointer' }}
+                          title="Klik om betaaldatum te wijzigen"
+                          onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field: 'paidAt' }); }}
+                        >Betaald: {inv.paidAt ? fmtDate(inv.paidAt) : '—'}</div>
+                      )
+                    )}
                   </div>
-                  <div className="text-right">
-                    <div className="font-display text-lg num font-medium">{fmtEUR(total)}</div>
+                  <div className="text-right" onClick={e => { e.stopPropagation(); setView({ mode: 'view', invoice: inv }); }}>
+                    <div className="font-display text-lg num font-medium">{fmtCurrency(total, inv.currency)}</div>
                   </div>
-                  <ChevronRight size={16} style={{ color: 'var(--muted)' }} />
-                </button>
+                  <ChevronRight size={16} style={{ color: 'var(--muted)' }} onClick={e => { e.stopPropagation(); setView({ mode: 'view', invoice: inv }); }} />
+                </div>
               );
             })}
           </div>
@@ -9086,6 +9129,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
               setAssets={setBoekAssets}
               entries={boekEntries}
               setEntries={setBoekEntries}
+              clients={clients}
             />
           )}
           {activeTab === 'horizonplanner' && (
