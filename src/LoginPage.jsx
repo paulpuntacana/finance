@@ -171,8 +171,14 @@ export default function LoginPage() {
     setError('')
     if (!fullName.trim()) { setError('Naam is verplicht'); return }
     if (password.length < 8) { setError('Wachtwoord minimaal 8 tekens'); return }
+    if (inviteCode.trim().toUpperCase() !== 'DHS2026') {
+      setError('Ongeldige uitnodigingscode. Vraag de code op bij de beheerder.')
+      return
+    }
     setLoading(true)
-    const { error } = await signUp(email, password, fullName, inviteCode)
+    // Lege inviteCode meegeven: DHS2026 is alleen een toegangspoort,
+    // nieuwe gebruikers maken hun eigen organisatie via de SetupWizard
+    const { error } = await signUp(email, password, fullName, '')
     setLoading(false)
     if (error) setError(error.message)
     else setSuccess('Check je e-mail voor de bevestigingslink!')
@@ -368,7 +374,7 @@ export default function LoginPage() {
             </div>
             <div>
               <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>
-                Uitnodigingscode <span style={{ color: '#CBD5E1', fontWeight: '400' }}>— optioneel</span>
+                Uitnodigingscode <span style={{ color: '#EF4444', fontWeight: '600' }}>*</span>
               </label>
               <input className="lp-inp" type="text" value={inviteCode} onChange={e => setInviteCode(e.target.value)} placeholder="ABC123" />
             </div>
