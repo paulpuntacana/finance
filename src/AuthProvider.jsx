@@ -56,7 +56,12 @@ const invoiceToDB = (item, orgId) => ({
   sent_at: item.sentAt || null, paid_at: item.paidAt || null,
   sign_token: item.signToken || null, signed_at: item.signedAt || null,
   signed_by_name: item.signedByName || null, signed_by_ip: item.signedByIp || null,
-  extra: {},
+  extra: {
+    ...(item.ncf ? { ncf: item.ncf } : {}),
+    ...(item.language ? { language: item.language } : {}),
+    ...(item.reference ? { reference: item.reference } : {}),
+    ...(item.qrEnabled !== undefined ? { qrEnabled: item.qrEnabled } : {}),
+  },
   updated_at: new Date().toISOString(),
 })
 
@@ -316,7 +321,7 @@ const TABLE_CONFIG = {
   },
   userApiKeys: {
     table: 'user_settings', mode: 'user_single',
-    fromDB: (row) => row.data || {},
+    fromDB: (row) => ({ ...(row.data || {}), importToken: row.api_token || null }),
   },
 }
 

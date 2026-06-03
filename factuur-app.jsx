@@ -9,9 +9,10 @@ import {
   BookOpen, Sparkles, RefreshCw, Globe, Hash, ArrowRight, Zap, FileBarChart,
   Network, Briefcase, Percent, Tag, Lightbulb, Wand2, Brain, MessageSquare, Star,
   FileCheck2, ShieldCheck, LogOut, Moon, Sun, Paperclip, ShoppingCart, Calculator,
-  AlignLeft, AlignCenter, AlignRight,
+  AlignLeft, AlignCenter, AlignRight, Key, Link2,
 } from 'lucide-react';
 import { useAuth, useCloudStorage } from './src/AuthProvider';
+import { supabase } from './src/supabase';
 import { useLang } from './src/LangContext';
 import OrgUsersView from './src/OrgUsersView';
 import QuotesView from './src/QuotesView';
@@ -228,6 +229,18 @@ const fmtDateLong = (iso) => {
 };
 
 const todayISO = () => new Date().toISOString().split('T')[0];
+
+// Converteert ISO-timestamp naar YYYY-MM-DD in de LOKALE tijdzone (niet UTC).
+// Voorkomt dat een datum als "10 jun 00:00 CEST" (= "9 jun 22:00 UTC") als "9 jun" wordt weergegeven.
+const isoToLocalDate = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
 
 const addDays = (iso, days) => {
   const d = new Date(iso);
@@ -1342,7 +1355,7 @@ const INVOICE_TRANSLATIONS = {
     totalDiscount: 'Total discount', subtotalExcl: (tax) => `Subtotal (excl. ${tax})`,
     totalDue: 'Total due', notes: 'Notes',
     bankDetails: 'Bank details', payableTo: 'payable to',
-    companyDetails: 'Company details', regNumber: () => 'Chamber of Commerce',
+    companyDetails: 'Company details', regNumber: (jur) => jur === 'DR' ? 'RNC' : 'Chamber of Commerce',
     signature: 'Signature', scanQr: 'Scan with your banking app\nto pay directly',
     tradingNameOf: (a, b) => `${a} is a trading name of ${b}.`, attn: 'Attn:',
   },
@@ -1357,7 +1370,7 @@ const INVOICE_TRANSLATIONS = {
     totalDiscount: 'Descuento total', subtotalExcl: (tax) => `Subtotal (excl. ${tax})`,
     totalDue: 'Total a pagar', notes: 'Notas',
     bankDetails: 'Datos bancarios', payableTo: 'a nombre de',
-    companyDetails: 'Datos de la empresa', regNumber: () => 'Registro Mercantil',
+    companyDetails: 'Datos de la empresa', regNumber: (jur) => jur === 'DR' ? 'RNC' : 'Registro Mercantil',
     signature: 'Firma', scanQr: 'Escanee con su app bancaria\npara pagar directamente',
     tradingNameOf: (a, b) => `${a} es nombre comercial de ${b}.`, attn: 'A/A:',
   },
@@ -2024,6 +2037,8 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
     { id: 'quotes', label: t('nav.quotes'), icon: FileCheck2 },
     { id: 'settings', label: t('nav.more'), icon: SettingsIcon },
   ];
+  // Mobile nav: use shorter labels for space-constrained items
+  mobileItems[3].label = t('nav.quotesMobile');
 
   const NavItem = ({ item }) => {
     const Icon = item.icon;
@@ -2218,6 +2233,7 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
 // DASHBOARD
 // ============================================================================
 const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setActiveTab, onSendReminder }) => {
+  const { t } = useLang();
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const [aiInput, setAiInput] = useState('');
@@ -2307,9 +2323,9 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
       list.push({
         level: 'danger',
         icon: AlertCircle,
-        title: `${overdueInvs.length} factuur${overdueInvs.length !== 1 ? 'en' : ''} achterstallig`,
-        text: `${fmtEUR(overdueTotal)} nog te ontvangen — stuur een herinnering`,
-        action: 'Bekijk',
+        title: `${overdueInvs.length} ${overdueInvs.length !== 1 ? t('dash.invoicesOverdue') : t('dash.invoiceOverdue')}`,
+        text: `${fmtEUR(overdueTotal)} ${t('dash.insightOverdueText')}`,
+        action: t('dash.insightOverdueAction'),
         tab: 'invoices',
       });
     }
@@ -2317,9 +2333,9 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
       list.push({
         level: 'warning',
         icon: ReceiptIcon,
-        title: `${stats.openExpenses} bon${stats.openExpenses !== 1 ? 'nen' : ''} wachten op verwerking`,
-        text: 'Scan en categoriseer je bonnen voor correcte BTW',
-        action: 'Verwerken',
+        title: `${stats.openExpenses} ${stats.openExpenses !== 1 ? t('dash.receiptPlural') : t('dash.receiptSingle')} ${t('dash.insightExpensesTitle')}`,
+        text: t('dash.insightExpensesText'),
+        action: t('dash.insightExpensesAction'),
         tab: 'expenses',
       });
     }
@@ -2327,9 +2343,9 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
       list.push({
         level: 'warning',
         icon: Bell,
-        title: `${dueReminders.length} herinnering${dueReminders.length !== 1 ? 'en' : ''} klaar om te versturen`,
-        text: 'Klanten hebben je herinneringsschema bereikt',
-        action: 'Verstuur',
+        title: `${dueReminders.length} ${dueReminders.length !== 1 ? t('dash.reminderPlural') : t('dash.reminderSingle')} ${t('dash.insightRemindersTitle')}`,
+        text: t('dash.insightRemindersText'),
+        action: t('dash.insightRemindersAction'),
         onAction: () => onSendReminder(dueReminders[0].invoice, dueReminders[0].level),
       });
     }
@@ -2337,8 +2353,8 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
       list.push({
         level: 'danger',
         icon: TrendingUp,
-        title: 'Kosten hoger dan omzet deze maand',
-        text: `Verlies van ${fmtEUR(Math.abs(stats.profit))} — controleer je uitgaven`,
+        title: t('dash.insightLossTitle'),
+        text: t('dash.insightLossText').replace('{amount}', fmtEUR(Math.abs(stats.profit))),
         action: null,
       });
     }
@@ -2346,8 +2362,8 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
       list.push({
         level: 'ok',
         icon: CheckCircle2,
-        title: 'Alles ziet er goed uit',
-        text: `${fmtEUR(stats.omzet)} gefactureerd · geen achterstallige facturen`,
+        title: t('dash.insightOkTitle'),
+        text: `${fmtEUR(stats.omzet)} ${t('dash.insightOkText')}`,
         action: null,
       });
     }
@@ -2426,7 +2442,7 @@ Wanneer je antwoordt:
     if (!hasApiKey) {
       setAiMessages(prev => [...prev,
         { role: 'user', content: q },
-        { role: 'assistant', content: 'Stel eerst een AI API key in via Instellingen → AI om de assistent te gebruiken.' },
+        { role: 'assistant', content: t('dash.aiNoKeyMsg') },
       ]);
       setAiInput('');
       return;
@@ -2454,10 +2470,10 @@ Wanneer je antwoordt:
   };
 
   const quickQuestions = [
-    'Geef mij een dagelijks inzicht',
-    'Welke facturen zijn achterstallig?',
-    'Hoe staat mijn BTW er voor?',
-    'Tips om cashflow te verbeteren',
+    t('dash.q1'),
+    t('dash.q2'),
+    t('dash.q3'),
+    t('dash.q4'),
   ];
 
   const INSIGHT_STYLE = {
@@ -2490,7 +2506,7 @@ Wanneer je antwoordt:
             style={{ borderColor: 'var(--border-2)', background: 'var(--surface-2)', color: 'var(--text)' }}
           >
             <ReceiptIcon size={16} />
-            <span className="hidden md:inline">Bon</span>
+            <span className="hidden md:inline">{t('dash.receipt')}</span>
           </button>
           <button
             onClick={() => setActiveTab('invoices')}
@@ -2498,7 +2514,7 @@ Wanneer je antwoordt:
             style={{ background: 'var(--accent)', color: '#fff' }}
           >
             <Plus size={16} />
-            <span className="hidden md:inline">Factuur</span>
+            <span className="hidden md:inline">{t('dash.invoice')}</span>
           </button>
         </div>
       </div>
@@ -2506,10 +2522,10 @@ Wanneer je antwoordt:
       {/* ── KPI Cards — 2×2 mobiel, 4 desktop ── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: 'Omzet', value: fmtEUR(stats.omzet), sub: 'gefactureerd', icon: TrendingUp, color: '#3b82f6' },
-          { label: 'Openstaand', value: fmtEUR(stats.outstanding), sub: stats.overdue > 0 ? `${fmtEUR(stats.overdue)} te laat` : 'Alles op tijd', icon: Clock, color: stats.overdue > 0 ? '#ef4444' : '#10b981' },
-          { label: 'BTW', value: fmtEUR(Math.abs(stats.btwNet)), sub: stats.btwNet >= 0 ? 'af te dragen' : 'terug', icon: Percent, color: '#f59e0b' },
-          { label: 'Winst', value: fmtEUR(stats.profit), sub: 'deze maand', icon: Zap, color: stats.profit >= 0 ? '#10b981' : '#ef4444' },
+          { label: t('dash.statRevenue'), value: fmtEUR(stats.omzet), sub: t('dash.statRevenueSub'), icon: TrendingUp, color: '#3b82f6' },
+          { label: t('dash.statOutstanding'), value: fmtEUR(stats.outstanding), sub: stats.overdue > 0 ? `${fmtEUR(stats.overdue)} ${t('dash.statLate')}` : t('dash.statAllOnTime'), icon: Clock, color: stats.overdue > 0 ? '#ef4444' : '#10b981' },
+          { label: t('dash.statVat'), value: fmtEUR(Math.abs(stats.btwNet)), sub: stats.btwNet >= 0 ? t('dash.statVatDue') : t('dash.statVatBack'), icon: Percent, color: '#f59e0b' },
+          { label: t('dash.statProfit'), value: fmtEUR(stats.profit), sub: t('dash.statThisMonth'), icon: Zap, color: stats.profit >= 0 ? '#10b981' : '#ef4444' },
         ].map((k, i) => (
           <Card key={i} className="p-4">
             <div className="flex items-center justify-between mb-2">
@@ -2563,9 +2579,9 @@ Wanneer je antwoordt:
             <NineDotsIcon size={16} color="white" animated={true} />
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-sm" style={{ color: 'var(--ink)' }}>AI Assistent</h3>
+            <h3 className="font-semibold text-sm" style={{ color: 'var(--ink)' }}>{t('dash.aiTitle')}</h3>
             <p className="text-[11px]" style={{ color: 'var(--muted)' }}>
-              {hasApiKey ? 'Vraag iets over je financiën' : 'Stel een API key in via Instellingen → AI'}
+              {hasApiKey ? t('dash.aiSubtitleActive') : t('dash.aiSubtitleNoKey')}
             </p>
           </div>
           {aiMessages.length > 0 && (
@@ -2574,12 +2590,12 @@ Wanneer je antwoordt:
               className="text-[11px] px-2 py-1 rounded-lg transition-colors hover:opacity-70"
               style={{ color: 'var(--muted)' }}
             >
-              Wis
+              {t('dash.aiClear')}
             </button>
           )}
           {!hasApiKey && (
             <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold flex-shrink-0" style={{ background: '#fef3c7', color: '#92400e' }}>
-              Geen key
+              {t('dash.aiNoKey')}
             </span>
           )}
         </div>
@@ -2635,7 +2651,7 @@ Wanneer je antwoordt:
               value={aiInput}
               onChange={e => setAiInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendAiMessage()}
-              placeholder="Stel een vraag over je financiën..."
+              placeholder={t('dash.aiPlaceholder')}
               disabled={aiLoading}
               className="flex-1 text-sm rounded-xl border px-3 py-2.5 outline-none"
               style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--ink)' }}
@@ -2656,8 +2672,8 @@ Wanneer je antwoordt:
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="p-5 lg:col-span-2">
           <div className="mb-3">
-            <h2 className="font-display text-base font-semibold" style={{ color: 'var(--ink)' }}>Omzet & Kosten</h2>
-            <p className="text-[11px]" style={{ color: 'var(--muted)' }}>Laatste 6 maanden · gefactureerd</p>
+            <h2 className="font-display text-base font-semibold" style={{ color: 'var(--ink)' }}>{t('dash.chartTitle')}</h2>
+            <p className="text-[11px]" style={{ color: 'var(--muted)' }}>{t('dash.chartSub')}</p>
           </div>
           <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={chartData} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>
@@ -2682,7 +2698,7 @@ Wanneer je antwoordt:
               />
               <Tooltip
                 contentStyle={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 10, fontSize: 12, color: 'var(--text)' }}
-                formatter={(v, name) => [fmtEUR(v), name === 'omzet' ? 'Omzet' : 'Kosten']}
+                formatter={(v, name) => [fmtEUR(v), name === 'omzet' ? t('dash.chartRevenue') : t('dash.chartCosts')]}
               />
               <Area type="monotone" dataKey="omzet" stroke="#3b82f6" strokeWidth={2} fill="url(#omzetGrad)" name="omzet" />
               <Area type="monotone" dataKey="kosten" stroke="#ef4444" strokeWidth={1.5} fill="url(#kostenGrad)" name="kosten" />
@@ -2693,11 +2709,11 @@ Wanneer je antwoordt:
         {/* Desktop right panel */}
         <div className="hidden lg:flex flex-col gap-4">
           <Card className="p-4 flex-1">
-            <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--ink)' }}>Te vorderen</h3>
+            <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--ink)' }}>{t('dash.receivable')}</h3>
             <div className="space-y-2.5">
               {[
-                { label: 'Openstaand', value: fmtEUR(stats.outstanding), danger: false },
-                { label: 'Achterstallig', value: fmtEUR(stats.overdue), danger: stats.overdue > 0 },
+                { label: t('dash.outstanding'), value: fmtEUR(stats.outstanding), danger: false },
+                { label: t('dash.overdue'), value: fmtEUR(stats.overdue), danger: stats.overdue > 0 },
               ].map(r => (
                 <div key={r.label} className="flex items-center justify-between">
                   <span className="text-xs" style={{ color: 'var(--muted)' }}>{r.label}</span>
@@ -2706,19 +2722,19 @@ Wanneer je antwoordt:
               ))}
             </div>
             <button onClick={() => setActiveTab('invoices')} className="mt-3 text-xs font-medium flex items-center gap-1 hover:underline" style={{ color: 'var(--accent)' }}>
-              Bekijk facturen <ChevronRight size={12} />
+              {t('dash.viewInvoices')} <ChevronRight size={12} />
             </button>
           </Card>
           <Card className="p-4 flex-1">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Open bonnen</h3>
+              <h3 className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>{t('dash.openReceipts')}</h3>
               <span className="text-sm num font-bold" style={{ color: stats.openExpenses > 0 ? 'var(--warning)' : 'var(--muted)' }}>{stats.openExpenses}</span>
             </div>
             <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
-              {stats.openExpenses === 0 ? 'Alle bonnen verwerkt' : `${stats.openExpenses} bon${stats.openExpenses !== 1 ? 'nen' : ''} wachten`}
+              {stats.openExpenses === 0 ? t('dash.allProcessed') : `${stats.openExpenses} ${stats.openExpenses !== 1 ? t('dash.receiptPlural') : t('dash.receiptSingle')} ${t('dash.waitingShort')}`}
             </p>
             <button onClick={() => setActiveTab('expenses')} className="text-xs font-medium flex items-center gap-1 hover:underline" style={{ color: 'var(--accent)' }}>
-              Naar bonnen <ChevronRight size={12} />
+              {t('dash.toReceipts')} <ChevronRight size={12} />
             </button>
           </Card>
         </div>
@@ -2727,17 +2743,17 @@ Wanneer je antwoordt:
       {/* ── Mobiel: compacte stats onder grafiek ── */}
       <div className="grid grid-cols-2 gap-3 lg:hidden">
         <Card className="p-4">
-          <div className="text-[10px] uppercase tracking-[0.08em] font-semibold mb-1.5" style={{ color: 'var(--text-3)' }}>Openstaand</div>
+          <div className="text-[10px] uppercase tracking-[0.08em] font-semibold mb-1.5" style={{ color: 'var(--text-3)' }}>{t('dash.outstanding')}</div>
           <div className="num font-bold" style={{ fontSize: '17px', color: 'var(--text)', letterSpacing: '-0.02em' }}>{fmtEUR(stats.outstanding)}</div>
           <div className="text-[11px] mt-1" style={{ color: stats.overdue > 0 ? 'var(--danger)' : 'var(--text-3)' }}>
-            {stats.overdue > 0 ? `${fmtEUR(stats.overdue)} te laat` : 'Alles op tijd'}
+            {stats.overdue > 0 ? `${fmtEUR(stats.overdue)} ${t('dash.statLate')}` : t('dash.statAllOnTime')}
           </div>
         </Card>
         <Card className="p-4">
-          <div className="text-[10px] uppercase tracking-[0.08em] font-semibold mb-1.5" style={{ color: 'var(--text-3)' }}>Open bonnen</div>
+          <div className="text-[10px] uppercase tracking-[0.08em] font-semibold mb-1.5" style={{ color: 'var(--text-3)' }}>{t('dash.openReceipts')}</div>
           <div className="num font-bold" style={{ fontSize: '17px', color: stats.openExpenses > 0 ? 'var(--warning)' : 'var(--text)', letterSpacing: '-0.02em' }}>{stats.openExpenses}</div>
           <div className="text-[11px] mt-1" style={{ color: 'var(--text-3)' }}>
-            {stats.openExpenses === 0 ? 'Alles verwerkt' : 'wachten op verwerking'}
+            {stats.openExpenses === 0 ? t('dash.allProcessedShort') : t('dash.awaitingProcessing')}
           </div>
         </Card>
       </div>
@@ -2745,13 +2761,13 @@ Wanneer je antwoordt:
       {/* ── Recente facturen ── */}
       <Card>
         <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
-          <h3 className="font-display text-base font-semibold" style={{ color: 'var(--ink)' }}>Recente facturen</h3>
+          <h3 className="font-display text-base font-semibold" style={{ color: 'var(--ink)' }}>{t('dash.recentTitle')}</h3>
           <button onClick={() => setActiveTab('invoices')} className="text-xs font-medium hover:underline flex items-center gap-1" style={{ color: 'var(--accent)' }}>
-            Alles <ChevronRight size={12} />
+            {t('dash.viewAll')} <ChevronRight size={12} />
           </button>
         </div>
         {recentInvoices.length === 0 ? (
-          <div className="p-8 text-center text-sm" style={{ color: 'var(--muted)' }}>Nog geen facturen</div>
+          <div className="p-8 text-center text-sm" style={{ color: 'var(--muted)' }}>{t('dash.noInvoices')}</div>
         ) : (
           <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
             {recentInvoices.map(inv => {
@@ -3029,6 +3045,7 @@ const ClientForm = ({ client, onSave, onClose, settings }) => {
 // INVOICES VIEW
 // ============================================================================
 const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients, settings, setSettings, activeEntity, setEntities, entities, onSendReminder }) => {
+  const { t } = useLang();
   const [view, setView] = useState({ mode: 'list' });
   const [statusFilter, setStatusFilter] = useState('all');
   const [listEdit, setListEdit] = useState(null); // { invId, field: 'client' }
@@ -3201,26 +3218,26 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="font-display text-4xl font-medium">Facturen</h1>
+          <h1 className="font-display text-4xl font-medium">{t('inv.title')}</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-            {invoices.length} factu{invoices.length === 1 ? 'ur' : 'ren'} · Volgend nr: <span className="font-mono">{nextPrefix}{String(nextNum).padStart(4, '0')}</span> · {activeEntity?.name}
+            {invoices.length} {invoices.length === 1 ? t('inv.countSingle') : t('inv.countMulti')} · {t('inv.nextNr')}: <span className="font-mono">{nextPrefix}{String(nextNum).padStart(4, '0')}</span> · {activeEntity?.name}
           </p>
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" onClick={() => setShowAging(a => !a)}>
-            <FileBarChart size={14} /> Ouderdomsanalyse
+            <FileBarChart size={14} /> {t('inv.aging')}
           </Button>
           <Button onClick={() => {
             setView({ mode: 'edit', invoice: { issueDate: todayISO(), dueDate: addDays(todayISO(), paymentTermsForEntity), items: [{ description: '', quantity: 1, price: 0, btwRate: defaultBtw }] } });
           }}>
-            <Plus size={16} /> Nieuwe factuur
+            <Plus size={16} /> {t('inv.new')}
           </Button>
         </div>
       </div>
 
       {showAging && (
         <Card className="p-5">
-          <h3 className="font-display text-base font-medium mb-4">Ouderdomsanalyse openstaande facturen</h3>
+          <h3 className="font-display text-base font-medium mb-4">{t('inv.agingTitle')}</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[['0-30', '0–30 dagen', 'var(--info)'], ['31-60', '31–60 dagen', 'var(--warning)'], ['61-90', '61–90 dagen', 'var(--danger)'], ['90+', '> 90 dagen', '#7c3aed']].map(([key, label, color]) => {
               const entries = agingBuckets[key] || [];
@@ -3243,7 +3260,7 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
 
       <Card className="p-3">
         <div className="flex flex-wrap gap-1">
-          {[{ id: 'all', label: 'Alles' }, { id: 'draft', label: 'Concept' }, { id: 'sent', label: 'Verstuurd' }, { id: 'partial', label: 'Deelbetaling' }, { id: 'overdue', label: 'Te laat' }, { id: 'paid', label: 'Betaald' }, { id: 'credit_note', label: 'Creditnota' }].map(f => (
+          {[{ id: 'all', label: t('inv.filterAll') }, { id: 'draft', label: t('inv.filterDraft') }, { id: 'sent', label: t('inv.filterSent') }, { id: 'partial', label: t('inv.filterPartial') }, { id: 'overdue', label: t('inv.filterOverdue') }, { id: 'paid', label: t('inv.filterPaid') }, { id: 'credit_note', label: t('inv.filterCreditNote') }].map(f => (
             <button
               key={f.id}
               onClick={() => setStatusFilter(f.id)}
@@ -3263,11 +3280,11 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
         <Card>
           <EmptyState
             icon={FileText}
-            title={statusFilter !== 'all' ? 'Geen facturen met deze status' : 'Nog geen facturen'}
-            description={statusFilter !== 'all' ? 'Probeer een ander filter' : 'Maak je eerste factuur aan om te beginnen.'}
+            title={statusFilter !== 'all' ? t('inv.emptyFilterTitle') : t('inv.emptyTitle')}
+            description={statusFilter !== 'all' ? t('inv.emptyFilterDesc') : t('inv.emptyDesc')}
             action={statusFilter === 'all' && clients.length > 0 && (
               <Button onClick={() => setView({ mode: 'edit', invoice: { issueDate: todayISO(), dueDate: addDays(todayISO(), paymentTermsForEntity), items: [{ description: '', quantity: 1, price: 0, btwRate: defaultBtw }] } })}>
-                <Plus size={14} /> Eerste factuur
+                <Plus size={14} /> {t('inv.first')}
               </Button>
             )}
           />
@@ -3302,7 +3319,7 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
                       >{inv.number || <span style={{ color: 'var(--warning)' }}>— nr. —</span>}</span>
                       <Badge status={status} />
                       {status === 'overdue' && overdueDays > 0 && (
-                        <span className="text-[10px]" style={{ color: 'var(--danger)' }}>{overdueDays}d te laat</span>
+                        <span className="text-[10px]" style={{ color: 'var(--danger)' }}>{overdueDays}{t('inv.overduedays')}</span>
                       )}
                     </div>
                     {editingClient ? (
@@ -3335,40 +3352,40 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
                       <div onClick={e => e.stopPropagation()}>
                         <input type="date" defaultValue={inv.issueDate || ''} autoFocus
                           style={{ fontSize: '11px', padding: '1px 4px', borderRadius: '4px', border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--ink)' }}
-                          onChange={e => { if (e.target.value) { handleUpdateInvoice(inv.id, { issueDate: e.target.value }); setListEdit(null); } }}
-                          onBlur={() => setListEdit(null)} />
+                          onKeyDown={e => { if (e.key === 'Escape') setListEdit(null); }}
+                          onBlur={e => { const v = e.target.value; setTimeout(() => { if (v) handleUpdateInvoice(inv.id, { issueDate: v }); setListEdit(null); }, 200); }} />
                       </div>
                     ) : (
                       <div style={{ cursor: 'pointer' }} title="Klik om factuurdatum te wijzigen"
                         onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field: 'issueDate' }); }}>
-                        Factuurdatum: {fmtDate(inv.issueDate)}
+                        {t('inv.dateLabel')}: {fmtDate(inv.issueDate)}
                       </div>
                     )}
                     {listEdit?.invId === inv.id && listEdit?.field === 'dueDate' ? (
                       <div onClick={e => e.stopPropagation()}>
                         <input type="date" defaultValue={inv.dueDate || ''} autoFocus
                           style={{ fontSize: '11px', padding: '1px 4px', borderRadius: '4px', border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--ink)' }}
-                          onChange={e => { if (e.target.value) { handleUpdateInvoice(inv.id, { dueDate: e.target.value }); setListEdit(null); } }}
-                          onBlur={() => setListEdit(null)} />
+                          onKeyDown={e => { if (e.key === 'Escape') setListEdit(null); }}
+                          onBlur={e => { const v = e.target.value; setTimeout(() => { if (v) handleUpdateInvoice(inv.id, { dueDate: v }); setListEdit(null); }, 200); }} />
                       </div>
                     ) : (
                       <div style={{ cursor: 'pointer' }} title="Klik om vervaldatum te wijzigen"
                         onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field: 'dueDate' }); }}>
-                        Vervalt: {fmtDate(inv.dueDate)}
+                        {t('inv.dueLabel')}: {fmtDate(inv.dueDate)}
                       </div>
                     )}
                     {(status === 'paid' || status === 'partial') && (
                       listEdit?.invId === inv.id && listEdit?.field === 'paidAt' ? (
                         <div onClick={e => e.stopPropagation()}>
-                          <input type="date" defaultValue={inv.paidAt ? inv.paidAt.slice(0, 10) : ''} autoFocus
+                          <input type="date" defaultValue={isoToLocalDate(inv.paidAt)} autoFocus
                             style={{ fontSize: '11px', padding: '1px 4px', borderRadius: '4px', border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--ink)' }}
-                            onChange={e => { if (e.target.value) { handleUpdateInvoice(inv.id, { paidAt: new Date(e.target.value).toISOString() }); setListEdit(null); } }}
-                            onBlur={() => setListEdit(null)} />
+                            onKeyDown={e => { if (e.key === 'Escape') setListEdit(null); }}
+                            onBlur={e => { const v = e.target.value; setTimeout(() => { if (v) handleUpdateInvoice(inv.id, { paidAt: v + 'T12:00:00.000Z' }); setListEdit(null); }, 200); }} />
                         </div>
                       ) : (
                         <div style={{ color: 'var(--success)', cursor: 'pointer' }} title="Klik om betaaldatum te wijzigen"
                           onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field: 'paidAt' }); }}>
-                          Betaald: {inv.paidAt ? fmtDate(inv.paidAt) : '—'}
+                          {t('inv.paidLabel')}: {inv.paidAt ? fmtDate(inv.paidAt) : '—'}
                         </div>
                       )
                     )}
@@ -3391,6 +3408,7 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
 // INVOICE EDITOR
 // ============================================================================
 const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, onSave, onCancel }) => {
+  const { t } = useLang();
   const paymentTerms = activeEntity?.paymentTerms || settings.invoice?.paymentTerms || 14;
   const jurisdiction = JURISDICTIONS[activeEntity?.jurisdiction || 'NL'] || JURISDICTIONS.NL;
   const defaultBtw = jurisdiction.salesTax.standard;
@@ -3435,14 +3453,14 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-4">
         <button onClick={onCancel} className="flex items-center gap-2 text-sm hover:underline" style={{ color: 'var(--ink-2)' }}>
-          <ArrowLeft size={14} /> Terug
+          <ArrowLeft size={14} /> {t('editor.back')}
         </button>
       </div>
 
       <div>
-        <h1 className="font-display text-4xl font-medium">{form.id ? `Factuur ${form.number}` : 'Nieuwe factuur'}</h1>
+        <h1 className="font-display text-4xl font-medium">{form.id ? `${t('editor.titleEdit')} ${form.number}` : t('editor.titleNew')}</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-          {form.id ? 'Wijzigingen worden direct opgeslagen' : `Factuurnummer: ${prefix}${String(nextNum).padStart(4, '0')} · ${activeEntity?.name}`}
+          {form.id ? t('editor.subtitleEdit') : `${t('editor.subtitleNew')}: ${prefix}${String(nextNum).padStart(4, '0')} · ${activeEntity?.name}`}
         </p>
       </div>
 
@@ -3463,26 +3481,26 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div className="md:col-span-2 space-y-1">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>Klant *</label>
+              <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>{t('editor.client')} *</label>
               <button onClick={() => setAddingClient(true)} className="flex items-center gap-1 text-xs hover:underline" style={{ color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                <Plus size={11} /> Nieuwe klant
+                <Plus size={11} /> {t('editor.newClient')}
               </button>
             </div>
             {clients.length === 0 ? (
               <div className="px-3 py-2 text-sm rounded border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-                Geen klanten — klik op <strong>+ Nieuwe klant</strong> om er een toe te voegen.
+                {t('editor.noClients')}
               </div>
             ) : (
               <select value={form.clientId} onChange={e => update('clientId', e.target.value)}
                 className="w-full px-3 py-2 text-sm rounded border"
                 style={{ background: 'var(--bg)', color: 'var(--text)', borderColor: 'var(--border)' }}>
-                <option value="">Kies klant...</option>
+                <option value="">{t('editor.selectClient')}</option>
                 {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
           </div>
           <div>
-            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted)' }}>Valuta</label>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted)' }}>{t('editor.currency')}</label>
             <select value={form.currency || 'EUR'} onChange={e => update('currency', e.target.value)}
               className="w-full px-3 py-2 text-sm rounded border"
               style={{ background: 'var(--bg)', color: 'var(--text)', borderColor: 'var(--border)' }}>
@@ -3492,7 +3510,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted)' }}>Taal factuur</label>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted)' }}>{t('editor.invoiceLang')}</label>
             <select value={form.language || 'nl'} onChange={e => update('language', e.target.value)}
               className="w-full px-3 py-2 text-sm rounded border"
               style={{ background: 'var(--bg)', color: 'var(--text)', borderColor: 'var(--border)' }}>
@@ -3502,36 +3520,46 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
               <option value="de">🇩🇪 Deutsch</option>
             </select>
           </div>
-          <Input label="Referentie" value={form.reference || ''} onChange={e => update('reference', e.target.value)} placeholder="PO-nummer, etc." />
-          <Input label="Factuurdatum *" type="date" value={form.issueDate} onChange={e => {
+          <Input label={t('editor.reference')} value={form.reference || ''} onChange={e => update('reference', e.target.value)} placeholder={t('editor.referencePlaceholder')} />
+          {jurisdiction.code === 'DR' && (
+            <div>
+              <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted)' }}>NCF (DGII) *</label>
+              <input value={form.ncf || ''} onChange={e => update('ncf', e.target.value)}
+                placeholder="B01-00000001" maxLength={13}
+                className="w-full px-3 py-2 text-sm rounded border font-mono"
+                style={{ background: 'var(--bg)', color: 'var(--text)', borderColor: 'var(--border)' }} />
+              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Número de Comprobante Fiscal · B01 crédito fiscal · B02 consumidor final · B14 especial</p>
+            </div>
+          )}
+          <Input label={`${t('editor.issueDate')} *`} type="date" value={form.issueDate} onChange={e => {
             update('issueDate', e.target.value);
             if (!form.dueDate || daysBetween(form.issueDate, form.dueDate) === settings.invoice.paymentTerms) {
               setForm(f => ({ ...f, issueDate: e.target.value, dueDate: addDays(e.target.value, settings.invoice.paymentTerms) }));
             }
           }} />
-          <Input label="Vervaldatum *" type="date" value={form.dueDate} onChange={e => update('dueDate', e.target.value)} />
+          <Input label={`${t('editor.dueDate')} *`} type="date" value={form.dueDate} onChange={e => update('dueDate', e.target.value)} />
           <div className="flex items-end">
             <div className="text-xs" style={{ color: 'var(--muted)' }}>
-              Betaaltermijn: <strong className="num" style={{ color: 'var(--ink)' }}>{form.dueDate && form.issueDate ? daysBetween(form.issueDate, form.dueDate) : 0}</strong> dagen
+              {t('editor.paymentTerms')}: <strong className="num" style={{ color: 'var(--ink)' }}>{form.dueDate && form.issueDate ? daysBetween(form.issueDate, form.dueDate) : 0}</strong> {t('editor.paymentTermsDays')}
             </div>
           </div>
         </div>
 
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-medium text-sm">Regels</h3>
-            <Button size="sm" variant="secondary" onClick={addItem}><Plus size={12} /> Regel</Button>
+            <h3 className="font-medium text-sm">{t('editor.lines')}</h3>
+            <Button size="sm" variant="secondary" onClick={addItem}><Plus size={12} /> {t('editor.addLine')}</Button>
           </div>
           {/* Desktop tabel — verborgen op mobiel */}
           <div className="hidden md:block overflow-x-auto scrollable">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-xs uppercase tracking-wider" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-                  <th className="text-left py-2 font-medium">Omschrijving</th>
-                  <th className="text-right py-2 font-medium w-20">Aantal</th>
-                  <th className="text-right py-2 font-medium w-28">Prijs</th>
+                  <th className="text-left py-2 font-medium">{t('editor.colDescription')}</th>
+                  <th className="text-right py-2 font-medium w-20">{t('editor.colQty')}</th>
+                  <th className="text-right py-2 font-medium w-28">{t('editor.colPrice')}</th>
                   <th className="text-right py-2 font-medium w-20">{taxName}</th>
-                  <th className="text-right py-2 font-medium w-28">Totaal</th>
+                  <th className="text-right py-2 font-medium w-28">{t('editor.colTotal')}</th>
                   <th className="w-24"></th>
                 </tr>
               </thead>
@@ -3546,7 +3574,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                           <input
                             value={item.description}
                             onChange={e => updateItem(idx, 'description', e.target.value)}
-                            placeholder="Omschrijving werk/product..."
+                            placeholder={t('editor.descPlaceholder')}
                             className="w-full px-2 py-1.5 text-sm bg-transparent rounded border"
                             style={{ borderColor: 'var(--border)' }}
                           />
@@ -3593,7 +3621,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                               style={{ color: hasDiscount ? 'var(--accent)' : 'var(--muted)' }}
                               title={hasDiscount ? 'Korting verwijderen' : 'Korting toevoegen'}
                             >
-                              {hasDiscount ? '× korting' : '+ korting'}
+                              {hasDiscount ? t('editor.discountRemove') : t('editor.discountAdd')}
                             </button>
                             {form.items.length > 1 && (
                               <button onClick={() => removeItem(idx)} className="p-1 rounded hover:bg-red-50">
@@ -3668,7 +3696,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div>
-                      <div className="text-[10px] font-medium mb-1" style={{ color: 'var(--muted)' }}>Aantal</div>
+                      <div className="text-[10px] font-medium mb-1" style={{ color: 'var(--muted)' }}>{t('editor.colQty')}</div>
                       <input
                         type="number" step="0.01" value={item.quantity}
                         onChange={e => updateItem(idx, 'quantity', e.target.value)}
@@ -3677,7 +3705,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                       />
                     </div>
                     <div>
-                      <div className="text-[10px] font-medium mb-1" style={{ color: 'var(--muted)' }}>Prijs (€)</div>
+                      <div className="text-[10px] font-medium mb-1" style={{ color: 'var(--muted)' }}>{t('editor.colPrice')}</div>
                       <input
                         type="number" step="0.01" value={item.price}
                         onChange={e => updateItem(idx, 'price', e.target.value)}
@@ -3703,7 +3731,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                       className="text-[11px] font-medium"
                       style={{ color: hasDiscount ? 'var(--accent)' : 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                     >
-                      {hasDiscount ? '× korting verwijderen' : '+ korting'}
+                      {hasDiscount ? t('editor.discountRemoveMobile') : t('editor.discountAdd')}
                     </button>
                     <span className="text-sm num font-semibold" style={{ color: 'var(--text)' }}>
                       {fmtCurrency(line.net, form.currency)}
@@ -3712,7 +3740,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                   </div>
                   {hasDiscount && (
                     <div className="rounded p-2 space-y-1.5" style={{ background: 'var(--accent-soft)' }}>
-                      <div className="text-[10px] font-medium" style={{ color: 'var(--accent)' }}>Korting</div>
+                      <div className="text-[10px] font-medium" style={{ color: 'var(--accent)' }}>{t('editor.discountLabel')}</div>
                       <div className="flex gap-2">
                         <input
                           value={item.discount.name || ''}
@@ -3748,7 +3776,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <Textarea label="Notities op factuur" rows={4} value={form.notes} onChange={e => update('notes', e.target.value)} placeholder="Bijv. project-naam, dankwoord, betalingsvoorwaarden..." />
+            <Textarea label={t('editor.notes')} rows={4} value={form.notes} onChange={e => update('notes', e.target.value)} placeholder={t('editor.notesPlaceholder')} />
           </div>
           <div className="space-y-2 text-sm">
             {totals.totalDiscount > 0 && (
@@ -3758,13 +3786,13 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                   <span className="num">{fmtCurrency(totals.subtotal + totals.totalDiscount, form.currency)}</span>
                 </div>
                 <div className="flex justify-between py-1" style={{ color: 'var(--accent)' }}>
-                  <span>Totale korting</span>
+                  <span>{t('editor.totalDiscount')}</span>
                   <span className="num">−{fmtCurrency(totals.totalDiscount, form.currency)}</span>
                 </div>
               </>
             )}
             <div className="flex justify-between py-1.5">
-              <span style={{ color: 'var(--muted)' }}>Subtotaal</span>
+              <span style={{ color: 'var(--muted)' }}>{t('editor.subtotal')}</span>
               <span className="num font-medium">{fmtCurrency(totals.subtotal, form.currency)}</span>
             </div>
             {Object.entries(totals.btwByRate).map(([rate, amt]) => Number(rate) > 0 && (
@@ -3774,7 +3802,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
               </div>
             ))}
             <div className="flex justify-between py-2.5 border-t-2 mt-2" style={{ borderColor: 'var(--ink)' }}>
-              <span className="font-display text-lg">Totaal</span>
+              <span className="font-display text-lg">{t('editor.total')}</span>
               <span className="font-display text-xl num font-medium">{fmtCurrency(totals.total, form.currency)}</span>
             </div>
           </div>
@@ -3782,9 +3810,9 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
       </Card>
 
       <div className="flex justify-end gap-2">
-        <Button variant="secondary" onClick={onCancel}>Annuleren</Button>
+        <Button variant="secondary" onClick={onCancel}>{t('editor.cancel')}</Button>
         <Button onClick={() => isValid && onSave(form)} disabled={!isValid}>
-          <Save size={14} /> Factuur opslaan
+          <Save size={14} /> {t('editor.save')}
         </Button>
       </div>
     </div>
@@ -3795,6 +3823,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
 // INVOICE DETAIL VIEW (with PDF preview)
 // ============================================================================
 const InvoiceDetail = ({ invoice, clients, settings, activeEntity, entities, onClose, onEdit, onDelete, onStatusChange, onDuplicate, onSendReminder, onCreateCreditNote, onRegisterPayment, onUpdateInvoice }) => {
+  const { t } = useLang();
   const [showSendModal, setShowSendModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [changingClient, setChangingClient] = useState(false);
@@ -3887,22 +3916,24 @@ ${clone.innerHTML}
     <div className="space-y-5">
       <div className="no-print flex items-center justify-between gap-4 flex-wrap">
         <button onClick={onClose} className="flex items-center gap-2 text-sm hover:underline" style={{ color: 'var(--ink-2)' }}>
-          <ArrowLeft size={14} /> Terug naar lijst
+          <ArrowLeft size={14} /> {t('detail.backToList')}
         </button>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onClick={() => onDuplicate(invoice)}><Copy size={13} /> Dupliceren</Button>
-          <Button size="sm" variant="secondary" onClick={handlePrint}><Download size={13} /> Download PDF</Button>
+          <Button size="sm" variant="secondary" onClick={() => onDuplicate(invoice)}><Copy size={13} /> {t('detail.duplicate')}</Button>
+          <Button size="sm" variant="secondary" onClick={handlePrint}><Download size={13} /> {t('detail.downloadPdf')}</Button>
           {onUpdateInvoice && (
             <Button size="sm" variant="secondary"
               onClick={() => onUpdateInvoice(invoice.id, { qrEnabled: invoice.qrEnabled === false ? undefined : invoice.qrEnabled ? false : true })}
               title={
                 invoice.qrEnabled && qrMissingIban
                   ? 'QR aan maar geen IBAN ingesteld — ga naar Instellingen › Entiteiten en voeg IBAN toe'
-                  : invoice.qrEnabled === false ? 'QR code verborgen' : invoice.qrEnabled ? 'QR code aan — klik om te verwijderen' : 'QR code volgt template instelling'
+                  : invoice.currency && invoice.currency !== 'EUR'
+                    ? `QR uitgeschakeld — SEPA QR werkt alleen voor EUR (deze factuur is in ${invoice.currency})`
+                    : invoice.qrEnabled === false ? 'QR code verborgen' : invoice.qrEnabled ? 'QR code aan — klik om te verwijderen' : 'QR code volgt template instelling'
               }
               style={{ borderColor: invoice.qrEnabled ? (qrMissingIban ? 'var(--warning)' : 'var(--success)') : invoice.qrEnabled === false ? 'var(--danger)' : 'var(--border-2)', color: invoice.qrEnabled ? (qrMissingIban ? 'var(--warning)' : 'var(--success)') : invoice.qrEnabled === false ? 'var(--danger)' : 'var(--ink-2)' }}
             >
-              <Hash size={13} /> {invoice.qrEnabled === false ? 'QR uit' : invoice.qrEnabled ? (qrMissingIban ? 'QR — geen IBAN' : 'QR aan') : 'QR code'}
+              <Hash size={13} /> {invoice.qrEnabled === false ? t('detail.qrOff') : invoice.qrEnabled ? (qrMissingIban ? t('detail.qrNoIban') : t('detail.qrOn')) : t('detail.qrDefault')}
             </Button>
           )}
           {onUpdateInvoice && (
@@ -3912,7 +3943,7 @@ ${clone.innerHTML}
                 const nr = window.prompt('Factuurnummer:', invoice.number || '');
                 if (nr !== null && nr.trim() !== '') onUpdateInvoice(invoice.id, { number: nr.trim() });
               }}
-            ><Edit3 size={13} /> {invoice.number ? 'Wijzig nr.' : 'Factuurnummer invoeren'}</Button>
+            ><Edit3 size={13} /> {invoice.number ? t('detail.changeNr') : t('detail.enterNr')}</Button>
           )}
           {onUpdateInvoice && (
             changingClient ? (
@@ -3926,40 +3957,40 @@ ${clone.innerHTML}
                     setChangingClient(false);
                   }}
                 >
-                  <option value="">— Geen klant —</option>
+                  <option value="">{t('detail.noClient')}</option>
                   {clients.map(c => <option key={c.id} value={c.id}>{c.name || c.company || c.email || c.id}</option>)}
                 </select>
                 <button onClick={() => setChangingClient(false)} style={{ fontSize: '13px', color: 'var(--muted)', padding: '2px 6px' }}>✕</button>
               </div>
             ) : (
               <Button size="sm" variant="secondary" onClick={() => setChangingClient(true)}>
-                <Edit3 size={13} /> Wijzig klant
+                <Edit3 size={13} /> {t('detail.changeClient')}
               </Button>
             )
           )}
-          {status === 'draft' && <Button size="sm" variant="secondary" onClick={() => onEdit(invoice)}><Edit3 size={13} /> Bewerken</Button>}
+          {status === 'draft' && <Button size="sm" variant="secondary" onClick={() => onEdit(invoice)}><Edit3 size={13} /> {t('detail.edit')}</Button>}
           {status === 'draft' && (
             <Button size="sm" variant="secondary"
-              onClick={() => { if (window.confirm('Factuur markeren als handmatig verstuurd?')) onStatusChange(invoice.id, 'sent', { sentAt: new Date().toISOString() }); }}
+              onClick={() => { if (window.confirm(t('detail.markSentConfirm'))) onStatusChange(invoice.id, 'sent', { sentAt: new Date().toISOString() }); }}
               title="Markeer als verstuurd zonder te versturen via de app"
             >
-              <CheckCircle2 size={13} /> Handmatig verstuurd
+              <CheckCircle2 size={13} /> {t('detail.markSent')}
             </Button>
           )}
           {(status === 'draft' || status === 'sent' || status === 'overdue' || status === 'partial') && (
-            <Button size="sm" onClick={() => setShowSendModal(true)}><Send size={13} /> {status === 'draft' ? 'Versturen' : 'Opnieuw versturen'}</Button>
+            <Button size="sm" onClick={() => setShowSendModal(true)}><Send size={13} /> {status === 'draft' ? t('detail.send') : t('detail.resend')}</Button>
           )}
           {(status === 'sent' || status === 'overdue' || status === 'partial') && onRegisterPayment && (
-            <Button size="sm" variant="secondary" onClick={() => setShowPaymentModal(true)}><Wallet size={13} /> Betaling registreren</Button>
+            <Button size="sm" variant="secondary" onClick={() => setShowPaymentModal(true)}><Wallet size={13} /> {t('detail.registerPayment')}</Button>
           )}
           {status !== 'paid' && status !== 'draft' && status !== 'credit_note' && (
-            <Button size="sm" onClick={() => onStatusChange(invoice.id, 'paid', { paidAt: new Date().toISOString(), payments: [...payments, { amount: remaining, date: todayISO(), note: 'Volledig betaald' }] })}><Check size={13} /> Markeer betaald</Button>
+            <Button size="sm" onClick={() => onStatusChange(invoice.id, 'paid', { paidAt: new Date().toISOString(), payments: [...payments, { amount: remaining, date: todayISO(), note: 'Volledig betaald' }] })}><Check size={13} /> {t('detail.markPaid')}</Button>
           )}
           {status === 'paid' && (
-            <Button size="sm" variant="secondary" onClick={() => onStatusChange(invoice.id, 'sent', { paidAt: null })}><X size={13} /> Markeer onbetaald</Button>
+            <Button size="sm" variant="secondary" onClick={() => onStatusChange(invoice.id, 'sent', { paidAt: null })}><X size={13} /> {t('detail.markUnpaid')}</Button>
           )}
           {status === 'paid' && onCreateCreditNote && (
-            <Button size="sm" variant="secondary" onClick={() => onCreateCreditNote(invoice)}><FileCheck2 size={13} /> Creditnota</Button>
+            <Button size="sm" variant="secondary" onClick={() => onCreateCreditNote(invoice)}><FileCheck2 size={13} /> {t('detail.creditNote')}</Button>
           )}
           <Button size="sm" variant="danger" onClick={() => onDelete(invoice.id)}><Trash2 size={13} /></Button>
         </div>
@@ -3968,18 +3999,18 @@ ${clone.innerHTML}
       <div className="no-print flex items-center gap-3 flex-wrap">
         <h1 className="font-display text-3xl font-medium">Factuur {invoice.number}</h1>
         <Badge status={status} />
-        {invoice.sentAt && <span className="text-xs" style={{ color: 'var(--muted)' }}>Verstuurd op {fmtDate(invoice.sentAt)}</span>}
-        {invoice.paidAt && <span className="text-xs" style={{ color: 'var(--success)' }}>Betaald op {fmtDate(invoice.paidAt)}</span>}
+        {invoice.sentAt && <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('detail.sentOn')} {fmtDate(invoice.sentAt)}</span>}
+        {invoice.paidAt && <span className="text-xs" style={{ color: 'var(--success)' }}>{t('detail.paidOn')} {fmtDate(invoice.paidAt)}</span>}
       </div>
 
       {invoice.remindersSent && invoice.remindersSent.length > 0 && (
         <Card className="p-4 no-print">
-          <h3 className="text-xs font-medium uppercase tracking-wider mb-2" style={{ color: 'var(--muted)' }}>Herinneringen verstuurd</h3>
+          <h3 className="text-xs font-medium uppercase tracking-wider mb-2" style={{ color: 'var(--muted)' }}>{t('detail.remindersTitle')}</h3>
           <div className="space-y-1.5">
             {invoice.remindersSent.map((r, i) => (
               <div key={i} className="flex items-center gap-2 text-sm">
                 <CheckCircle2 size={14} style={{ color: 'var(--success)' }} />
-                <span>{settings.reminders.templates[r.level]?.name || `Herinnering ${r.level + 1}`}</span>
+                <span>{settings.reminders.templates[r.level]?.name || `${t('detail.reminderFallback')} ${r.level + 1}`}</span>
                 <span style={{ color: 'var(--muted)' }}>· {fmtDate(r.date)}</span>
               </div>
             ))}
@@ -3990,7 +4021,7 @@ ${clone.innerHTML}
       {/* Partial payments panel */}
       {payments.length > 0 && (
         <Card className="p-4 no-print">
-          <h3 className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: 'var(--muted)' }}>Betalingen</h3>
+          <h3 className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: 'var(--muted)' }}>{t('detail.paymentsTitle')}</h3>
           <div className="space-y-1.5 mb-3">
             {payments.map((p, i) => (
               <div key={i} className="flex items-center justify-between text-sm">
@@ -4004,7 +4035,7 @@ ${clone.innerHTML}
             ))}
           </div>
           <div className="flex justify-between text-sm font-medium pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
-            <span>Openstaand</span>
+            <span>{t('detail.paymentOutstanding')}</span>
             <span className="num" style={{ color: remaining > 0 ? 'var(--warning)' : 'var(--success)' }}>{fmtCurrency(remaining, invoice.currency)}</span>
           </div>
           {remaining > 0 && (
@@ -4061,6 +4092,7 @@ ${clone.innerHTML}
 // REGISTER PAYMENT MODAL
 // ============================================================================
 const RegisterPaymentModal = ({ invoice, remaining, totals, onSave, onClose }) => {
+  const { t } = useLang();
   const [amount, setAmount] = useState(remaining.toFixed(2));
   const [date, setDate] = useState(todayISO());
   const [note, setNote] = useState('');
@@ -4071,30 +4103,30 @@ const RegisterPaymentModal = ({ invoice, remaining, totals, onSave, onClose }) =
     <Modal open onClose={onClose} size="sm">
       <div className="px-6 py-5 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
         <div>
-          <h2 className="font-display text-xl">Betaling registreren</h2>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Factuur {invoice.number} · openstaand {fmtCurrency(remaining, invoice.currency)}</p>
+          <h2 className="font-display text-xl">{t('payment.title')}</h2>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Factuur {invoice.number} · {t('payment.subtitle')} {fmtCurrency(remaining, invoice.currency)}</p>
         </div>
         <button onClick={onClose} className="p-1.5 rounded hover:bg-stone-100"><X size={16} /></button>
       </div>
       <div className="p-6 space-y-4">
-        <Input label="Bedrag ontvangen" type="number" step="0.01" min="0" value={amount} onChange={e => setAmount(e.target.value)} />
-        <Input label="Datum ontvangst" type="date" value={date} onChange={e => setDate(e.target.value)} />
-        <Input label="Opmerking (optioneel)" value={note} onChange={e => setNote(e.target.value)} placeholder="Bijv. eerste termijn" />
+        <Input label={t('payment.amountLabel')} type="number" step="0.01" min="0" value={amount} onChange={e => setAmount(e.target.value)} />
+        <Input label={t('payment.dateLabel')} type="date" value={date} onChange={e => setDate(e.target.value)} />
+        <Input label={t('payment.noteLabel')} value={note} onChange={e => setNote(e.target.value)} placeholder={t('payment.notePlaceholder')} />
         {isFullPayment && amountNum > 0 && (
           <div className="rounded p-2 text-xs" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
-            Volledige betaling — factuur wordt automatisch op Betaald gezet.
+            {t('payment.fullPayment')}
           </div>
         )}
         {!isFullPayment && amountNum > 0 && (
           <div className="rounded p-2 text-xs" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
-            Restbedrag na betaling: {fmtCurrency(remaining - amountNum, invoice.currency)}
+            {t('payment.partialRemaining')} {fmtCurrency(remaining - amountNum, invoice.currency)}
           </div>
         )}
       </div>
       <div className="px-6 pb-5 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>Annuleren</Button>
+        <Button variant="secondary" onClick={onClose}>{t('editor.cancel')}</Button>
         <Button disabled={amountNum <= 0} onClick={() => onSave({ amount: amountNum, date, note })}>
-          <Check size={14} /> Registreren
+          <Check size={14} /> {t('payment.save')}
         </Button>
       </div>
     </Modal>
@@ -4105,6 +4137,7 @@ const RegisterPaymentModal = ({ invoice, remaining, totals, onSave, onClose }) =
 // SEND INVOICE / REMINDER MODAL
 // ============================================================================
 const SendInvoiceModal = ({ invoice, client, settings, onSend, onClose, mode = 'send', reminderLevel = null }) => {
+  const { t } = useLang();
   const totals = computeInvoice(invoice.items);
   const isReminder = mode === 'reminder';
   const template = isReminder
@@ -4142,7 +4175,7 @@ const SendInvoiceModal = ({ invoice, client, settings, onSend, onClose, mode = '
     <Modal open onClose={onClose} size="lg">
       <div className="px-6 py-5 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
         <div>
-          <h2 className="font-display text-2xl">{isReminder ? 'Herinnering versturen' : 'Factuur versturen'}</h2>
+          <h2 className="font-display text-2xl">{isReminder ? t('send.titleReminder') : t('send.titleInvoice')}</h2>
           <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
             {isReminder ? template.name : `Factuur ${invoice.number}`} → {client?.email || client?.name}
           </p>
@@ -4174,13 +4207,13 @@ const SendInvoiceModal = ({ invoice, client, settings, onSend, onClose, mode = '
             <div className="rounded-md p-3 text-xs flex items-start gap-2" style={{ background: 'var(--info-soft)', color: 'var(--info)' }}>
               <AlertCircle size={14} className="mt-0.5 shrink-0" />
               <div>
-                <strong>Demo modus:</strong> Koppel Resend via Instellingen → Email & WhatsApp om direct te versturen. Status wordt wel bijgewerkt.
+                {t('send.demoWarning')}
               </div>
             </div>
-            <Input label="Van" value={`${settings.email.fromName} <${settings.email.fromEmail || 'nog-niet-ingesteld@example.com'}>`} readOnly />
-            <Input label="Aan" value={client?.email || 'Geen email ingesteld bij klant'} readOnly />
-            <Input label="Onderwerp" value={subject} onChange={e => setSubject(e.target.value)} />
-            <Textarea label="Bericht" rows={8} value={body} onChange={e => setBody(e.target.value)} />
+            <Input label={t('send.from')} value={`${settings.email.fromName} <${settings.email.fromEmail || 'nog-niet-ingesteld@example.com'}>`} readOnly />
+            <Input label={t('send.to')} value={client?.email || t('send.noClientEmail')} readOnly />
+            <Input label={t('send.subject')} value={subject} onChange={e => setSubject(e.target.value)} />
+            <Textarea label={t('send.message')} rows={8} value={body} onChange={e => setBody(e.target.value)} />
             <div className="text-xs flex items-center gap-2 px-3 py-2 rounded" style={{ background: 'var(--surface-2)' }}>
               <FileText size={14} style={{ color: 'var(--muted)' }} />
               <span style={{ color: 'var(--ink-2)' }}>Bijlage: {invoice.number}.pdf</span>
@@ -4193,19 +4226,19 @@ const SendInvoiceModal = ({ invoice, client, settings, onSend, onClose, mode = '
             <div className="rounded-md p-3 text-xs flex items-start gap-2" style={{ background: 'rgba(37,211,102,0.08)', color: '#16a34a' }}>
               <MessageSquare size={14} className="mt-0.5 shrink-0" />
               <div>
-                WhatsApp Web opent in een nieuw tabblad met het ingevulde bericht. De klant ontvangt het bericht direct via WhatsApp.
-                {!whatsappNumber && <strong> Voeg een telefoonnummer toe bij de klant om door te gaan.</strong>}
+                {t('send.waInfo')}
+                {!whatsappNumber && <strong> {t('send.waNoPhone')}</strong>}
               </div>
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--ink-2)' }}>Verzenden naar</label>
+              <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--ink-2)' }}>{t('send.waSendTo')}</label>
               <div className="text-sm px-3 py-2 rounded" style={{ background: 'var(--surface-2)', color: whatsappNumber ? 'var(--ink)' : 'var(--danger)' }}>
-                {whatsappNumber ? `+${whatsappNumber}` : 'Geen telefoonnummer ingesteld bij klant'}
+                {whatsappNumber ? `+${whatsappNumber}` : t('send.waNoNumber')}
               </div>
             </div>
-            <Textarea label="WhatsApp bericht" rows={6} value={waBody} onChange={e => setWaBody(e.target.value)} />
+            <Textarea label={t('send.waMessage')} rows={6} value={waBody} onChange={e => setWaBody(e.target.value)} />
             <div className="text-xs" style={{ color: 'var(--muted)' }}>
-              Tip: voeg ook een link toe naar de factuur-PDF wanneer je hosting hebt.
+              {t('send.waTip')}
             </div>
           </>
         )}
@@ -4223,7 +4256,7 @@ const SendInvoiceModal = ({ invoice, client, settings, onSend, onClose, mode = '
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-all"
               style={{ borderColor: 'var(--border-2)', color: 'var(--ink-2)', background: 'var(--surface)', cursor: 'pointer' }}
             >
-              <Mail size={13} /> Openen in Gmail / mail-app
+              <Mail size={13} /> {t('send.openInGmail')}
             </button>
           )}
         </div>
@@ -4994,7 +5027,9 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
 
   // Per-invoice override: invoice.qrEnabled = true (force on) | false (force off) | undefined (follow template)
   const qrOn = invoice?.qrEnabled === true ? true : invoice?.qrEnabled === false ? false : opts.showQrCode !== false;
-  const epcData = qrOn ? buildEpcQr({
+  // EPC/SEPA QR is only valid for EUR transactions (SEPA countries)
+  const isSepaCompatible = !invoice?.currency || invoice?.currency === 'EUR';
+  const epcData = (qrOn && isSepaCompatible) ? buildEpcQr({
     iban: legalEntity.iban,
     bic: legalEntity.bicCode,
     name: legalEntity.name,
@@ -5160,6 +5195,7 @@ const TemplateClassic = ({ invoice, entity, client, totals, parentEntity }) => {
             <div style={{ fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 600, color: 'var(--muted)', marginBottom: 6 }}>{t.invoice}</div>
             <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 20, fontWeight: 500, color: accent, letterSpacing: '0.04em' }}>{invoice.number}</div>
             {invoice.reference && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>{t.ref}: {invoice.reference}</div>}
+            {invoice.ncf && <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>NCF: <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{invoice.ncf}</span></div>}
           </div>
         </div>
 
@@ -5175,6 +5211,7 @@ const TemplateClassic = ({ invoice, entity, client, totals, parentEntity }) => {
               <div><span style={{ color: 'var(--muted)', fontFamily: 'Geist, sans-serif', fontSize: 10 }}>{t.date} </span>{fmtDate(invoice.issueDate)}</div>
               <div><span style={{ color: 'var(--muted)', fontFamily: 'Geist, sans-serif', fontSize: 10 }}>{t.due} </span>{fmtDate(invoice.dueDate)}</div>
               {invoice.reference && <div><span style={{ color: 'var(--muted)', fontFamily: 'Geist, sans-serif', fontSize: 10 }}>{t.ref} </span>{invoice.reference}</div>}
+              {invoice.ncf && <div><span style={{ color: 'var(--muted)', fontFamily: 'Geist, sans-serif', fontSize: 10 }}>NCF </span><span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{invoice.ncf}</span></div>}
             </div>
           </div>
         </div>
@@ -5231,6 +5268,7 @@ const TemplateModern = ({ invoice, entity, client, totals, parentEntity }) => {
             <div>{t.invoiceDate}: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.issueDate)}</span></div>
             <div>{t.dueDate}: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.dueDate)}</span></div>
             {invoice.reference && <div>{t.reference}: <span style={{ color: 'var(--ink)' }}>{invoice.reference}</span></div>}
+            {invoice.ncf && <div>NCF: <span style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{invoice.ncf}</span></div>}
           </div>
         </div>
       </div>
@@ -5287,6 +5325,7 @@ const TemplateMinimal = ({ invoice, entity, client, totals, parentEntity }) => {
           <div style={{ fontSize: 11, lineHeight: 2, color: 'var(--ink-2)' }}>
             <div>{t.invoiceDate}: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.issueDate)}</span></div>
             <div>{t.dueDate}: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.dueDate)}</span></div>
+            {invoice.ncf && <div>NCF: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{invoice.ncf}</span></div>}
           </div>
         </div>
         <div>
@@ -5343,6 +5382,7 @@ const TemplateStatement = ({ invoice, entity, client, totals, parentEntity }) =>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>{t.invoice}</div>
             <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 18, fontWeight: 600, color: accent }}>{invoice.number}</div>
+            {invoice.ncf && <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 3 }}>NCF: <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{invoice.ncf}</span></div>}
           </div>
         </div>
 
@@ -5358,6 +5398,7 @@ const TemplateStatement = ({ invoice, entity, client, totals, parentEntity }) =>
               <div>{t.date}: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.issueDate)}</span></div>
               <div>{t.due}: <span className="num" style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtDate(invoice.dueDate)}</span></div>
               {invoice.reference && <div>{t.ref}: <span style={{ color: 'var(--ink)' }}>{invoice.reference}</span></div>}
+              {invoice.ncf && <div>NCF: <span style={{ color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace' }}>{invoice.ncf}</span></div>}
             </div>
           </div>
         </div>
@@ -5396,6 +5437,7 @@ const TemplateNordic = ({ invoice, entity, client, totals, parentEntity }) => {
             <div style={{ fontSize: 9, letterSpacing: '0.22em', textTransform: 'uppercase', color: '#ccc', marginBottom: 6 }}>{t.invoice}</div>
             <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 20, fontWeight: 600, color: accent, letterSpacing: '0.03em' }}>{invoice.number}</div>
             {invoice.reference && <div style={{ fontSize: 9, color: '#bbb', marginTop: 4 }}>{t.ref}: {invoice.reference}</div>}
+            {invoice.ncf && <div style={{ fontSize: 9, color: '#bbb', marginTop: 2 }}>NCF: <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{invoice.ncf}</span></div>}
           </div>
         </div>
 
@@ -5450,6 +5492,7 @@ const TemplateBold = ({ invoice, entity, client, totals, parentEntity }) => {
             <div style={{ textAlign: 'right', marginBottom: 2 }}>
               <div style={{ fontSize: 9, letterSpacing: '0.22em', textTransform: 'uppercase', color: '#bbb', marginBottom: 5 }}>{t.invoiceNumber}</div>
               <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 26, fontWeight: 800, color: accent, letterSpacing: '-0.01em', lineHeight: 1 }}>{invoice.number}</div>
+              {invoice.ncf && <div style={{ fontSize: 9, color: '#bbb', marginTop: 4 }}>NCF: <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{invoice.ncf}</span></div>}
             </div>
           </div>
           <div style={{ fontSize: 10.5, color: '#999', marginTop: 10, lineHeight: 1.7 }}>
@@ -5473,6 +5516,7 @@ const TemplateBold = ({ invoice, entity, client, totals, parentEntity }) => {
               <div>{t.date} <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#1a1a1a', float: 'right' }}>{fmtDate(invoice.issueDate)}</span></div>
               <div>{t.due} <span style={{ fontFamily: 'JetBrains Mono, monospace', color: accent, float: 'right' }}>{fmtDate(invoice.dueDate)}</span></div>
               {invoice.reference && <div>{t.ref} <span style={{ color: '#1a1a1a', float: 'right' }}>{invoice.reference}</span></div>}
+              {invoice.ncf && <div>NCF <span style={{ color: '#1a1a1a', float: 'right', fontFamily: 'JetBrains Mono, monospace', fontSize: 10 }}>{invoice.ncf}</span></div>}
             </div>
             <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #e4e1db', fontFamily: 'JetBrains Mono, monospace', fontSize: 18, fontWeight: 700, color: accent }}>{fmtCurrency(totals.total, invoice.currency)}</div>
           </div>
@@ -5513,6 +5557,7 @@ const TemplateHorizon = ({ invoice, entity, client, totals, parentEntity }) => {
             <div>{fmtDate(invoice.issueDate)}</div>
             <div style={{ opacity: 0.7 }}>{t.due} {fmtDate(invoice.dueDate)}</div>
             {invoice.reference && <div style={{ opacity: 0.6, fontFamily: 'Geist, sans-serif', fontSize: 9 }}>Ref: {invoice.reference}</div>}
+            {invoice.ncf && <div style={{ opacity: 0.7, fontFamily: 'JetBrains Mono, monospace', fontSize: 9 }}>NCF: {invoice.ncf}</div>}
           </div>
         </div>
       </div>
@@ -5576,6 +5621,7 @@ const TemplateSplit = ({ invoice, entity, client, totals, parentEntity }) => {
             <div><span style={{ color: '#c5b9a8' }}>{t.date} </span><span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5 }}>{fmtDate(invoice.issueDate)}</span></div>
             <div><span style={{ color: '#c5b9a8' }}>{t.due} </span><span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5 }}>{fmtDate(invoice.dueDate)}</span></div>
             {invoice.reference && <div><span style={{ color: '#c5b9a8' }}>{t.ref} </span>{invoice.reference}</div>}
+            {invoice.ncf && <div><span style={{ color: '#c5b9a8' }}>NCF </span><span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9.5 }}>{invoice.ncf}</span></div>}
           </div>
         </div>
 
@@ -5634,6 +5680,7 @@ const TemplateBloom = ({ invoice, entity, client, totals, parentEntity }) => {
             <div><span style={{ color: '#ccc' }}>{t.date} </span><span style={{ color: '#555' }}>{fmtDate(invoice.issueDate)}</span></div>
             <div><span style={{ color: '#ccc' }}>{t.due} </span><span style={{ color: '#555' }}>{fmtDate(invoice.dueDate)}</span></div>
             {invoice.reference && <div><span style={{ color: '#ccc' }}>{t.ref} </span><span style={{ color: '#555' }}>{invoice.reference}</span></div>}
+            {invoice.ncf && <div><span style={{ color: '#ccc' }}>NCF </span><span style={{ color: '#555', fontFamily: 'JetBrains Mono, monospace', fontSize: 9 }}>{invoice.ncf}</span></div>}
           </div>
         </div>
       </div>
@@ -5678,6 +5725,7 @@ const TemplateVelvet = ({ invoice, entity, client, totals, parentEntity }) => {
           <div style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.65)', marginTop: 10, lineHeight: 1.9 }}>
             <div><span style={{ opacity: 0.7 }}>{t.date} </span>{fmtDate(invoice.issueDate)}</div>
             <div><span style={{ opacity: 0.7 }}>{t.due} </span>{fmtDate(invoice.dueDate)}</div>
+            {invoice.ncf && <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9 }}><span style={{ opacity: 0.7 }}>NCF </span>{invoice.ncf}</div>}
           </div>
         </div>
       </div>
@@ -8191,7 +8239,179 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
 // ============================================================================
 // SETTINGS VIEW
 // ============================================================================
-const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntities, clients, initialSection, updateProfile, profile, user, organization, updateOrganization, saveUserApiKeys }) => {
+const IMPORT_FUNCTION_URL = 'https://iomsezoerbldjwyztlkr.supabase.co/functions/v1/import-invoice';
+
+function IntegratiesSection({ importToken, generateImportToken }) {
+  const [copied, setCopied] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+
+  const copyToken = () => {
+    if (!importToken) return;
+    navigator.clipboard.writeText(importToken);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const copyUrl = () => {
+    navigator.clipboard.writeText(IMPORT_FUNCTION_URL);
+    setCopiedUrl(true);
+    setTimeout(() => setCopiedUrl(false), 2000);
+  };
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    await generateImportToken();
+    setGenerating(false);
+    setShowToken(true);
+  };
+
+  const masked = importToken
+    ? importToken.slice(0, 8) + '••••••••••••••••••••••••••' + importToken.slice(-4)
+    : null;
+
+  return (
+    <div className="space-y-5">
+      <Card className="p-6 space-y-5">
+        <div>
+          <h3 className="font-display text-lg mb-2 font-medium">Make.com koppeling — Inkoop automatisch importeren</h3>
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>
+            Genereer een persoonlijk API-token zodat Make.com facturen rechtstreeks in jouw inkoopoverzicht kan plaatsen.
+            Elke gebruiker heeft zijn eigen token — data komt altijd in het juiste account terecht.
+          </p>
+        </div>
+
+        {/* Token sectie */}
+        <div className="space-y-3">
+          <div style={{ color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Jouw API-token
+          </div>
+          {importToken ? (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg font-mono text-sm"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', color: 'var(--text)', minWidth: 0 }}>
+                <Key size={13} style={{ color: 'var(--muted)', flexShrink: 0 }} />
+                <span className="truncate">{showToken ? importToken : masked}</span>
+              </div>
+              <button
+                onClick={() => setShowToken(s => !s)}
+                className="px-3 py-2 text-xs rounded-lg"
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', color: 'var(--text-2)', whiteSpace: 'nowrap' }}
+              >
+                {showToken ? 'Verberg' : 'Toon'}
+              </button>
+              <button
+                onClick={copyToken}
+                className="px-3 py-2 text-xs rounded-lg flex items-center gap-1.5"
+                style={{ background: copied ? 'var(--success-soft)' : 'var(--surface-2)', border: '1px solid var(--border-2)', color: copied ? 'var(--success)' : 'var(--text-2)', whiteSpace: 'nowrap' }}
+              >
+                {copied ? <><Check size={12} /> Gekopieerd</> : <><Copy size={12} /> Kopieer</>}
+              </button>
+            </div>
+          ) : (
+            <div className="rounded-md p-3 text-sm" style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', color: 'var(--muted)' }}>
+              Nog geen token gegenereerd.
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleGenerate}
+              disabled={generating}
+              className="px-4 py-2 text-sm rounded-lg flex items-center gap-2"
+              style={{ background: 'var(--ink)', color: '#fff', opacity: generating ? 0.6 : 1, cursor: generating ? 'wait' : 'pointer' }}
+            >
+              <RefreshCw size={13} className={generating ? 'animate-spin' : ''} />
+              {importToken ? 'Vernieuw token' : 'Genereer token'}
+            </button>
+            {importToken && (
+              <span className="text-xs" style={{ color: 'var(--muted)' }}>
+                Vernieuwen maakt het oude token ongeldig.
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Webhook URL */}
+        <div className="space-y-2">
+          <div style={{ color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Webhook URL (gebruik in Make)
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg font-mono text-xs"
+              style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', color: 'var(--text-2)', minWidth: 0 }}>
+              <Link2 size={12} style={{ color: 'var(--muted)', flexShrink: 0 }} />
+              <span className="truncate">{IMPORT_FUNCTION_URL}</span>
+            </div>
+            <button
+              onClick={copyUrl}
+              className="px-3 py-2 text-xs rounded-lg flex items-center gap-1.5"
+              style={{ background: copiedUrl ? 'var(--success-soft)' : 'var(--surface-2)', border: '1px solid var(--border-2)', color: copiedUrl ? 'var(--success)' : 'var(--text-2)', whiteSpace: 'nowrap' }}
+            >
+              {copiedUrl ? <><Check size={12} /> Gekopieerd</> : <><Copy size={12} /> Kopieer</>}
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      {/* Make instructies */}
+      <Card className="p-6 space-y-4">
+        <h3 className="font-display text-base font-medium flex items-center gap-2">
+          <Zap size={16} style={{ color: 'var(--accent)' }} />
+          Make.com instellen
+        </h3>
+        <ol className="space-y-3 text-sm" style={{ color: 'var(--text-2)' }}>
+          <li className="flex gap-3">
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--ink)', color: '#fff' }}>1</span>
+            <span>Maak een nieuw scenario in Make.com. Voeg module toe: <strong>Gmail → Watch Emails</strong>. Kies label <strong>Facturen</strong>, filter op <em>Ongelezen</em>.</span>
+          </li>
+          <li className="flex gap-3">
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--ink)', color: '#fff' }}>2</span>
+            <span>Voeg module toe: <strong>Gmail → Mark as Read</strong> (zodat elke factuur maar één keer verwerkt wordt).</span>
+          </li>
+          <li className="flex gap-3">
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--ink)', color: '#fff' }}>3</span>
+            <span>Voeg module toe: <strong>OpenAI → Create a Completion</strong>. Gebruik de e-mailtekst als input met onderstaand JSON-formaat als output (zie veldlijst).</span>
+          </li>
+          <li className="flex gap-3">
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--ink)', color: '#fff' }}>4</span>
+            <span>Voeg module toe: <strong>HTTP → Make a request</strong>. Methode: <code className="px-1 rounded" style={{ background: 'var(--surface-2)' }}>POST</code>, URL: de webhook URL hierboven. Header: <code className="px-1 rounded" style={{ background: 'var(--surface-2)' }}>Authorization: Bearer &lt;jouw token&gt;</code>.</span>
+          </li>
+          <li className="flex gap-3">
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--ink)', color: '#fff' }}>5</span>
+            <span>Zet de scenario aan en test met een echte factuur-mail in het label.</span>
+          </li>
+        </ol>
+
+        {/* JSON veldspec */}
+        <div className="rounded-lg p-4 mt-2" style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)' }}>
+          <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-2)' }}>JSON body die Make stuurt (verplicht: supplier, date, amount_excl)</div>
+          <pre className="text-xs overflow-x-auto" style={{ color: 'var(--text-2)', lineHeight: 1.6 }}>{`{
+  "supplier":       "OpenAI",
+  "invoice_number": "2024-INV-001",
+  "date":           "2024-06-01",
+  "amount_excl":    49.00,
+  "btw_rate":       0,
+  "btw_amount":     0,
+  "total_amount":   49.00,
+  "currency":       "USD",
+  "category":       "AI & Automatisering",
+  "notes":          "GPT-4 API usage June"
+}`}</pre>
+        </div>
+
+        <div className="rounded-md p-3 text-xs flex items-start gap-2" style={{ background: 'var(--warning-soft)', color: 'var(--ink-2)' }}>
+          <AlertCircle size={13} className="mt-0.5 shrink-0" style={{ color: 'var(--warning)' }} />
+          <div>
+            <strong>BTW-tip voor Make:</strong> Vraag in je OpenAI-prompt: <em>"Als het bedrijf buiten Nederland/EU is, zet btw_rate op 0. Als er BTW op staat, gebruik het exacte percentage."</em> Zo detecteert Make automatisch of het 0%, 9% of 21% is.
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntities, clients, initialSection, updateProfile, profile, user, organization, updateOrganization, saveUserApiKeys, generateImportToken, importToken }) => {
   const { t, lang, setLang, LANGUAGES } = useLang();
   const [section, setSection] = useState(initialSection || 'jurisdiction');
   const [draft, setDraft] = useState(settings);
@@ -8257,16 +8477,17 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
   };
 
   const sections = [
-    { id: 'profile', label: t('settings.profile') },
-    { id: 'jurisdiction', label: t('settings.jurisdiction') },
-    { id: 'templates', label: t('settings.templates') },
-    { id: 'reminders', label: t('settings.reminders') },
-    { id: 'email', label: t('settings.email') },
-    { id: 'categories', label: t('settings.categories') },
-    { id: 'ai', label: t('settings.ai') },
-    { id: 'credit', label: t('settings.credit') },
-    { id: 'status', label: t('settings.status') },
-    { id: 'appearance', label: t('settings.appearance') },
+    { id: 'profile', label: t('settings.profile'), icon: Users },
+    { id: 'jurisdiction', label: t('settings.jurisdiction'), icon: Globe },
+    { id: 'templates', label: t('settings.templates'), icon: Wand2 },
+    { id: 'reminders', label: t('settings.reminders'), icon: Bell },
+    { id: 'email', label: t('settings.email'), icon: Mail },
+    { id: 'categories', label: t('settings.categories'), icon: Tag },
+    { id: 'ai', label: t('settings.ai'), icon: Brain },
+    { id: 'credit', label: t('settings.credit'), icon: ShieldCheck },
+    { id: 'status', label: t('settings.status'), icon: CheckCircle2 },
+    { id: 'appearance', label: t('settings.appearance'), icon: Sparkles },
+    { id: 'integraties', label: 'Integraties', icon: Link2 },
   ];
 
   return (
@@ -8281,23 +8502,51 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
         </Button>
       </div>
 
-      <Card className="p-2 overflow-x-auto scrollable">
-        <div className="flex gap-1">
-          {sections.map(s => (
-            <button
-              key={s.id}
-              onClick={() => setSection(s.id)}
-              className="px-4 py-2 text-sm rounded font-medium whitespace-nowrap transition-colors"
-              style={{
-                background: section === s.id ? 'var(--ink)' : 'transparent',
-                color: section === s.id ? '#fff' : 'var(--ink-2)',
-              }}
-            >
-              {s.label}
-            </button>
-          ))}
+      {/* Mobile: compact dropdown nav */}
+      <div className="md:hidden">
+        <div className="relative">
+          <select
+            value={section}
+            onChange={e => setSection(e.target.value)}
+            className="w-full appearance-none pl-4 pr-10 py-3 text-sm rounded-xl border font-medium"
+            style={{ background: 'var(--bg)', color: 'var(--text)', borderColor: 'var(--border-strong)' }}
+          >
+            {sections.map(s => (
+              <option key={s.id} value={s.id}>{s.label}</option>
+            ))}
+          </select>
+          <ChevronDown size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--muted)' }} />
         </div>
-      </Card>
+      </div>
+
+      {/* Desktop: sidebar + content / Mobile: content full width */}
+      <div className="md:flex gap-6 items-start">
+        {/* Sidebar nav — desktop only */}
+        <nav className="hidden md:flex flex-col w-44 shrink-0 sticky gap-0.5" style={{ top: '1rem' }}>
+          {sections.map(s => {
+            const Icon = s.icon;
+            const active = section === s.id;
+            return (
+              <button
+                key={s.id}
+                onClick={() => setSection(s.id)}
+                className="flex items-center gap-2.5 w-full px-3 py-2.5 rounded-lg text-sm text-left transition-all"
+                style={{
+                  background: active ? 'var(--surface-2)' : 'transparent',
+                  color: active ? 'var(--ink)' : 'var(--ink-2)',
+                  fontWeight: active ? 600 : 400,
+                  borderLeft: `2px solid ${active ? 'var(--ink)' : 'transparent'}`,
+                }}
+              >
+                <Icon size={14} style={{ flexShrink: 0, opacity: active ? 1 : 0.5 }} />
+                <span className="truncate">{s.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0 space-y-5">
 
       {section === 'profile' && (
         <div className="space-y-5">
@@ -8440,7 +8689,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
             <p className="text-sm" style={{ color: 'var(--muted)' }}>
               Kies onder welke belastingdienst je je administratie voert. Dit bepaalt BTW-tarieven, grootboekrekeningen, aangiftefrequentie en de basis-valuta.
             </p>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
               {Object.values(JURISDICTIONS).map(j => {
                 const isActive = (draft.jurisdiction || 'NL') === j.code;
                 return (
@@ -8457,26 +8706,23 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                       }
                       setDraft(next);
                     }}
-                    className="text-left p-4 rounded-lg border-2 transition-all"
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg border text-left transition-all"
                     style={{
                       borderColor: isActive ? 'var(--ink)' : 'var(--border)',
                       background: isActive ? 'var(--surface-2)' : 'transparent',
+                      borderWidth: isActive ? '2px' : '1px',
                     }}
                   >
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className="text-xl">{j.flag}</span>
-                      <span className="font-display text-sm font-medium leading-tight">{j.name}</span>
-                      {isActive && <Check size={12} className="ml-auto shrink-0" style={{ color: 'var(--success)' }} />}
+                    <span className="text-base shrink-0">{j.flag}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold truncate" style={{ color: 'var(--ink)' }}>{j.name}</div>
+                      {j.code !== 'CUSTOM' ? (
+                        <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>{j.salesTax.name} {j.salesTax.standard}%</div>
+                      ) : (
+                        <div className="text-xs" style={{ color: 'var(--muted)' }}>Eigen regels</div>
+                      )}
                     </div>
-                    {j.code !== 'CUSTOM' && (
-                      <div className="text-xs space-y-0.5" style={{ color: 'var(--muted)' }}>
-                        <div>{j.salesTax.name} {j.salesTax.standard}%</div>
-                        <div>{j.baseCurrency} · {j.filingPeriod === 'quarterly' ? 'Kwartaal' : 'Maandelijks'}</div>
-                      </div>
-                    )}
-                    {j.code === 'CUSTOM' && (
-                      <div className="text-xs" style={{ color: 'var(--muted)' }}>Eigen tarieven & regels</div>
-                    )}
+                    {isActive && <Check size={11} className="shrink-0" style={{ color: 'var(--success)' }} />}
                   </button>
                 );
               })}
@@ -8690,6 +8936,10 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
             </div>
           </div>
         </Card>
+      )}
+
+      {section === 'integraties' && (
+        <IntegratiesSection importToken={importToken} generateImportToken={generateImportToken} />
       )}
 
       {section === 'reminders' && (
@@ -9023,6 +9273,8 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
           </Card>
         </div>
       )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -9217,6 +9469,17 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
   const [theme, setTheme] = useState(() => localStorage.getItem('dhs_theme') || 'dark');
   const [settings, setSettings, settingsLoaded] = useCloudStorage('settings', DEFAULT_SETTINGS);
   const [userApiKeys, saveUserApiKeys] = useCloudStorage('userApiKeys', { apiKey: '', openaiApiKey: '' });
+
+  const generateImportToken = async () => {
+    if (!user?.id) return
+    const token = crypto.randomUUID()
+    await supabase.from('user_settings').upsert(
+      { user_id: user.id, org_id: profile?.organization_id || null, api_token: token, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    )
+    await saveUserApiKeys({ ...userApiKeys, importToken: token })
+  }
+
   const effectiveSettings = useMemo(() => ({
     ...settings,
     apiKey: userApiKeys.apiKey || '',
@@ -9423,7 +9686,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
             <LinksView />
           )}
           {activeTab === 'settings' && (
-            <SettingsView settings={effectiveSettings} setSettings={setSettings} activeEntity={activeEntity} entities={entities} setEntities={setEntities} clients={clients} initialSection={settingsOpenSection} updateProfile={updateProfile} profile={profile} user={user} organization={organization} updateOrganization={updateOrganization} saveUserApiKeys={saveUserApiKeys} />
+            <SettingsView settings={effectiveSettings} setSettings={setSettings} activeEntity={activeEntity} entities={entities} setEntities={setEntities} clients={clients} initialSection={settingsOpenSection} updateProfile={updateProfile} profile={profile} user={user} organization={organization} updateOrganization={updateOrganization} saveUserApiKeys={saveUserApiKeys} generateImportToken={generateImportToken} importToken={userApiKeys.importToken} />
           )}
         </div>
       </main>
