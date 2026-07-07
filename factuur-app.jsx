@@ -1727,6 +1727,70 @@ Gebruik lege string "" als een veld niet zichtbaar is.`;
   return JSON.parse(match[0]);
 };
 
+// AI — factuurregels uit screenshot (bv. Excel-overzicht van uren/opdrachten)
+const callClaudeVisionForInvoiceLines = async ({ imageDataUrl, apiKey, openaiApiKey, clientNames = [] }) => {
+  const resolvedKey = resolveApiKey(apiKey, openaiApiKey);
+  if (!resolvedKey) throw new Error('Geen AI API key ingesteld. Vul een Anthropic of OpenAI key in via Instellingen → AI.');
+  const base64 = imageDataUrl.split(',')[1];
+  const mediaType = imageDataUrl.split(';')[0].split(':')[1] || 'image/jpeg';
+  const prompt = `Dit is een screenshot van een urenoverzicht/werkstaat (bv. uit Excel), met kolommen zoals Datum, Opdracht/omschrijving, Client, Aantal uren, Uurtarief en/of Prijs.
+
+Extraheer elke rij als een factuurregel. Retourneer ALLEEN dit JSON object, geen uitleg of markdown:
+{
+  "client": "meest voorkomende klantnaam in het overzicht, of leeg string",
+  "items": [
+    { "description": "korte omschrijving incl. datum, bv. '01-06-2026 — CP2 campagne verbeteringen'", "quantity": 2, "price": 35 }
+  ]
+}
+
+Regels:
+- Negeer lege rijen, kopregels en totaalregels.
+- "quantity" = aantal uren (of aantal stuks als er geen uren zijn).
+- "price" = prijs PER EENHEID (bv. uurtarief), NIET de regeltotaal. Als alleen een totaalbedrag zichtbaar is en géén uurtarief, bereken price = totaal / aantal.
+- Gebruik punt als decimaalteken, geen duizendtalscheiding.
+- Als er meerdere klanten in het overzicht staan, vul "client" met de klant die het vaakst voorkomt.
+${clientNames.length ? `- Bekende klantnamen in het systeem: ${clientNames.join(', ')}. Gebruik exact zo'n naam in "client" als die overeenkomt.` : ''}`;
+
+  const provider = detectProvider(resolvedKey);
+  let raw = '';
+  if (provider === 'openai') {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${resolvedKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini', max_tokens: 1500,
+        messages: [{ role: 'user', content: [
+          { type: 'image_url', image_url: { url: imageDataUrl } },
+          { type: 'text', text: prompt },
+        ]}],
+      }),
+    });
+    if (!response.ok) throw new Error(`OpenAI API error ${response.status}`);
+    const data = await response.json();
+    raw = data.choices?.[0]?.message?.content || '';
+  } else {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': resolvedKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001', max_tokens: 1500,
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+          { type: 'text', text: prompt },
+        ]}],
+      }),
+    });
+    if (!response.ok) throw new Error(`API error ${response.status}`);
+    const data = await response.json();
+    raw = data.content?.find(b => b.type === 'text')?.text || '';
+  }
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('Geen geldige JSON teruggegeven');
+  const parsed = JSON.parse(match[0]);
+  if (!Array.isArray(parsed.items) || parsed.items.length === 0) throw new Error('Geen regels herkend');
+  return parsed;
+};
+
 // ============================================================================
 // DEFAULT ENTITY (gebruikt bij eerste opstart / migratie)
 // ============================================================================
@@ -3423,6 +3487,9 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
     ...invoice,
   });
   const [addingClient, setAddingClient] = useState(false);
+  const [aiLinesLoading, setAiLinesLoading] = useState(false);
+  const [aiLinesError, setAiLinesError] = useState('');
+  const aiLinesInputRef = useRef(null);
 
   const update = (key, val) => setForm({ ...form, [key]: val });
   const updateItem = (idx, key, val) => {
@@ -3442,6 +3509,40 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
   };
   const addItem = () => setForm({ ...form, items: [...form.items, { description: '', quantity: 1, price: 0, btwRate: defaultBtw, discount: null }] });
   const removeItem = (idx) => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
+
+  const handleAiFillLines = async (e) => {
+    const file = e.target.files?.[0];
+    if (aiLinesInputRef.current) aiLinesInputRef.current.value = '';
+    if (!file) return;
+    setAiLinesLoading(true);
+    setAiLinesError('');
+    try {
+      const dataUrl = await resizeImage(file, 1800, 0.85);
+      const result = await callClaudeVisionForInvoiceLines({
+        imageDataUrl: dataUrl,
+        apiKey: settings.apiKey,
+        openaiApiKey: settings.openaiApiKey,
+        clientNames: clients.map(c => c.name),
+      });
+      const newItems = result.items.map(it => ({
+        description: it.description || '',
+        quantity: Number(it.quantity) || 1,
+        price: Number(it.price) || 0,
+        btwRate: defaultBtw,
+        discount: null,
+      }));
+      setForm(f => {
+        const existingIsEmpty = f.items.length === 1 && !f.items[0].description && !f.items[0].price;
+        const items = existingIsEmpty ? newItems : [...f.items, ...newItems];
+        const match = result.client && clients.find(c => c.name.toLowerCase() === result.client.toLowerCase());
+        return { ...f, items, clientId: f.clientId || (match ? match.id : f.clientId) };
+      });
+    } catch (err) {
+      setAiLinesError(err.message || t('editor.aiFillError'));
+    } finally {
+      setAiLinesLoading(false);
+    }
+  };
 
   const totals = computeInvoice(form.items);
 
@@ -3548,8 +3649,26 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
         <div>
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-medium text-sm">{t('editor.lines')}</h3>
-            <Button size="sm" variant="secondary" onClick={addItem}><Plus size={12} /> {t('editor.addLine')}</Button>
+            <div className="flex items-center gap-2">
+              <input ref={aiLinesInputRef} type="file" accept="image/*" className="hidden" onChange={handleAiFillLines} />
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => aiLinesInputRef.current?.click()}
+                disabled={aiLinesLoading}
+                title={t('editor.aiFillHint')}
+              >
+                {aiLinesLoading ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                {t('editor.aiFill')}
+              </Button>
+              <Button size="sm" variant="secondary" onClick={addItem}><Plus size={12} /> {t('editor.addLine')}</Button>
+            </div>
           </div>
+          {aiLinesError && (
+            <div className="mb-3 px-3 py-2 text-xs rounded border flex items-center gap-2" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}>
+              <AlertCircle size={13} /> {aiLinesError}
+            </div>
+          )}
           {/* Desktop tabel — verborgen op mobiel */}
           <div className="hidden md:block overflow-x-auto scrollable">
             <table className="w-full text-sm">
@@ -9184,53 +9303,53 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
         return (
           <div className="space-y-5">
             <Card className="p-6">
-              <h3 className="font-display text-lg font-medium mb-1">Systeem status</h3>
-              <p className="text-sm mb-5" style={{ color: 'var(--muted)' }}>Overzicht van alle koppelingen en API-sleutels</p>
+              <h3 className="font-display text-lg font-medium mb-1">{t('status.title')}</h3>
+              <p className="text-sm mb-5" style={{ color: 'var(--muted)' }}>{t('status.desc')}</p>
               <div>
                 <StatusRow
                   label="AI (Anthropic / OpenAI)"
                   ok={hasAiKey}
                   okText={`API key geconfigureerd (${resolveApiKey(draft.apiKey, draft.openaiApiKey) ? (detectProvider(resolveApiKey(draft.apiKey, draft.openaiApiKey)) === 'openai' ? 'OpenAI' : 'Anthropic') : 'env var'})`}
-                  failText="Geen API key — stel in via Instellingen → AI"
-                  action={!hasAiKey ? { label: 'Instellen', onClick: () => setSection('ai') } : null}
+                  failText={t('status.aiMissing')}
+                  action={!hasAiKey ? { label: t('status.configure'), onClick: () => setSection('ai') } : null}
                 />
                 <StatusRow
                   label="Email verzending (Resend)"
                   ok={hasResend}
                   okText={`Resend API key aanwezig${hasEmail ? ` · afzender: ${draft.email.fromEmail}` : ''}`}
-                  failText="Geen Resend API key — stel in via Email & WhatsApp"
-                  action={!hasResend ? { label: 'Instellen', onClick: () => setSection('email') } : null}
+                  failText={t('status.resendMissing')}
+                  action={!hasResend ? { label: t('status.configure'), onClick: () => setSection('email') } : null}
                 />
                 <StatusRow
-                  label="Afzender e-mailadres"
+                  label={t('status.emailLabel')}
                   ok={hasEmail}
                   okText={draft.email.fromEmail}
-                  failText="Geen afzender e-mail — stel in via Email & WhatsApp"
-                  action={!hasEmail ? { label: 'Instellen', onClick: () => setSection('email') } : null}
+                  failText={t('status.emailMissing')}
+                  action={!hasEmail ? { label: t('status.configure'), onClick: () => setSection('email') } : null}
                 />
                 <StatusRow
                   label="WhatsApp"
                   ok={hasWhatsApp}
-                  okText={`Ingesteld op ${draft.email.whatsappNumber}`}
-                  failText="Geen WhatsApp-nummer — stel in via Email & WhatsApp"
-                  action={!hasWhatsApp ? { label: 'Instellen', onClick: () => setSection('email') } : null}
+                  okText={`${t('status.waSetOnNumber')} ${draft.email.whatsappNumber}`}
+                  failText={t('status.waMissing')}
+                  action={!hasWhatsApp ? { label: t('status.configure'), onClick: () => setSection('email') } : null}
                 />
               </div>
             </Card>
 
             <Card className="p-6 space-y-4">
-              <h3 className="font-display text-lg font-medium">Snelle acties</h3>
+              <h3 className="font-display text-lg font-medium">{t('status.quickActions')}</h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {[
-                  { label: 'AI instellen', icon: Brain, onClick: () => setSection('ai'), ok: hasAiKey },
-                  { label: 'Email instellen', icon: Mail, onClick: () => setSection('email'), ok: hasEmail && hasResend },
-                  { label: 'WhatsApp instellen', icon: MessageSquare, onClick: () => setSection('email'), ok: hasWhatsApp },
+                  { label: t('status.aiSetup'), icon: Brain, onClick: () => setSection('ai'), ok: hasAiKey },
+                  { label: t('status.emailSetup'), icon: Mail, onClick: () => setSection('email'), ok: hasEmail && hasResend },
+                  { label: t('status.waSetup'), icon: MessageSquare, onClick: () => setSection('email'), ok: hasWhatsApp },
                 ].map(a => (
                   <button key={a.label} onClick={a.onClick} className="p-4 rounded-lg border text-left transition-all hover:opacity-80"
                     style={{ borderColor: a.ok ? 'var(--success)' : 'var(--border-2)', background: a.ok ? 'var(--success-soft)' : 'var(--surface-2)' }}>
                     <a.icon size={18} style={{ color: a.ok ? 'var(--success)' : 'var(--accent)', marginBottom: 8 }} />
                     <div className="text-sm font-medium">{a.label}</div>
-                    <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{a.ok ? 'Geconfigureerd' : 'Vereist setup'}</div>
+                    <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{a.ok ? t('status.configured') : t('status.needsSetup')}</div>
                   </button>
                 ))}
               </div>
