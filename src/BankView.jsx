@@ -85,7 +85,9 @@ function parseRevolutCSV(text) {
     const cols = parseCSVLine(line)
     const date = get(cols, 'date completed (utc)') || get(cols, 'date started (utc)')
     const amount = parseFloat(get(cols, 'amount')) || 0
-    const counterparty = get(cols, 'beneficiary name') || get(cols, 'sender name') || get(cols, 'payer') || get(cols, 'description')
+    // "payer" bevat altijd de eigen accounthouder (bv. "Den Hartogh Solutions"), nooit de
+    // werkelijke tegenpartij — daarom NIET meenemen in de fallback-keten.
+    const counterparty = get(cols, 'beneficiary name') || get(cols, 'sender name') || get(cols, 'description')
     return {
       externalId: get(cols, 'id'),
       account: get(cols, 'account'),

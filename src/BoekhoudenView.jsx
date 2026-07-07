@@ -69,6 +69,13 @@ const entrySignedAmount = (e) => {
 }
 const entryIsCredit = (e) => e.type ? e.type === 'credit' : !e.isDebit
 
+// Journaalposten/kostenposten die vanuit Bank geboekt zijn slaan de ruwe bank-omschrijving op
+// als "Bank: <tekst>" in notes/reference. Strip dat voorvoegsel zodat je alleen de omschrijving zelf ziet.
+const stripBankPrefix = (text) => (text || '').replace(/^Bank:\s*/i, '').trim()
+
+// Zoekt de naam van een grootboekrekening op code (bv. "4420" → "Data, AI & API-diensten").
+const ledgerLabel = (ledgerAccounts, code) => (ledgerAccounts || []).find(a => a.code === code)?.name || null
+
 // Shared invoice subtotal excl. BTW
 const invoiceExBtw = (items = []) =>
   items.reduce((sum, it) => {
@@ -111,7 +118,7 @@ const Label = ({ children }) => (
 )
 
 // ── Winst/Verlies tab ─────────────────────────────────────────────────────────
-function WinstVerliesTab({ invoices, expenses, assets, entries, clients }) {
+function WinstVerliesTab({ invoices, expenses, assets, entries, clients, ledgerAccounts }) {
   const { t } = useLang()
   const currentYear = new Date().getFullYear()
   const [year, setYear] = useState(currentYear)
@@ -165,10 +172,13 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients }) {
     </button>
   )
 
-  const SubRow = ({ label, value, color }) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 16px 7px 32px', borderBottom: '1px solid var(--border)' }}>
-      <span style={{ fontSize: '12px', color: 'var(--text-2)' }}>{label}</span>
-      <span style={{ fontFamily: 'monospace', fontSize: '12px', color }}>{fmtEUR(value)}</span>
+  const SubRow = ({ label, subLabel, value, color }) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '7px 16px 7px 32px', borderBottom: '1px solid var(--border)' }}>
+      <div>
+        <div style={{ fontSize: '12px', color: 'var(--text-2)' }}>{label}</div>
+        {subLabel && <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '2px' }}>{subLabel}</div>}
+      </div>
+      <span style={{ fontFamily: 'monospace', fontSize: '12px', color, flexShrink: 0, marginLeft: '12px' }}>{fmtEUR(value)}</span>
     </div>
   )
 
@@ -231,9 +241,19 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients }) {
           <>
             {processedExpenses.length === 0
               ? <div style={{ padding: '10px 32px', fontSize: '12px', color: 'var(--text-3)', fontStyle: 'italic', borderBottom: '1px solid var(--border)' }}>Geen verwerkte bonnen in {year}</div>
-              : processedExpenses.map(exp => (
-                <SubRow key={exp.id} label={`${exp.vendor || '—'}${exp.category ? ` (${exp.category})` : ''}`} value={exp.amount} color="var(--danger)" />
-              ))
+              : processedExpenses.map(exp => {
+                const bankText = stripBankPrefix(exp.notes)
+                const vendor = exp.vendor || bankText || 'Onbekende leverancier'
+                const ledger = exp.ledgerAccount
+                  ? `${exp.ledgerAccount}${ledgerLabel(ledgerAccounts, exp.ledgerAccount) ? ' · ' + ledgerLabel(ledgerAccounts, exp.ledgerAccount) : ''}`
+                  : null
+                const subLabel = [
+                  exp.category || null,
+                  ledger,
+                  bankText && bankText !== vendor ? bankText : null,
+                ].filter(Boolean).join(' · ')
+                return <SubRow key={exp.id} label={vendor} subLabel={subLabel} value={exp.amount} color="var(--danger)" />
+              })
             }
             <TotalRow label={t('bk.totalCosts')} value={totalCosts} color="var(--danger)" />
             <TotalRow label={t('bk.grossMargin')} value={brutomarge} color={brutomarge >= 0 ? 'var(--text)' : 'var(--danger)'} />
@@ -261,13 +281,26 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients }) {
         {yearEntries.length > 0 && (
           <>
             <SectionHeader label="Memoriaalboekingen" value={memoResult} sectionKey="memo" color={memoResult >= 0 ? 'var(--success)' : 'var(--danger)'} />
-            {open.memo && yearEntries.map(e => (
-              <SubRow key={e.id}
-                label={`${e.description} (${e.category})`}
-                value={Math.abs(e.amount)}
-                color={entryIsCredit(e) ? 'var(--success)' : 'var(--danger)'}
-              />
-            ))}
+            {open.memo && yearEntries.map(e => {
+              const bankText = stripBankPrefix(e.reference)
+              const title = e.description || bankText || 'Journaalpost'
+              const ledger = e.ledgerCode
+                ? `${e.ledgerCode}${ledgerLabel(ledgerAccounts, e.ledgerCode) ? ' · ' + ledgerLabel(ledgerAccounts, e.ledgerCode) : ''}`
+                : null
+              const subLabel = [
+                e.category || null,
+                ledger,
+                bankText && bankText !== title ? bankText : null,
+              ].filter(Boolean).join(' · ')
+              return (
+                <SubRow key={e.id}
+                  label={title}
+                  subLabel={subLabel}
+                  value={Math.abs(e.amount)}
+                  color={entryIsCredit(e) ? 'var(--success)' : 'var(--danger)'}
+                />
+              )
+            })}
           </>
         )}
 
@@ -687,7 +720,7 @@ function MemoriaalTab({ entries, setEntries }) {
 }
 
 // ── Grootboek tab ─────────────────────────────────────────────────────────────
-function GrootboekTab({ invoices, expenses, entries, clients }) {
+function GrootboekTab({ invoices, expenses, entries, clients, ledgerAccounts }) {
   const currentYear = new Date().getFullYear()
   const [year, setYear] = useState(currentYear)
 
@@ -707,24 +740,37 @@ function GrootboekTab({ invoices, expenses, entries, clients }) {
       const clientName = (clients || []).find(c => c.id === inv.clientId)?.name || inv.clientName || '—'
       out.push({
         id: `inv_${inv.id}`, date: d, type: 'Omzet',
-        description: `${inv.number || inv.id} — ${clientName}`,
-        ledger: '—', amount: invoiceExBtw(inv.items),
+        title: clientName, subtitle: inv.number || inv.id,
+        ledger: null, amount: invoiceExBtw(inv.items),
       })
     })
     ;(expenses || []).forEach(exp => {
       if (exp.status !== 'processed' || !exp.date || new Date(exp.date).getFullYear() !== year) return
+      const bankText = stripBankPrefix(exp.notes)
+      const vendor = exp.vendor || bankText || 'Onbekende leverancier'
+      const subtitle = [
+        exp.category || null,
+        bankText && bankText !== vendor ? bankText : null,
+        exp.source === 'bank' ? 'via Bank' : null,
+      ].filter(Boolean).join(' · ')
       out.push({
         id: `exp_${exp.id}`, date: exp.date, type: 'Kostenpost',
-        description: `${exp.vendor || '—'}${exp.category ? ` · ${exp.category}` : ''}`,
-        ledger: exp.ledgerAccount || '—', amount: -Number(exp.amount || 0),
+        title: vendor, subtitle,
+        ledger: exp.ledgerAccount || null, amount: -Number(exp.amount || 0),
       })
     })
     ;(entries || []).forEach(e => {
       if (!e.date || new Date(e.date).getFullYear() !== year) return
+      const bankText = stripBankPrefix(e.reference)
+      const title = e.description || bankText || 'Journaalpost'
+      const subtitle = [
+        e.category || null,
+        bankText && bankText !== title ? bankText : null,
+      ].filter(Boolean).join(' · ')
       out.push({
         id: `ent_${e.id}`, date: e.date, type: 'Journaalpost',
-        description: `${e.description || '—'}${e.category ? ` (${e.category})` : ''}`,
-        ledger: e.ledgerCode || '—', amount: entrySignedAmount(e),
+        title, subtitle,
+        ledger: e.ledgerCode || null, amount: entrySignedAmount(e),
       })
     })
     return out.sort((a, b) => new Date(b.date) - new Date(a.date))
@@ -772,7 +818,7 @@ function GrootboekTab({ invoices, expenses, entries, clients }) {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                {['Datum', 'Type', 'Omschrijving', 'Grootboek', 'Bedrag'].map(h => (
+                {['Datum', 'Type', 'Met wie / omschrijving', 'Grootboek', 'Bedrag'].map(h => (
                   <th key={h} style={th}>{h}</th>
                 ))}
               </tr>
@@ -795,8 +841,20 @@ function GrootboekTab({ invoices, expenses, entries, clients }) {
                       {r.type}
                     </span>
                   </td>
-                  <td style={td}>{r.description}</td>
-                  <td style={td}><span style={{ fontSize: '12px', color: 'var(--text-3)' }}>{r.ledger}</span></td>
+                  <td style={td}>
+                    <div style={{ fontWeight: '600', color: 'var(--text)' }}>{r.title}</div>
+                    {r.subtitle && <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '2px' }}>{r.subtitle}</div>}
+                  </td>
+                  <td style={td}>
+                    {r.ledger ? (
+                      <>
+                        <span style={{ fontFamily: 'monospace', fontSize: '12px', fontWeight: '600', color: 'var(--text-2)' }}>{r.ledger}</span>
+                        {ledgerLabel(ledgerAccounts, r.ledger) && (
+                          <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '2px' }}>{ledgerLabel(ledgerAccounts, r.ledger)}</div>
+                        )}
+                      </>
+                    ) : <span style={{ fontSize: '12px', color: 'var(--text-3)' }}>—</span>}
+                  </td>
                   <td style={td}>
                     <span style={{ fontFamily: 'monospace', fontWeight: '700', color: r.amount >= 0 ? 'var(--success)' : 'var(--danger)' }}>
                       {r.amount >= 0 ? '+' : '−'}{fmtEUR(Math.abs(r.amount))}
@@ -825,7 +883,7 @@ function GrootboekTab({ invoices, expenses, entries, clients }) {
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
-export default function BoekhoudenView({ invoices, expenses, assets, setAssets, entries, setEntries, clients }) {
+export default function BoekhoudenView({ invoices, expenses, assets, setAssets, entries, setEntries, clients, ledgerAccounts }) {
   const { t } = useLang()
   const [tab, setTab] = useState('wv')
   const tabs = [
@@ -858,8 +916,8 @@ export default function BoekhoudenView({ invoices, expenses, assets, setAssets, 
         ))}
       </div>
 
-      {tab === 'wv' && <WinstVerliesTab invoices={invoices} expenses={expenses} assets={assets} entries={entries} clients={clients} />}
-      {tab === 'grootboek' && <GrootboekTab invoices={invoices} expenses={expenses} entries={entries} clients={clients} />}
+      {tab === 'wv' && <WinstVerliesTab invoices={invoices} expenses={expenses} assets={assets} entries={entries} clients={clients} ledgerAccounts={ledgerAccounts} />}
+      {tab === 'grootboek' && <GrootboekTab invoices={invoices} expenses={expenses} entries={entries} clients={clients} ledgerAccounts={ledgerAccounts} />}
       {tab === 'activa' && <VasteActivaTab assets={assets} setAssets={setAssets} />}
       {tab === 'memoriaal' && <MemoriaalTab entries={entries} setEntries={setEntries} />}
     </div>

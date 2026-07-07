@@ -9780,6 +9780,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
               entries={boekEntries}
               setEntries={setBoekEntries}
               clients={clients}
+              ledgerAccounts={getLedgerAccounts(activeEntity?.jurisdiction || effectiveSettings.jurisdiction || 'NL')}
             />
           )}
           {activeTab === 'bank' && (
