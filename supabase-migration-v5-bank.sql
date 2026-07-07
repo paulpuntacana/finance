@@ -35,7 +35,11 @@ create table public.bank_transactions (
 );
 create index idx_bank_transactions_org      on public.bank_transactions (org_id);
 create index idx_bank_transactions_date     on public.bank_transactions (date);
-create unique index idx_bank_transactions_dedupe on public.bank_transactions (org_id, external_id) where external_id is not null;
+-- Let op: interne overboekingen tussen eigen Revolut-rekeningen delen dezelfde external_id
+-- voor beide kanten (bv. "To Main" / "From BTW Rekening"), maar hebben elk een ander account.
+-- Daarom op (org_id, external_id, account) i.p.v. alleen (org_id, external_id), anders wordt
+-- de tweede kant van zo'n overboeking geblokkeerd als "duplicate" bij het synchroniseren.
+create unique index idx_bank_transactions_dedupe on public.bank_transactions (org_id, external_id, account) where external_id is not null;
 
 alter table public.bank_transactions enable row level security;
 
