@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react'
+import { useState, useRef, useMemo, useEffect } from 'react'
 import { useLang } from './LangContext'
 import {
   Upload, Search, Trash2, X, Check, Sparkles, Link2, Receipt, FileText,
@@ -20,6 +20,12 @@ const fmtDate = (iso) => {
   const d = new Date(iso)
   if (isNaN(d)) return '—'
   return d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+const fmtDayLabel = (key) => {
+  const d = new Date(key)
+  if (isNaN(d)) return 'Onbekende datum'
+  return d.toLocaleDateString('nl-NL', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 const BANK_ENTRY_CATEGORIES = ['Kostenpost', 'Omzetaanpassing', 'Correctie', 'Overig']
@@ -128,7 +134,10 @@ export default function BankView({
   const [aiError, setAiError] = useState(null)
   const [bookTx, setBookTx] = useState(null)      // tx being booked as journaalpost
   const [linkTx, setLinkTx] = useState(null)       // { tx, mode: 'invoice' | 'expense' }
+  const [selected, setSelected] = useState(new Set())
   const fileRef = useRef()
+
+  useEffect(() => { setSelected(new Set()) }, [filter, search])
 
   const jurisdiction = settings.jurisdiction || 'NL'
   const ledgerAccounts = useMemo(() => (getLedgerAccounts ? getLedgerAccounts(jurisdiction) : []), [jurisdiction, getLedgerAccounts])
@@ -222,6 +231,89 @@ export default function BankView({
     setLinkTx(null)
   }
 
+  // Bouwt de expense/journaalpost die hoort bij de AI-suggestie van een transactie
+  // (gedeeld door de 1-klik accept en de bulk-accept, zodat de boekingslogica gelijk blijft).
+  const buildAIBooking = (tx) => {
+    const isExpense = Number(tx.amount) < 0
+    const amountIncl = Math.abs(Number(tx.amount) || 0)
+    const category = tx.aiCategory && BANK_ENTRY_CATEGORIES.includes(tx.aiCategory) ? tx.aiCategory : (isExpense ? 'Kostenpost' : 'Omzetaanpassing')
+    if (isExpense) {
+      const btwRate = salesTax?.standard ?? 21
+      const btwAmount = +(amountIncl - amountIncl / (1 + btwRate / 100)).toFixed(2)
+      const expenseId = genId('exp')
+      return {
+        patch: { status: 'matched', matchedExpenseId: expenseId },
+        expense: {
+          id: expenseId, entityId: activeEntity?.id || null,
+          status: 'processed', source: 'bank',
+          vendor: tx.counterparty || tx.description || '',
+          date: tx.date, currency: tx.currency || 'EUR',
+          originalAmount: amountIncl, exchangeRate: 1,
+          amount: amountIncl, btwAmount, btwRate,
+          category, ledgerAccount: tx.aiLedgerCode || '',
+          notes: `Bank: ${tx.description || tx.externalId}`,
+          capturedAt: new Date().toISOString(),
+        },
+      }
+    }
+    const entryId = genId('be')
+    return {
+      patch: { status: 'matched', boekEntryId: entryId },
+      entry: {
+        id: entryId, entityId: activeEntity?.id || null,
+        date: tx.date, category,
+        description: tx.counterparty || tx.description,
+        amount: amountIncl, isDebit: false,
+        ledgerCode: tx.aiLedgerCode || null,
+        reference: `Bank: ${tx.description || tx.externalId}`,
+      },
+    }
+  }
+
+  const quickAcceptAI = (tx) => {
+    if (!tx.aiLedgerCode) return
+    const { patch, expense, entry } = buildAIBooking(tx)
+    if (expense) { const base = allExpenses || expenses; setExpenses([expense, ...base]) }
+    if (entry) setEntries(prev => [entry, ...(prev || [])])
+    updateTx(tx.id, patch)
+  }
+
+  // ── Bulk-selectie ────────────────────────────────────────────────────────
+  const clearSelection = () => setSelected(new Set())
+  const toggleSelect = (id) => setSelected(prev => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
+
+  const bulkMarkPersonal = () => {
+    setTransactions(prev => prev.map(t => selected.has(t.id) ? { ...t, status: 'personal', matchedInvoiceId: null, matchedExpenseId: null, boekEntryId: null } : t))
+    clearSelection()
+  }
+  const bulkMarkIgnored = () => {
+    setTransactions(prev => prev.map(t => selected.has(t.id) ? { ...t, status: 'ignored', matchedInvoiceId: null, matchedExpenseId: null, boekEntryId: null } : t))
+    clearSelection()
+  }
+  const bulkDelete = () => {
+    setTransactions(prev => prev.filter(t => !selected.has(t.id)))
+    clearSelection()
+  }
+  const bulkAcceptAI = () => {
+    const targets = (transactions || []).filter(t => selected.has(t.id) && t.status === 'unmatched' && t.aiLedgerCode)
+    if (targets.length === 0) { clearSelection(); return }
+    const newExpenses = [], newEntries = [], patches = {}
+    targets.forEach(tx => {
+      const { patch, expense, entry } = buildAIBooking(tx)
+      patches[tx.id] = patch
+      if (expense) newExpenses.push(expense)
+      if (entry) newEntries.push(entry)
+    })
+    if (newExpenses.length) { const base = allExpenses || expenses; setExpenses([...newExpenses, ...base]) }
+    if (newEntries.length) setEntries(prev => [...newEntries, ...(prev || [])])
+    setTransactions(prev => prev.map(t => patches[t.id] ? { ...t, ...patches[t.id] } : t))
+    clearSelection()
+  }
+
   // ── AI suggesties ──────────────────────────────────────────────────────
   const runAISuggestions = async () => {
     setAiError(null)
@@ -282,6 +374,23 @@ export default function BankView({
     }
     return rows.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
   }, [transactions, filter, search])
+
+  const visibleIds = useMemo(() => filtered.map(t => t.id), [filtered])
+  const allSelected = visibleIds.length > 0 && visibleIds.every(id => selected.has(id))
+  const toggleSelectAll = () => setSelected(allSelected ? new Set() : new Set(visibleIds))
+
+  // Groepeer per dag zodat de lijst overzichtelijker is bij veel transacties (geen paginering)
+  const groups = useMemo(() => {
+    const map = new Map()
+    filtered.forEach(t => {
+      const key = t.date ? t.date.slice(0, 10) : 'onbekend'
+      if (!map.has(key)) map.set(key, [])
+      map.get(key).push(t)
+    })
+    return Array.from(map.entries()).map(([date, items]) => ({
+      date, items, net: items.reduce((s, t) => s + (Number(t.amount) || 0), 0),
+    }))
+  }, [filtered])
 
   const openInvoices = useMemo(() => (invoices || []).filter(i => ['sent', 'partial', 'overdue'].includes(i.status)), [invoices])
 
@@ -369,7 +478,21 @@ export default function BankView({
         </div>
       </div>
 
-      {/* ── Transaction list ── */}
+      {/* ── Bulk-actiebalk ── */}
+      {selected.size > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: '10px', padding: '9px 13px', marginBottom: '14px' }}>
+          <span style={{ fontSize: '12.5px', fontWeight: '700', color: 'var(--accent)' }}>{selected.size} geselecteerd</span>
+          <button style={btn('primary')} onClick={bulkAcceptAI}>
+            <Sparkles size={12} /> Accepteer AI-suggesties
+          </button>
+          <button style={btn()} onClick={bulkMarkPersonal}><EyeOff size={12} /> Privé</button>
+          <button style={btn()} onClick={bulkMarkIgnored}><Ban size={12} /> Negeer</button>
+          <button style={{ ...btn(), color: 'var(--danger)' }} onClick={bulkDelete}><Trash2 size={12} /> Verwijderen</button>
+          <button style={{ ...btn(), marginLeft: 'auto' }} onClick={clearSelection}><X size={12} /> Deselecteer</button>
+        </div>
+      )}
+
+      {/* ── Transaction list (gegroepeerd per dag) ── */}
       <Card style={{ overflow: 'hidden' }}>
         {filtered.length === 0 ? (
           <div style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--text-3)', fontSize: '13px' }}>
@@ -377,73 +500,103 @@ export default function BankView({
           </div>
         ) : (
           <div>
-            {filtered.map(tx => (
-              <div key={tx.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
-                {tx.amount < 0
-                  ? <ArrowUpCircle size={17} style={{ color: 'var(--danger)', flexShrink: 0 }} />
-                  : <ArrowDownCircle size={17} style={{ color: 'var(--success)', flexShrink: 0 }} />}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+              <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} title="Selecteer alles in deze weergave" />
+              <span style={{ fontSize: '10.5px', fontWeight: '700', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Selecteer alles ({filtered.length})
+              </span>
+            </div>
+            {groups.map(g => (
+              <div key={g.date}>
+                <div style={{
+                  position: 'sticky', top: 0, zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '6px 16px', background: 'var(--surface-3)', borderBottom: '1px solid var(--border)',
+                  fontSize: '11px', fontWeight: '700', color: 'var(--text-3)',
+                }}>
+                  <span>{fmtDayLabel(g.date)}</span>
+                  <span style={{ fontFamily: 'monospace' }}>{g.net < 0 ? '-' : '+'}{fmtMoney(Math.abs(g.net))}</span>
+                </div>
+                {g.items.map(tx => (
+                  <div key={tx.id} style={{
+                    display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', borderBottom: '1px solid var(--border)',
+                    background: selected.has(tx.id) ? 'var(--accent-soft)' : 'transparent',
+                  }}>
+                    <input type="checkbox" checked={selected.has(tx.id)} onChange={() => toggleSelect(tx.id)} />
 
-                <div style={{ width: '86px', flexShrink: 0, fontSize: '12px', color: 'var(--text-3)' }}>{fmtDate(tx.date)}</div>
+                    {tx.amount < 0
+                      ? <ArrowUpCircle size={17} style={{ color: 'var(--danger)', flexShrink: 0 }} />
+                      : <ArrowDownCircle size={17} style={{ color: 'var(--success)', flexShrink: 0 }} />}
 
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {tx.counterparty || tx.description || '—'}
-                    {isLikelyInternalTransfer(tx) && tx.status === 'unmatched' && (
-                      <span title="Lijkt een interne overboeking tussen eigen rekeningen — controleer voor je boekt" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: '700', color: 'var(--warning)', background: 'var(--warning-soft)', padding: '2px 6px', borderRadius: '10px', flexShrink: 0 }}>
-                        <AlertTriangle size={10} /> Interne overboeking?
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {tx.description}{tx.account ? ` · ${tx.account}` : ''}
-                  </div>
-                  {tx.aiLedgerCode && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '3px' }}>
-                      <Sparkles size={10} style={{ color: 'var(--accent)' }} />
-                      <span style={{ fontSize: '10.5px', color: 'var(--accent)', fontWeight: '600' }}>
-                        {tx.aiLedgerCode} · {tx.aiCategory}{tx.aiConfidence != null ? ` (${Math.round(tx.aiConfidence * 100)}%)` : ''}
-                      </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '13.5px', fontWeight: '600', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {tx.description || tx.counterparty || '—'}
+                        {isLikelyInternalTransfer(tx) && tx.status === 'unmatched' && (
+                          <span title="Lijkt een interne overboeking tussen eigen rekeningen — controleer voor je boekt" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: '700', color: 'var(--warning)', background: 'var(--warning-soft)', padding: '2px 6px', borderRadius: '10px', flexShrink: 0 }}>
+                            <AlertTriangle size={10} /> Interne overboeking?
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {tx.counterparty && tx.counterparty !== tx.description ? tx.counterparty : ''}{tx.account ? ` · ${tx.account}` : ''}
+                      </div>
+                      {tx.aiLedgerCode && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '3px' }}>
+                          <Sparkles size={10} style={{ color: 'var(--accent)' }} />
+                          <span style={{ fontSize: '10.5px', color: 'var(--accent)', fontWeight: '600' }}>
+                            {tx.aiLedgerCode} · {tx.aiCategory}{tx.aiConfidence != null ? ` (${Math.round(tx.aiConfidence * 100)}%)` : ''}
+                          </span>
+                          {tx.status === 'unmatched' && (
+                            <button title="Accepteer suggestie en boek direct" onClick={() => quickAcceptAI(tx)} style={{
+                              display: 'flex', alignItems: 'center', gap: '3px', border: 'none', cursor: 'pointer',
+                              background: 'var(--success-soft)', color: 'var(--success)', borderRadius: '20px',
+                              fontSize: '10px', fontWeight: '700', padding: '2px 7px',
+                            }}>
+                              <Check size={9} /> Accepteer
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
 
-                <div style={{ width: '110px', flexShrink: 0, textAlign: 'right', fontFamily: 'monospace', fontSize: '13px', fontWeight: '700', color: tx.amount < 0 ? 'var(--danger)' : 'var(--success)' }}>
-                  {tx.amount < 0 ? '-' : '+'}{fmtMoney(Math.abs(tx.amount), tx.currency)}
-                </div>
+                    <div style={{ width: '110px', flexShrink: 0, textAlign: 'right', fontFamily: 'monospace', fontSize: '13px', fontWeight: '700', color: tx.amount < 0 ? 'var(--danger)' : 'var(--success)' }}>
+                      {tx.amount < 0 ? '-' : '+'}{fmtMoney(Math.abs(tx.amount), tx.currency)}
+                    </div>
 
-                <div style={{ width: '92px', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
-                  <StatusBadge status={tx.status} />
-                </div>
+                    <div style={{ width: '92px', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
+                      <StatusBadge status={tx.status} />
+                    </div>
 
-                <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                  {tx.status === 'unmatched' && (
-                    <>
-                      <button title="Boek als journaalpost" onClick={() => setBookTx(tx)} style={{ ...btn(), padding: '5px 8px' }}>
-                        <Receipt size={12} />
+                    <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                      {tx.status === 'unmatched' && (
+                        <>
+                          <button title="Boek als journaalpost" onClick={() => setBookTx(tx)} style={{ ...btn(), padding: '5px 8px' }}>
+                            <Receipt size={12} />
+                          </button>
+                          <button title="Koppel aan factuur" onClick={() => setLinkTx({ tx, mode: 'invoice' })} style={{ ...btn(), padding: '5px 8px' }}>
+                            <FileText size={12} />
+                          </button>
+                          <button title="Koppel aan uitgave" onClick={() => setLinkTx({ tx, mode: 'expense' })} style={{ ...btn(), padding: '5px 8px' }}>
+                            <Link2 size={12} />
+                          </button>
+                          <button title="Markeer als privé" onClick={() => markPersonal(tx.id)} style={{ ...btn(), padding: '5px 8px' }}>
+                            <EyeOff size={12} />
+                          </button>
+                          <button title="Negeer (interne overboeking)" onClick={() => markIgnored(tx.id)} style={{ ...btn(), padding: '5px 8px' }}>
+                            <Ban size={12} />
+                          </button>
+                        </>
+                      )}
+                      {tx.status !== 'unmatched' && (
+                        <button title="Ongedaan maken" onClick={() => resetTx(tx.id)} style={{ ...btn(), padding: '5px 8px' }}>
+                          <RotateCcw size={12} />
+                        </button>
+                      )}
+                      <button title="Verwijderen" onClick={() => deleteTx(tx.id)} style={{ ...btn(), padding: '5px 8px', color: 'var(--danger)' }}>
+                        <Trash2 size={12} />
                       </button>
-                      <button title="Koppel aan factuur" onClick={() => setLinkTx({ tx, mode: 'invoice' })} style={{ ...btn(), padding: '5px 8px' }}>
-                        <FileText size={12} />
-                      </button>
-                      <button title="Koppel aan uitgave" onClick={() => setLinkTx({ tx, mode: 'expense' })} style={{ ...btn(), padding: '5px 8px' }}>
-                        <Link2 size={12} />
-                      </button>
-                      <button title="Markeer als privé" onClick={() => markPersonal(tx.id)} style={{ ...btn(), padding: '5px 8px' }}>
-                        <EyeOff size={12} />
-                      </button>
-                      <button title="Negeer (interne overboeking)" onClick={() => markIgnored(tx.id)} style={{ ...btn(), padding: '5px 8px' }}>
-                        <Ban size={12} />
-                      </button>
-                    </>
-                  )}
-                  {tx.status !== 'unmatched' && (
-                    <button title="Ongedaan maken" onClick={() => resetTx(tx.id)} style={{ ...btn(), padding: '5px 8px' }}>
-                      <RotateCcw size={12} />
-                    </button>
-                  )}
-                  <button title="Verwijderen" onClick={() => deleteTx(tx.id)} style={{ ...btn(), padding: '5px 8px', color: 'var(--danger)' }}>
-                    <Trash2 size={12} />
-                  </button>
-                </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             ))}
           </div>
