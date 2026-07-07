@@ -9,7 +9,7 @@ import {
   BookOpen, Sparkles, RefreshCw, Globe, Hash, ArrowRight, Zap, FileBarChart,
   Network, Briefcase, Percent, Tag, Lightbulb, Wand2, Brain, MessageSquare, Star,
   FileCheck2, ShieldCheck, LogOut, Moon, Sun, Paperclip, ShoppingCart, Calculator,
-  AlignLeft, AlignCenter, AlignRight, Key, Link2,
+  AlignLeft, AlignCenter, AlignRight, Key, Link2, Landmark,
 } from 'lucide-react';
 import { useAuth, useCloudStorage } from './src/AuthProvider';
 import { supabase } from './src/supabase';
@@ -19,6 +19,7 @@ import QuotesView from './src/QuotesView';
 import HorizonPlanner from './src/HorizonPlanner';
 import CreditManagementView from './src/CreditManagementView';
 import BoekhoudenView from './src/BoekhoudenView';
+import BankView from './src/BankView';
 import ImportView from './src/ImportView';
 import PurchaseInvoicesView from './src/PurchaseInvoicesView';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, Area, AreaChart } from 'recharts';
@@ -2085,6 +2086,7 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
     { id: 'entities', label: t('nav.entities'), icon: Network },
     { id: 'tax', label: t('nav.tax'), icon: FileBarChart },
     { id: 'boekhouding', label: t('nav.accounting'), icon: BookOpen },
+    { id: 'bank', label: t('nav.bank'), icon: Landmark },
     { id: 'horizonplanner', label: t('nav.horizon'), icon: TrendingUp },
     { id: 'ai', label: t('nav.ai'), icon: Brain },
     { id: 'credit', label: t('nav.credit'), icon: ShieldCheck },
@@ -9616,6 +9618,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
   const [horizonData, setHorizonData, horizonDataLoaded] = useCloudStorage('horizonData', {});
   const [boekAssets, setBoekAssets] = useCloudStorage('boek_assets', []);
   const [boekEntries, setBoekEntries] = useCloudStorage('boek_entries', []);
+  const [bankTransactions, setBankTransactions] = useCloudStorage('bank_transactions', []);
   const [purchaseInvoices, setPurchaseInvoices, purchaseInvoicesLoaded] = useCloudStorage('purchase_invoices', []);
   const [reminderModal, setReminderModal] = useState(null);
 
@@ -9777,6 +9780,25 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
               entries={boekEntries}
               setEntries={setBoekEntries}
               clients={clients}
+            />
+          )}
+          {activeTab === 'bank' && (
+            <BankView
+              transactions={bankTransactions}
+              setTransactions={setBankTransactions}
+              invoices={entityInvoices}
+              expenses={entityExpenses}
+              allExpenses={expenses}
+              setExpenses={setExpenses}
+              entries={boekEntries}
+              setEntries={setBoekEntries}
+              clients={clients}
+              settings={effectiveSettings}
+              activeEntity={activeEntity}
+              callAI={callAI}
+              suggestLedgerAccount={suggestLedgerAccount}
+              getLedgerAccounts={getLedgerAccounts}
+              jurisdictionInfo={JURISDICTIONS[activeEntity?.jurisdiction || effectiveSettings.jurisdiction || 'NL']}
             />
           )}
           {activeTab === 'horizonplanner' && (

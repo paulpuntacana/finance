@@ -249,6 +249,38 @@ const boekEntryToDB = (item, orgId) => ({
   ledger_code: item.ledgerCode || null, reference: item.reference || null, extra: {},
 })
 
+const bankTxFromDB = (row) => ({
+  ...row.extra, id: row.id, entityId: row.entity_id, externalId: row.external_id,
+  account: row.account, date: row.date, description: row.description,
+  counterparty: row.counterparty, reference: row.reference, type: row.type,
+  amount: row.amount, currency: row.currency,
+  origAmount: row.orig_amount, origCurrency: row.orig_currency,
+  fee: row.fee, balance: row.balance, status: row.status,
+  matchedInvoiceId: row.matched_invoice_id, matchedExpenseId: row.matched_expense_id,
+  boekEntryId: row.boek_entry_id,
+  aiLedgerCode: row.ai_ledger_code, aiCategory: row.ai_category,
+  aiConfidence: row.ai_confidence, aiNote: row.ai_note,
+  notes: row.notes, createdAt: row.created_at,
+})
+
+const bankTxToDB = (item, orgId) => ({
+  id: item.id, org_id: orgId, entity_id: item.entityId || null,
+  external_id: item.externalId || null, account: item.account || null,
+  date: item.date || new Date().toISOString().split('T')[0],
+  description: item.description || null, counterparty: item.counterparty || null,
+  reference: item.reference || null, type: item.type || null,
+  amount: item.amount ?? 0, currency: item.currency || 'EUR',
+  orig_amount: item.origAmount ?? null, orig_currency: item.origCurrency || null,
+  fee: item.fee ?? 0, balance: item.balance ?? null,
+  status: item.status || 'unmatched',
+  matched_invoice_id: item.matchedInvoiceId || null,
+  matched_expense_id: item.matchedExpenseId || null,
+  boek_entry_id: item.boekEntryId || null,
+  ai_ledger_code: item.aiLedgerCode || null, ai_category: item.aiCategory || null,
+  ai_confidence: item.aiConfidence ?? null, ai_note: item.aiNote || null,
+  notes: item.notes || null, extra: {},
+})
+
 // Mapping: storage key → Supabase tabel + modus
 const TABLE_CONFIG = {
   settings: {
@@ -312,6 +344,11 @@ const TABLE_CONFIG = {
   boek_entries: {
     table: 'boek_entries', mode: 'array',
     fromDB: boekEntryFromDB, toDB: boekEntryToDB,
+    select: '*',
+  },
+  bank_transactions: {
+    table: 'bank_transactions', mode: 'array',
+    fromDB: bankTxFromDB, toDB: bankTxToDB,
     select: '*',
   },
   purchase_invoices: {
