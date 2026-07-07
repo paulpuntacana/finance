@@ -58,6 +58,17 @@ const getDepreciationForYear = (assets, year) =>
       return sum + (entry ? entry.depreciation : 0)
     }, 0)
 
+// Memoriaalboekingen gebruiken `type: 'credit'|'debet'`, maar journaalposten die vanuit de bank
+// geboekt worden (BankView) gebruiken `isDebit: boolean` zonder `type`. Deze helper ondersteunt beide
+// zodat bank-journaalposten correct meetellen i.p.v. altijd als debet behandeld te worden.
+const entrySignedAmount = (e) => {
+  const amt = Number(e.amount || 0)
+  if (e.type === 'credit') return amt
+  if (e.type === 'debet') return -amt
+  return e.isDebit ? -amt : amt
+}
+const entryIsCredit = (e) => e.type ? e.type === 'credit' : !e.isDebit
+
 // Shared invoice subtotal excl. BTW
 const invoiceExBtw = (items = []) =>
   items.reduce((sum, it) => {
@@ -135,8 +146,7 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients }) {
   const totalRevenue = useMemo(() => paidInvoices.reduce((s, i) => s + invoiceExBtw(i.items), 0), [paidInvoices])
   const totalCosts = useMemo(() => processedExpenses.reduce((s, e) => s + Number(e.amount || 0), 0), [processedExpenses])
   const totalDepreciation = useMemo(() => getDepreciationForYear(assets, year), [assets, year])
-  const memoResult = useMemo(() => yearEntries.reduce((s, e) =>
-    s + (e.type === 'credit' ? Number(e.amount || 0) : -Number(e.amount || 0)), 0), [yearEntries])
+  const memoResult = useMemo(() => yearEntries.reduce((s, e) => s + entrySignedAmount(e), 0), [yearEntries])
 
   const brutomarge = totalRevenue - totalCosts
   const result = brutomarge - totalDepreciation + memoResult
@@ -255,7 +265,7 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients }) {
               <SubRow key={e.id}
                 label={`${e.description} (${e.category})`}
                 value={Math.abs(e.amount)}
-                color={e.type === 'credit' ? 'var(--success)' : 'var(--danger)'}
+                color={entryIsCredit(e) ? 'var(--success)' : 'var(--danger)'}
               />
             ))}
           </>
@@ -543,7 +553,7 @@ function MemoriaalTab({ entries, setEntries }) {
       date: todayISO(),
       description: `Terugboeking: ${entry.description}`,
       amount: entry.amount,
-      type: entry.type === 'credit' ? 'debet' : 'credit',
+      type: entryIsCredit(entry) ? 'debet' : 'credit',
       category: 'Terugboeking',
       created_at: new Date().toISOString(),
       is_reversal: true,
@@ -557,8 +567,7 @@ function MemoriaalTab({ entries, setEntries }) {
     setEntries(prev => prev.filter(e => e.id !== id))
   }
 
-  const totalResult = (entries || []).reduce((s, e) =>
-    s + (e.type === 'credit' ? Number(e.amount || 0) : -Number(e.amount || 0)), 0)
+  const totalResult = (entries || []).reduce((s, e) => s + entrySignedAmount(e), 0)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -642,15 +651,15 @@ function MemoriaalTab({ entries, setEntries }) {
                   <td style={td}>
                     <span style={{
                       fontSize: '11px', fontWeight: '600', padding: '2px 8px', borderRadius: '8px',
-                      background: e.type === 'credit' ? 'var(--success-soft)' : 'var(--danger-soft)',
-                      color: e.type === 'credit' ? 'var(--success)' : 'var(--danger)',
+                      background: entryIsCredit(e) ? 'var(--success-soft)' : 'var(--danger-soft)',
+                      color: entryIsCredit(e) ? 'var(--success)' : 'var(--danger)',
                     }}>
-                      {e.type === 'credit' ? 'Credit' : 'Debet'}
+                      {entryIsCredit(e) ? 'Credit' : 'Debet'}
                     </span>
                   </td>
                   <td style={td}>
-                    <span style={{ fontFamily: 'monospace', fontWeight: '700', color: e.type === 'credit' ? 'var(--success)' : 'var(--danger)' }}>
-                      {e.type === 'credit' ? '+' : '−'}{fmtEUR(e.amount)}
+                    <span style={{ fontFamily: 'monospace', fontWeight: '700', color: entryIsCredit(e) ? 'var(--success)' : 'var(--danger)' }}>
+                      {entryIsCredit(e) ? '+' : '−'}{fmtEUR(e.amount)}
                     </span>
                   </td>
                   <td style={td}>
@@ -677,12 +686,151 @@ function MemoriaalTab({ entries, setEntries }) {
   )
 }
 
+// ── Grootboek tab ─────────────────────────────────────────────────────────────
+function GrootboekTab({ invoices, expenses, entries, clients }) {
+  const currentYear = new Date().getFullYear()
+  const [year, setYear] = useState(currentYear)
+
+  const years = useMemo(() => {
+    const set = new Set([currentYear, currentYear - 1, currentYear - 2])
+    ;(invoices || []).forEach(i => { const d = i.issueDate || i.date; if (d) set.add(new Date(d).getFullYear()) })
+    ;(expenses || []).forEach(e => e.date && set.add(new Date(e.date).getFullYear()))
+    ;(entries || []).forEach(e => e.date && set.add(new Date(e.date).getFullYear()))
+    return [...set].sort((a, b) => b - a)
+  }, [invoices, expenses, entries, currentYear])
+
+  const rows = useMemo(() => {
+    const out = []
+    ;(invoices || []).forEach(inv => {
+      const d = inv.issueDate || inv.date
+      if (inv.status !== 'paid' || !d || new Date(d).getFullYear() !== year) return
+      const clientName = (clients || []).find(c => c.id === inv.clientId)?.name || inv.clientName || '—'
+      out.push({
+        id: `inv_${inv.id}`, date: d, type: 'Omzet',
+        description: `${inv.number || inv.id} — ${clientName}`,
+        ledger: '—', amount: invoiceExBtw(inv.items),
+      })
+    })
+    ;(expenses || []).forEach(exp => {
+      if (exp.status !== 'processed' || !exp.date || new Date(exp.date).getFullYear() !== year) return
+      out.push({
+        id: `exp_${exp.id}`, date: exp.date, type: 'Kostenpost',
+        description: `${exp.vendor || '—'}${exp.category ? ` · ${exp.category}` : ''}`,
+        ledger: exp.ledgerAccount || '—', amount: -Number(exp.amount || 0),
+      })
+    })
+    ;(entries || []).forEach(e => {
+      if (!e.date || new Date(e.date).getFullYear() !== year) return
+      out.push({
+        id: `ent_${e.id}`, date: e.date, type: 'Journaalpost',
+        description: `${e.description || '—'}${e.category ? ` (${e.category})` : ''}`,
+        ledger: e.ledgerCode || '—', amount: entrySignedAmount(e),
+      })
+    })
+    return out.sort((a, b) => new Date(b.date) - new Date(a.date))
+  }, [invoices, expenses, entries, clients, year])
+
+  const totals = useMemo(() => {
+    const t = { Omzet: 0, Kostenpost: 0, Journaalpost: 0 }
+    rows.forEach(r => { t[r.type] += r.amount })
+    return { ...t, grandTotal: t.Omzet + t.Kostenpost + t.Journaalpost }
+  }, [rows])
+
+  const typeColor = { Omzet: 'var(--success)', Kostenpost: 'var(--danger)', Journaalpost: 'var(--accent)' }
+  const typeSoft = { Omzet: 'var(--success-soft)', Kostenpost: 'var(--danger-soft)', Journaalpost: 'var(--accent-soft)' }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '13px', color: 'var(--text-3)' }}>Jaar:</span>
+          <select style={{ ...inp, width: 'auto', padding: '6px 12px' }} value={year} onChange={e => setYear(Number(e.target.value))}>
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          {[
+            { label: 'Omzet', value: totals.Omzet, color: 'var(--success)' },
+            { label: 'Kostenposten', value: totals.Kostenpost, color: 'var(--danger)' },
+            { label: 'Journaalposten', value: totals.Journaalpost, color: 'var(--accent)' },
+            { label: 'Totaal', value: totals.grandTotal, color: totals.grandTotal >= 0 ? 'var(--success)' : 'var(--danger)' },
+          ].map(s => (
+            <div key={s.label} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 16px', textAlign: 'right' }}>
+              <div style={{ fontSize: '10px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: '3px' }}>{s.label}</div>
+              <div style={{ fontFamily: 'monospace', fontWeight: '700', fontSize: '15px', color: s.color }}>{fmtEUR(s.value)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <Card>
+        <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <TrendingUp size={15} style={{ color: 'var(--accent)' }} />
+          <span style={{ fontWeight: '600', color: 'var(--text)', fontSize: '14px' }}>Grootboek {year}</span>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {['Datum', 'Type', 'Omschrijving', 'Grootboek', 'Bedrag'].map(h => (
+                  <th key={h} style={th}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={5} style={{ ...td, textAlign: 'center', color: 'var(--text-3)', padding: '40px' }}>
+                    Geen boekingen gevonden in {year}.
+                  </td>
+                </tr>
+              ) : rows.map(r => (
+                <tr key={r.id}>
+                  <td style={td}><span style={{ fontSize: '12px', color: 'var(--text-2)' }}>{fmtDate(r.date)}</span></td>
+                  <td style={td}>
+                    <span style={{
+                      fontSize: '11px', fontWeight: '600', padding: '2px 8px', borderRadius: '8px',
+                      background: typeSoft[r.type], color: typeColor[r.type],
+                    }}>
+                      {r.type}
+                    </span>
+                  </td>
+                  <td style={td}>{r.description}</td>
+                  <td style={td}><span style={{ fontSize: '12px', color: 'var(--text-3)' }}>{r.ledger}</span></td>
+                  <td style={td}>
+                    <span style={{ fontFamily: 'monospace', fontWeight: '700', color: r.amount >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                      {r.amount >= 0 ? '+' : '−'}{fmtEUR(Math.abs(r.amount))}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            {rows.length > 0 && (
+              <tfoot>
+                <tr>
+                  <td colSpan={4} style={{ ...td, fontWeight: '700', borderBottom: 'none' }}>Totaal</td>
+                  <td style={{ ...td, borderBottom: 'none' }}>
+                    <span style={{ fontFamily: 'monospace', fontWeight: '800', fontSize: '14px', color: totals.grandTotal >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                      {fmtEUR(totals.grandTotal)}
+                    </span>
+                  </td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </Card>
+    </div>
+  )
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 export default function BoekhoudenView({ invoices, expenses, assets, setAssets, entries, setEntries, clients }) {
   const { t } = useLang()
   const [tab, setTab] = useState('wv')
   const tabs = [
     { id: 'wv', label: t('bk.tabPL') },
+    { id: 'grootboek', label: 'Grootboek' },
     { id: 'activa', label: t('bk.tabAssets') },
     { id: 'memoriaal', label: t('bk.tabJournal') },
   ]
@@ -711,6 +859,7 @@ export default function BoekhoudenView({ invoices, expenses, assets, setAssets, 
       </div>
 
       {tab === 'wv' && <WinstVerliesTab invoices={invoices} expenses={expenses} assets={assets} entries={entries} clients={clients} />}
+      {tab === 'grootboek' && <GrootboekTab invoices={invoices} expenses={expenses} entries={entries} clients={clients} />}
       {tab === 'activa' && <VasteActivaTab assets={assets} setAssets={setAssets} />}
       {tab === 'memoriaal' && <MemoriaalTab entries={entries} setEntries={setEntries} />}
     </div>

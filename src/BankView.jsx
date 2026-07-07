@@ -30,11 +30,13 @@ const fmtDayLabel = (key) => {
 
 const BANK_ENTRY_CATEGORIES = ['Kostenpost', 'Omzetaanpassing', 'Correctie', 'Overig']
 
-// Interne overboeking tussen eigen (Revolut-)rekeningen — waarschuw voor per ongeluk boeken als kosten/omzet
+// Interne overboeking tussen eigen (Revolut-)rekeningen — waarschuw voor per ongeluk boeken als kosten/omzet.
+// Let op: "TRANSFER" is in Revolut ook het type voor gewone inkomende/uitgaande SEPA-betalingen van
+// klanten/leveranciers, dus daar alleen op matchen geeft valse positieven. Alleen echte interne-signalen tellen mee.
 const isLikelyInternalTransfer = (tx) => {
   const type = (tx.type || '').toLowerCase()
   const desc = `${tx.description || ''} ${tx.reference || ''}`.toLowerCase()
-  return type.includes('transfer') || type.includes('exchange') || desc.includes('between accounts') || desc.includes('to eur balance') || desc.includes('to my')
+  return type.includes('exchange') || desc.includes('between accounts') || desc.includes('to eur balance') || desc.includes('to my')
 }
 
 // Beste match op bedrag (exact, binnen 1 cent) voor koppelen aan factuur/uitgave
@@ -392,7 +394,9 @@ export default function BankView({
     }))
   }, [filtered])
 
-  const openInvoices = useMemo(() => (invoices || []).filter(i => ['sent', 'partial', 'overdue'].includes(i.status)), [invoices])
+  // Alle facturen behalve concepten/creditnota's — ook al betaalde facturen zijn koppelbaar
+  // (bv. handmatig als betaald gemarkeerd voordat de bank-CSV geïmporteerd werd).
+  const openInvoices = useMemo(() => (invoices || []).filter(i => !['draft', 'credit_note'].includes(i.status)), [invoices])
 
   const FILTERS = [
     { id: 'unmatched', label: 'Ongematcht' },
@@ -730,7 +734,7 @@ const LinkModal = ({ tx, mode, options, clients, isInternalTransfer, onCancel, o
         )}
         <div style={{ maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
           {options.length === 0 && (
-            <div style={{ fontSize: '12.5px', color: 'var(--text-3)', padding: '10px 0' }}>Geen open {mode === 'invoice' ? 'facturen' : 'uitgaven'} gevonden.</div>
+            <div style={{ fontSize: '12.5px', color: 'var(--text-3)', padding: '10px 0' }}>Geen {mode === 'invoice' ? 'facturen' : 'uitgaven'} gevonden.</div>
           )}
           {sortedOptions.map(o => (
             <button
@@ -745,6 +749,11 @@ const LinkModal = ({ tx, mode, options, clients, isInternalTransfer, onCancel, o
               <span style={{ fontSize: '12.5px', color: 'var(--text)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 {mode === 'invoice' ? (o.number || 'Factuur') : (o.vendor || 'Uitgave')}
                 {mode === 'invoice' && o.clientId ? ` · ${clientName(o.clientId)}` : ''}
+                {mode === 'invoice' && o.status === 'paid' && (
+                  <span style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-3)', background: 'var(--surface-3)', padding: '2px 6px', borderRadius: '10px' }}>
+                    Betaald
+                  </span>
+                )}
                 {o.id === bestId && (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: '700', color: 'var(--success)', background: 'var(--success-soft)', padding: '2px 6px', borderRadius: '10px' }}>
                     <Star size={9} /> Waarschijnlijke match
