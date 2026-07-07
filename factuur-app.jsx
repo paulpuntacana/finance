@@ -1531,7 +1531,7 @@ const callAI = async ({ system, prompt, messages, apiKey, openaiApiKey, maxToken
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-5-20250929',
       max_tokens: maxTokens,
       system,
       messages: anthropicMessages,
