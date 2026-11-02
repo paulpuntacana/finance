@@ -224,10 +224,29 @@ const expenseToDB = (item, orgId, userId) => {
     category: item.category || null,
     ledger_code: item.ledgerAccount || item.ledgerCode || null,
     currency: item.currency || 'EUR',
-    receipt_url: item.receiptUrl || null, receipt_name: item.receiptName || null,
+    // Storage-pad van de bon ook in de kolom, zodat hij buiten de app terug te vinden is
+    receipt_url: item.receiptUrl || item.receiptPath || null, receipt_name: item.receiptName || item.attachmentName || null,
     notes: item.notes || null, created_by: userId || null,
     extra: { ...extra, status: item.status || 'open', dateMissing: !item.date },
   }
+}
+
+// localStorage (±5 MB) kan geen base64-bonnen bevatten: grote image/attachment-velden laten we
+// in de cache weg (de server heeft ze nog) en markeren we met receiptStripped. Een trigger in
+// migration v8 zet ze terug als zo'n ingekort record toch ooit gesynct wordt.
+// Zonder cloud is localStorage de enige opslag, dan strippen we niets.
+const CACHE_MAX_FIELD = 20000
+const cacheValue = (key, val, cloudEnabled) => {
+  if (key !== 'expenses' || !cloudEnabled || !Array.isArray(val)) return val
+  return val.map(e => {
+    if (!e) return e
+    const big = ['image', 'attachment'].filter(f => typeof e[f] === 'string' && e[f].length > CACHE_MAX_FIELD)
+    if (!big.length) return e
+    const copy = { ...e }
+    big.forEach(f => { delete copy[f] })
+    copy.receiptStripped = [...new Set([...(e.receiptStripped || []), ...big])]
+    return copy
+  })
 }
 
 const entityFromDB = (row) => ({
@@ -446,7 +465,7 @@ export const useCloudStorage = (key, defaultValue) => {
   const applyValue = (val) => {
     valueRef.current = val
     setValue(val)
-    try { localStorage.setItem(storageKey, JSON.stringify(val)) } catch {}
+    try { localStorage.setItem(storageKey, JSON.stringify(cacheValue(key, val, cloudEnabled))) } catch {}
   }
 
   const fetchRemote = async () => {
