@@ -2031,7 +2031,7 @@ const EntitySwitcher = ({ activeEntity, entities, onSwitch, onManage }) => {
         }
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium truncate" style={{ color: 'var(--ink)' }}>{activeEntity.name}</div>
-          <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
+          <div className="text-[11px]" style={{ color: 'var(--muted)' }}>
             {jur.flag} {typ.label}
           </div>
         </div>
@@ -2039,7 +2039,7 @@ const EntitySwitcher = ({ activeEntity, entities, onSwitch, onManage }) => {
       </button>
       {open && (
         <div className="absolute top-full left-0 right-0 mt-1 rounded-lg shadow-xl border z-50 animate-in py-1" style={{ borderColor: 'var(--border-strong)', background: 'var(--surface)' }}>
-          <div className="text-[10px] uppercase tracking-wider font-medium px-3 pt-2 pb-1" style={{ color: 'var(--muted)' }}>Actief bedrijf</div>
+          <div className="text-[11.5px] font-medium px-3 pt-2 pb-1" style={{ color: 'var(--muted)' }}>Actief bedrijf</div>
           {entities.map(e => {
             const t = getEntityType(e.type);
             const j = JURISDICTIONS[e.jurisdiction || 'NL'];
@@ -2258,10 +2258,11 @@ const Sidebar = ({ activeTab, setActiveTab, onOpenSearch, openCount, issueCount 
             >
               <div style={{
                 width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0, overflow: 'hidden',
-                background: profile?.avatar_url ? 'transparent' : 'linear-gradient(135deg, #4f46e5, #818cf8)',
+                // Accent-tokens i.p.v. vaste indigo, zodat de avatar meekleurt met licht/donker thema
+                background: profile?.avatar_url ? 'transparent' : 'linear-gradient(135deg, var(--accent), var(--accent-2))',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '13px', fontWeight: '700', color: '#fff',
-                boxShadow: '0 2px 6px rgba(79,70,229,0.35)',
+                fontSize: '13px', fontWeight: '700', color: 'var(--btn-primary-text)',
+                boxShadow: '0 2px 6px var(--accent-glow)',
               }}>
                 {profile?.avatar_url
                   ? <img src={profile.avatar_url} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -2309,7 +2310,7 @@ const Sidebar = ({ activeTab, setActiveTab, onOpenSearch, openCount, issueCount 
               <Icon size={18} />
               <span style={{ fontSize: '10px', fontWeight: '500' }}>{item.label}</span>
               {item.badge > 0 && (
-                <span className="absolute top-0.5 right-1" style={{ fontSize: '9px', fontWeight: '700', padding: '1px 4px', borderRadius: '8px', background: 'var(--danger)', color: '#fff', minWidth: 14, textAlign: 'center' }}>
+                <span className="absolute top-0.5 right-1" style={{ fontSize: '9px', fontWeight: '700', padding: '1px 4px', borderRadius: '8px', background: 'var(--danger)', color: 'var(--btn-primary-text)', minWidth: 14, textAlign: 'center' }}>
                   {item.badge}
                 </span>
               )}
@@ -2833,10 +2834,13 @@ const ClientsView = ({ clients, setClients, invoices, settings }) => {
     c.email?.toLowerCase().includes(search.toLowerCase())
   );
 
+  // Alleen echte omzet telt (geen concepten/geannuleerd); creditnota's verlagen het totaal.
   const clientStats = (clientId) => {
-    const inv = invoices.filter(i => i.clientId === clientId);
+    const inv = invoices.filter(i => i.clientId === clientId && isRevenueInvoice(i));
     const total = inv.reduce((s, i) => s + computeInvoice(i.items).total, 0);
-    return { count: inv.length, total };
+    const open = inv.reduce((s, i) => s + invoiceOpenAmount(i), 0);
+    const last = inv.map(invoiceDate).filter(Boolean).sort().pop() || null;
+    return { count: inv.length, total, open, last };
   };
 
   const handleSave = (data) => {
@@ -2861,13 +2865,11 @@ const ClientsView = ({ clients, setClients, invoices, settings }) => {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="page-title">Klanten</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{clients.length} klant{clients.length !== 1 ? 'en' : ''}</p>
-        </div>
-        <Button onClick={() => setEditing({})}><Plus size={16} /> Nieuwe klant</Button>
-      </div>
+      <PageHeader
+        title="Klanten"
+        sub={`${clients.length} klant${clients.length !== 1 ? 'en' : ''}`}
+        actions={<Button onClick={() => setEditing({})}><Plus size={16} /> Nieuwe klant</Button>}
+      />
 
       <Card className="p-3">
         <div className="relative">
@@ -2893,38 +2895,59 @@ const ClientsView = ({ clients, setClients, invoices, settings }) => {
           />
         </Card>
       ) : (
-        <Card>
-          <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-            {filtered.map(c => {
-              const stats = clientStats(c.id);
-              return (
-                <div key={c.id} className="px-5 py-4 hover:bg-[color:var(--surface-2)] transition-colors flex items-center justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-medium truncate">{c.name}</h3>
-                      {c.btw && <span className="text-xs font-mono px-1.5 py-0.5 rounded" style={{ background: 'var(--surface-2)', color: 'var(--muted)' }}>{c.btw}</span>}
-                    </div>
-                    <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-                      {c.contactName && <span>{c.contactName} · </span>}
-                      <span>{c.email || 'Geen email'}</span>
-                      {c.city && <span> · {c.city}</span>}
-                    </div>
-                  </div>
-                  <div className="hidden md:flex flex-col items-end text-right">
-                    <span className="text-[15px] font-semibold"><Money value={stats.total} /></span>
-                    <span className="text-xs" style={{ color: 'var(--muted)' }}>{stats.count} factu{stats.count === 1 ? 'ur' : 'ren'}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => setEditing(c)} className="p-2 rounded hover:bg-[color:var(--surface-2)]" title="Bewerken">
-                      <Edit3 size={14} style={{ color: 'var(--muted)' }} />
-                    </button>
-                    <button onClick={() => handleDelete(c.id)} className="p-2 rounded hover:bg-red-50" title="Verwijderen">
-                      <Trash2 size={14} style={{ color: 'var(--danger)' }} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+        <Card className="overflow-hidden">
+          {/* Kasboek-tabel: totaal gefactureerd (incl. BTW), openstaand en laatste factuurdatum per klant */}
+          <div className="overflow-x-auto">
+            <table className="ledger">
+              <thead>
+                <tr>
+                  <th>Klant</th>
+                  <th className="hidden md:table-cell" style={{ width: 90 }}>Facturen</th>
+                  <th className="hidden md:table-cell" style={{ width: 120 }}>Laatste factuur</th>
+                  <th className="r hidden sm:table-cell" style={{ width: 130 }}>Openstaand</th>
+                  <th className="r" style={{ width: 140 }}>Gefactureerd</th>
+                  <th style={{ width: 80 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(c => {
+                  const stats = clientStats(c.id);
+                  return (
+                    <tr key={c.id}>
+                      <td className="max-w-0" style={{ width: '40%' }}>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-medium truncate">{c.name}</span>
+                          {c.btw && <span className="text-xs font-mono px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: 'var(--surface-2)', color: 'var(--text-3)' }}>{c.btw}</span>}
+                        </div>
+                        <div className="truncate text-[11.5px]" style={{ color: 'var(--text-3)' }}>
+                          {c.contactName && <span>{c.contactName} · </span>}
+                          <span>{c.email || 'Geen email'}</span>
+                          {c.city && <span> · {c.city}</span>}
+                        </div>
+                      </td>
+                      <td className="hidden md:table-cell num" style={{ color: 'var(--text-2)' }}>{stats.count}</td>
+                      <td className="hidden md:table-cell num" style={{ color: 'var(--text-2)' }}>{stats.last ? fmtDate(stats.last) : '—'}</td>
+                      <td className="r hidden sm:table-cell">
+                        {stats.open > 0.005
+                          ? <Money value={stats.open} style={{ color: 'var(--warning)' }} />
+                          : <span style={{ color: 'var(--text-3)' }}>—</span>}
+                      </td>
+                      <td className="r"><Money value={stats.total} /></td>
+                      <td className="r">
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => setEditing(c)} className="p-2 rounded hover:bg-[color:var(--surface-3)]" title="Bewerken">
+                            <Edit3 size={14} style={{ color: 'var(--text-3)' }} />
+                          </button>
+                          <button onClick={() => handleDelete(c.id)} className="p-2 rounded hover:bg-[color:var(--danger-soft)]" title="Verwijderen">
+                            <Trash2 size={14} style={{ color: 'var(--danger)' }} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </Card>
       )}
@@ -3012,7 +3035,7 @@ const ClientForm = ({ client, onSave, onClose, settings }) => {
           <div className="rounded-lg p-4 space-y-3" style={{ background: 'var(--bg-alt)', border: '1px solid var(--border)' }}>
             <div className="flex items-center gap-2">
               <Wand2 size={14} style={{ color: 'var(--accent)' }} />
-              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent)' }}>Automatisch invullen met AI</span>
+              <span className="text-[12.5px] font-semibold" style={{ color: 'var(--accent)' }}>Automatisch invullen met AI</span>
             </div>
             <div className="flex gap-2">
               <input
@@ -6116,7 +6139,7 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
             return (
               <button key={opt.value} onClick={() => onUpdate({ ...entity, headerMode: opt.value })}
                 className="text-left px-3 py-2 rounded-lg border text-xs transition-all"
-                style={{ borderColor: active ? 'var(--btn-primary)' : 'var(--border)', background: active ? 'var(--btn-primary)' : 'transparent', color: active ? '#fff' : 'var(--ink-2)' }}>
+                style={{ borderColor: active ? 'var(--btn-primary)' : 'var(--border)', background: active ? 'var(--btn-primary)' : 'transparent', color: active ? 'var(--btn-primary-text)' : 'var(--ink-2)' }}>
                 <div className="font-medium">{opt.label}</div>
                 <div className="mt-0.5 opacity-70">{opt.desc}</div>
               </button>
@@ -6138,15 +6161,12 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
             onChange={e => onUpdate({ ...entity, logoScale: Number(e.target.value) })}
             className="w-full"
           />
-          <div className="flex gap-2">
-            {[60, 80, 100, 130, 160].map(v => (
-              <button key={v} onClick={() => onUpdate({ ...entity, logoScale: v })}
-                className="flex-1 py-1 text-xs rounded border"
-                style={{ borderColor: (entity.logoScale || 100) === v ? 'var(--btn-primary)' : 'var(--border)', background: (entity.logoScale || 100) === v ? 'var(--btn-primary)' : 'transparent', color: (entity.logoScale || 100) === v ? '#fff' : 'var(--ink-2)' }}>
-                {v}%
-              </button>
-            ))}
-          </div>
+          {/* Snelkeuze als Segmented, consistent met andere toggles */}
+          <Segmented
+            options={[60, 80, 100, 130, 160].map(v => ({ id: v, label: `${v}%` }))}
+            value={entity.logoScale || 100}
+            onChange={v => onUpdate({ ...entity, logoScale: v })}
+          />
         </Card>
       )}
 
@@ -6168,7 +6188,7 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
                 style={{ borderColor: active ? 'var(--btn-primary)' : 'var(--border)', background: active ? 'var(--surface-2)' : 'transparent' }}>
                 <div className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center flex-shrink-0 ${active ? 'border-0' : ''}`}
                   style={{ background: active ? 'var(--btn-primary)' : 'transparent', borderColor: 'var(--border-strong)' }}>
-                  {active && <svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 4l2 2 4-4" stroke="#fff" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>}
+                  {active && <svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 4l2 2 4-4" style={{ stroke: 'var(--btn-primary-text)' }} strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>}
                 </div>
                 <span style={{ color: 'var(--ink-2)' }}>{label}</span>
               </button>
@@ -6195,7 +6215,7 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
                 style={{ borderColor: active ? 'var(--btn-primary)' : 'var(--border)', background: active ? 'var(--surface-2)' : 'transparent' }}>
                 <div className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center flex-shrink-0 ${active ? 'border-0' : ''}`}
                   style={{ background: active ? 'var(--btn-primary)' : 'transparent', borderColor: 'var(--border-strong)' }}>
-                  {active && <svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 4l2 2 4-4" stroke="#fff" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>}
+                  {active && <svg width="8" height="8" viewBox="0 0 8 8"><path d="M1 4l2 2 4-4" style={{ stroke: 'var(--btn-primary-text)' }} strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>}
                 </div>
                 <span style={{ color: 'var(--ink-2)' }}>{label}</span>
               </button>
@@ -6243,7 +6263,7 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
 
       <Card className="p-4" style={{ background: 'var(--surface-2)' }}>
         <div className="flex items-center justify-between mb-3">
-          <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>Live preview</div>
+          <div className="text-[12px] font-medium" style={{ color: 'var(--muted)' }}>Live preview</div>
           <div className="flex items-center gap-2">
             <button
               className="flex items-center gap-1.5 text-[10px] px-2.5 py-1.5 rounded-md border transition-all"
@@ -6318,7 +6338,7 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
                         className="flex items-center justify-center w-5 h-5 rounded transition-all"
                         style={{
                           background: (entity.logoAlign || 'left') === align ? 'var(--btn-primary)' : 'transparent',
-                          color: (entity.logoAlign || 'left') === align ? '#fff' : 'var(--ink-2)',
+                          color: (entity.logoAlign || 'left') === align ? 'var(--btn-primary-text)' : 'var(--ink-2)',
                           border: 'none', cursor: 'pointer',
                         }}>
                         {icon}
@@ -6335,7 +6355,7 @@ const TemplateGallery = ({ entity, onUpdate, sampleInvoice, sampleClient }) => {
                 <button
                   onClick={handleSaveEdits}
                   className="flex items-center gap-1.5 text-[10px] px-3 py-1.5 rounded-md"
-                  style={{ background: 'var(--btn-primary)', color: '#fff', border: 'none', cursor: 'pointer' }}
+                  style={{ background: 'var(--btn-primary)', color: 'var(--btn-primary-text)', border: 'none', cursor: 'pointer' }}
                 >
                   <Save size={10} /> Opslaan
                 </button>
@@ -6625,17 +6645,19 @@ const TemplateThumb = ({ templateId, accent = '#7C2D2D' }) => {
 const EntitiesView = ({ entities, setEntities, activeEntityId, setActiveEntityId, invoices, expenses }) => {
   const [editing, setEditing] = useState(null);
 
+  // Zelfde rekenregels als Winst & verlies: omzet en kosten excl. BTW, lopend jaar,
+  // alle verstuurde facturen (factuurstelsel) i.p.v. alleen betaalde incl. BTW.
+  const statsYear = new Date().getFullYear();
   const stats = useMemo(() => {
     const byEntity = {};
     entities.forEach(e => {
       const inv = invoices.filter(i => i.entityId === e.id);
       const exp = expenses.filter(x => x.entityId === e.id);
-      const revenue = inv.filter(i => i.status === 'paid').reduce((s, i) => s + computeInvoice(i.items).total, 0);
-      const costs = exp.filter(x => x.status === 'processed').reduce((s, x) => s + Number(x.amount || 0), 0);
-      byEntity[e.id] = { invoiceCount: inv.length, expenseCount: exp.length, revenue, costs };
+      const pl = buildProfitLoss({ invoices: inv, expenses: exp, year: statsYear });
+      byEntity[e.id] = { invoiceCount: inv.length, expenseCount: exp.length, revenue: pl.revenue, costs: pl.costs };
     });
     return byEntity;
-  }, [entities, invoices, expenses]);
+  }, [entities, invoices, expenses, statsYear]);
 
   const handleSave = (entity) => {
     if (entity.id && entities.find(e => e.id === entity.id)) {
@@ -6649,11 +6671,21 @@ const EntitiesView = ({ entities, setEntities, activeEntityId, setActiveEntityId
 
   const handleDelete = (id) => {
     if (entities.length <= 1) { alert('Je moet minstens 1 bedrijf hebben.'); return; }
+    const ent = entities.find(e => e.id === id);
     const invCount = invoices.filter(i => i.entityId === id).length;
     const expCount = expenses.filter(e => e.entityId === id).length;
+    const childCount = entities.filter(e => e.parentId === id).length;
+    // Blokkeren i.p.v. waarschuwen: facturen/bonnen van een verwijderd bedrijf worden door
+    // geen enkel scherm meer getoond (ze zijn op entityId gefilterd) en tellen dan stil niet meer mee.
     if (invCount + expCount > 0) {
-      if (!window.confirm(`Dit bedrijf heeft ${invCount} facturen en ${expCount} bonnen. Deze blijven bestaan maar verliezen koppeling. Doorgaan?`)) return;
+      alert(`"${ent?.name || 'Dit bedrijf'}" kan niet worden verwijderd: er hangen nog ${invCount} factu${invCount === 1 ? 'ur' : 'ren'} en ${expCount} kostenpost${expCount === 1 ? '' : 'en'} aan.\n\nDie zouden anders uit alle overzichten (dashboard, BTW-aangifte, boekhouding) verdwijnen. Verplaats of verwijder ze eerst; alleen een leeg bedrijf kan worden verwijderd.`);
+      return;
     }
+    if (childCount > 0) {
+      alert(`"${ent?.name || 'Dit bedrijf'}" heeft nog ${childCount} onderliggend${childCount === 1 ? ' bedrijf of label' : 'e bedrijven/labels'}. Koppel die eerst aan een ander bedrijf.`);
+      return;
+    }
+    if (!window.confirm(`"${ent?.name || 'Dit bedrijf'}" verwijderen? Er zijn geen facturen of kostenposten aan gekoppeld.`)) return;
     setEntities(prev => prev.filter(e => e.id !== id));
     if (id === activeEntityId) setActiveEntityId(entities.find(e => e.id !== id)?.id);
   };
@@ -6682,7 +6714,7 @@ const EntitiesView = ({ entities, setEntities, activeEntityId, setActiveEntityId
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="font-display text-lg font-medium" style={{ color: 'var(--ink)' }}>{entity.name}</h3>
                   {isActive && <Badge status="processed">Actief</Badge>}
-                  <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium" style={{ background: 'var(--surface-2)', color: 'var(--muted)' }}>
+                  <span className="text-[11px] px-1.5 py-0.5 rounded font-medium" style={{ background: 'var(--surface-2)', color: 'var(--muted)' }}>
                     {typ.label}
                   </span>
                 </div>
@@ -6692,9 +6724,10 @@ const EntitiesView = ({ entities, setEntities, activeEntityId, setActiveEntityId
                   {entity.taxNumber && <span className="font-mono">{jur.code === 'NL' ? 'BTW' : 'Tax'}: {entity.taxNumber}</span>}
                 </div>
                 <div className="text-xs mt-2 flex gap-4 flex-wrap">
-                  <span><span style={{ color: 'var(--muted)' }}>Omzet: </span><span className="num font-medium">{fmtCurrency(s.revenue, jur.baseCurrency)}</span></span>
-                  <span><span style={{ color: 'var(--muted)' }}>Kosten: </span><span className="num font-medium">{fmtCurrency(s.costs, jur.baseCurrency)}</span></span>
+                  <span><span style={{ color: 'var(--muted)' }}>Omzet {statsYear} excl. BTW: </span><Money value={s.revenue} currency={jur.baseCurrency} className="font-medium" /></span>
+                  <span><span style={{ color: 'var(--muted)' }}>Kosten excl. BTW: </span><Money value={s.costs} currency={jur.baseCurrency} className="font-medium" /></span>
                   <span><span style={{ color: 'var(--muted)' }}>Facturen: </span><span className="num font-medium">{s.invoiceCount}</span></span>
+                  <span><span style={{ color: 'var(--muted)' }}>Kostenposten: </span><span className="num font-medium">{s.expenseCount}</span></span>
                 </div>
               </div>
               <div className="flex flex-col gap-1">
@@ -6707,7 +6740,7 @@ const EntitiesView = ({ entities, setEntities, activeEntityId, setActiveEntityId
                   <Edit3 size={13} style={{ color: 'var(--muted)' }} />
                 </button>
                 {entities.length > 1 && (
-                  <button onClick={() => handleDelete(entity.id)} className="p-1.5 rounded hover:bg-red-50">
+                  <button onClick={() => handleDelete(entity.id)} className="p-1.5 rounded hover:bg-[color:var(--danger-soft)]" title={s.invoiceCount + s.expenseCount > 0 ? 'Alleen lege bedrijven kunnen worden verwijderd' : 'Verwijderen'}>
                     <Trash2 size={13} style={{ color: 'var(--danger)' }} />
                   </button>
                 )}
@@ -6726,15 +6759,11 @@ const EntitiesView = ({ entities, setEntities, activeEntityId, setActiveEntityId
 
   return (
     <div className="space-y-5">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="page-title">Bedrijven</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-            {entities.length} bedrijf{entities.length !== 1 ? 'sentiteiten' : ''} · Structuur + gegevens
-          </p>
-        </div>
-        <Button onClick={() => setEditing({})}><Plus size={16} /> Nieuw bedrijf</Button>
-      </div>
+      <PageHeader
+        title="Bedrijven"
+        sub={`${entities.length} bedrijf${entities.length !== 1 ? 'sentiteiten' : ''} · Structuur + gegevens`}
+        actions={<Button onClick={() => setEditing({})}><Plus size={16} /> Nieuw bedrijf</Button>}
+      />
 
       <Card className="p-5" style={{ background: 'var(--surface-2)' }}>
         <div className="flex items-start gap-3">
@@ -6907,7 +6936,7 @@ const EntityForm = ({ entity, entities, onSave, onClose }) => {
           <h3 className="text-sm font-medium mb-3" style={{ color: 'var(--ink)' }}>Logo</h3>
           {form.logo && (
             <div className="mb-3 flex items-center gap-3">
-              <img src={form.logo} alt="logo" className="h-14 object-contain bg-stone-50 p-2 rounded border" style={{ borderColor: 'var(--border)' }} />
+              <img src={form.logo} alt="logo" className="h-14 object-contain p-2 rounded border" style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }} />
               <Button size="sm" variant="secondary" onClick={() => update('logo', null)}><X size={12} /> Verwijderen</Button>
             </div>
           )}
@@ -6932,16 +6961,11 @@ const EntityForm = ({ entity, entities, onSave, onClose }) => {
               </div>
               <div>
                 <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--ink-2)' }}>Logo uitlijning</label>
-                <div className="flex gap-2">
-                  {['left','center','right'].map(a => (
-                    <button key={a} onClick={() => update('logoAlign', a)}
-                      style={{ flex:1, padding:'5px', fontSize:11, borderRadius:6, border:'1px solid var(--border)',
-                        background: (form.logoAlign||'left')===a ? 'var(--accent)' : 'var(--surface-2)',
-                        color: (form.logoAlign||'left')===a ? '#fff' : 'var(--ink-2)', cursor:'pointer' }}>
-                      {a==='left'?'Links':a==='center'?'Midden':'Rechts'}
-                    </button>
-                  ))}
-                </div>
+                <Segmented
+                  options={[{ id: 'left', label: 'Links' }, { id: 'center', label: 'Midden' }, { id: 'right', label: 'Rechts' }]}
+                  value={form.logoAlign || 'left'}
+                  onChange={a => update('logoAlign', a)}
+                />
               </div>
             </div>
           )}
@@ -7413,61 +7437,99 @@ const TaxReportView = ({ invoices, expenses, setExpenses, clients, settings, act
 };
 
 // ============================================================================
-// INCOME TAX CALCULATOR  (NL / DR / EE — benaderingen 2024/2025)
+// INCOME TAX CALCULATOR  (NL 2026 / DR / EE — schattingen)
 // ============================================================================
+// Alle NL-parameters op één plek, zodat een jaarwissel één object is i.p.v. losse getallen.
+// Bron: KvK "Belastingtarieven 2026" + Belastingplan 2026 (Grant Thornton / Van Oers
+// loonspecials), nov 2026. Startersaftrek niet in die bronnen → controleren.
+const TAX_NL_2026 = {
+  year: 2026,
+  zelfstandigenaftrek: 1200,          // was €3.750 (2024), €2.470 (2025)
+  startersaftrek: 2123,               // controleren
+  mkbWinstvrijstelling: 0.127,        // 12,70%
+  // Box 1 (onder AOW-leeftijd), drie schijven
+  brackets: [
+    { to: 38883, rate: 0.3575 },
+    { to: 78426, rate: 0.3756 },
+    { to: Infinity, rate: 0.495 },
+  ],
+  // Algemene heffingskorting: max, afbouw 6,398% vanaf €29.736 → €0 bij €78.426
+  ahk: { max: 3115, phaseStart: 29736, phaseRate: 0.06398 },
+  // Arbeidskorting: opbouw in drie stappen tot max €5.685, afbouw 6,51% vanaf €45.592
+  ak: {
+    steps: [
+      { to: 11965, base: 0, rate: 0.08324 },
+      { to: 25845, base: 996, rate: 0.31009 },
+      { to: 45592, base: 5300, rate: 0.0195 },
+    ],
+    max: 5685, phaseStart: 45592, phaseRate: 0.0651,
+  },
+  // Zvw inkomensafhankelijke bijdrage (verlaagd tarief ondernemers) en maximum bijdrage-inkomen
+  zvw: { rate: 0.0485, cap: 79409 },
+  korGrens: 20000,
+};
+
 const calcIncomeTax = (jurCode, { revenue = 0, costs = 0, isStarter = false, hasUrencriterium = true } = {}) => {
   const winst = Math.max(0, revenue - costs);
 
   if (jurCode === 'NL') {
-    // Zelfstandigenaftrek 2024: €3.750 (daalt jaarlijks richting €900 in 2027)
-    const zelfstandigenAftrek = hasUrencriterium ? Math.min(3750, winst) : 0;
-    // Startersaftrek: +€2.123 extra, eerste 3 jaar
-    const startersAftrek = (isStarter && hasUrencriterium) ? Math.min(2123, Math.max(0, winst - zelfstandigenAftrek)) : 0;
+    const P = TAX_NL_2026;
+    const zelfstandigenAftrek = hasUrencriterium ? Math.min(P.zelfstandigenaftrek, winst) : 0;
+    // Startersaftrek: extra aftrek in max. 3 van de eerste 5 jaar, alleen met urencriterium
+    const startersAftrek = (isStarter && hasUrencriterium) ? Math.min(P.startersaftrek, Math.max(0, winst - zelfstandigenAftrek)) : 0;
     const winstNaAftrek = Math.max(0, winst - zelfstandigenAftrek - startersAftrek);
-    // MKB-winstvrijstelling: 13,31% over winst na aftrek
-    const mkbVrijstelling = Math.round(winstNaAftrek * 0.1331);
+    const mkbVrijstelling = Math.round(winstNaAftrek * P.mkbWinstvrijstelling);
     const belastbaarInkomen = Math.max(0, winstNaAftrek - mkbVrijstelling);
 
-    // Box 1: 36,97% t/m €73.031, 49,5% daarboven
-    let belasting = belastbaarInkomen <= 73031
-      ? belastbaarInkomen * 0.3697
-      : 73031 * 0.3697 + (belastbaarInkomen - 73031) * 0.495;
+    let belasting = 0, prev = 0;
+    for (const b of P.brackets) {
+      if (belastbaarInkomen <= prev) break;
+      belasting += (Math.min(belastbaarInkomen, b.to) - prev) * b.rate;
+      prev = b.to;
+    }
 
-    // Algemene Heffingskorting: max €3.362, afgebouwd tot €0 bij €73k+
-    const ahk = belastbaarInkomen <= 22660 ? 3362
-      : belastbaarInkomen >= 73031 ? 0
-      : Math.max(0, 3362 * (1 - (belastbaarInkomen - 22660) / (73031 - 22660)));
+    const ahk = Math.max(0, P.ahk.max - Math.max(0, belastbaarInkomen - P.ahk.phaseStart) * P.ahk.phaseRate);
 
-    // Arbeidskorting: max ~€5.158, opgebouwd t/m €40k, daarna afgebouwd
-    const ak = belastbaarInkomen <= 10741 ? belastbaarInkomen * 0.0823
-      : belastbaarInkomen <= 23201 ? 884 + (belastbaarInkomen - 10741) * 0.3001
-      : belastbaarInkomen <= 40070 ? Math.min(5158, 4625 + (belastbaarInkomen - 23201) * 0.028)
-      : belastbaarInkomen <= 124935 ? Math.max(0, 5158 - (belastbaarInkomen - 40070) * 0.0651)
-      : 0;
+    // Arbeidskorting over arbeidsinkomen (hier benaderd met belastbare winst)
+    let ak;
+    if (belastbaarInkomen > P.ak.phaseStart) {
+      ak = Math.max(0, P.ak.max - (belastbaarInkomen - P.ak.phaseStart) * P.ak.phaseRate);
+    } else {
+      let lower = 0;
+      ak = 0;
+      for (const st of P.ak.steps) {
+        if (belastbaarInkomen <= st.to) { ak = st.base + (belastbaarInkomen - lower) * st.rate; break; }
+        lower = st.to;
+      }
+      ak = Math.min(P.ak.max, ak);
+    }
 
     const kortingen = Math.min(belasting, ahk + ak);
     const inkomstenbelasting = Math.max(0, Math.round(belasting - kortingen));
-    // Zvw-bijdrage: 5,32% over belastbaar inkomen (max €66.956 basis)
-    const zvw = Math.round(Math.min(belastbaarInkomen, 66956) * 0.0532);
+    const zvw = Math.round(Math.min(belastbaarInkomen, P.zvw.cap) * P.zvw.rate);
     const totaal = inkomstenbelasting + zvw;
+    const topGrens = P.brackets[1].to;
+    const fmtE = (n) => `€${Math.round(n).toLocaleString('nl-NL')}`;
 
     return {
-      currency: 'EUR', winst, zelfstandigenAftrek, startersAftrek, mkbVrijstelling,
+      currency: 'EUR', taxYear: P.year, winst, zelfstandigenAftrek, startersAftrek, mkbVrijstelling,
       belastbaarInkomen: Math.round(belastbaarInkomen),
       inkomstenbelasting, zvw, totaal,
       effectief: revenue > 0 ? Math.round((totaal / revenue) * 1000) / 10 : 0,
       opzijPercentage: revenue > 0 ? Math.ceil((totaal / revenue) * 100) : 0,
       alerts: [
-        revenue > 16000 && revenue < 20000 && { type: 'warning', msg: `KOR-grens: nog €${Math.round(20000 - revenue).toLocaleString('nl-NL')} ruimte. Daarna BTW-plichtig!` },
-        revenue >= 20000 && { type: 'info', msg: `Boven KOR-grens (€20.000): BTW-aangifte verplicht.` },
-        inkomstenbelasting === 0 && { type: 'success', msg: `Je hoeft waarschijnlijk geen inkomstenbelasting te betalen — alleen Zvw (€${zvw.toLocaleString('nl-NL')}).` },
-        belastbaarInkomen > 73031 && { type: 'warning', msg: `Je raakt de 49,5%-schijf (>€73.031). Overweeg lijfrente of extra kosten boeken.` },
+        // KOR is een vrijstelling waar je je zelf voor aanmeldt (omzet < €20.000); BTW-plicht
+        // bestaat sowieso. Boven de grens kun je de KOR alleen niet (meer) gebruiken.
+        revenue > 16000 && revenue < P.korGrens && { type: 'warning', msg: `Nog ${fmtE(P.korGrens - revenue)} tot de KOR-grens (${fmtE(P.korGrens)} omzet). Gebruik je de KOR, dan vervalt die vrijstelling zodra je erboven komt en moet je weer BTW rekenen en aangifte doen.` },
+        revenue >= P.korGrens && { type: 'info', msg: `Omzet boven ${fmtE(P.korGrens)}: de kleineondernemersregeling (KOR) is niet beschikbaar — BTW rekenen en aangifte doen.` },
+        inkomstenbelasting === 0 && { type: 'success', msg: `Je hoeft waarschijnlijk geen inkomstenbelasting te betalen — alleen Zvw (${fmtE(zvw)}).` },
+        belastbaarInkomen > topGrens && { type: 'warning', msg: `Je raakt de 49,5%-schijf (>${fmtE(topGrens)}). Overweeg lijfrente of extra kosten boeken.` },
       ].filter(Boolean),
     };
   }
 
   if (jurCode === 'DR') {
-    // ISR Personas Físicas 2024 (brackets in DOP)
+    // ISR Personas Físicas (schijven in DOP, stand 2024) — schatting, niet jaarlijks bijgewerkt
     const brackets = [
       { to: 416220, rate: 0 }, { to: 624329, rate: 0.15 },
       { to: 867123, rate: 0.20 }, { to: Infinity, rate: 0.25 },
@@ -7487,6 +7549,7 @@ const calcIncomeTax = (jurCode, { revenue = 0, costs = 0, isStarter = false, has
       effectief: revenue > 0 ? Math.round((isrPF / revenue) * 1000) / 10 : 0,
       effectiefSRL: revenue > 0 ? Math.round((isrSRL / revenue) * 1000) / 10 : 0,
       alerts: [
+        { type: 'info', msg: `Schatting op basis van ISR-schijven 2024 — controleer de actuele DGII-tarieven.` },
         { type: 'info', msg: `Persona Física: progressief 0%–25%. SRL (bedrijf): 27% flat over winst.` },
         { type: 'success', msg: `DR is soepel: kleding, maaltijden, benzine zijn aftrekbaar zonder logo-eis!` },
         anticiposSRL > 0 && { type: 'warning', msg: `SRL-anticipos: RD$${anticiposSRL.toLocaleString('es-DO')}/jaar (1,5% omzet) — maandelijks vooruit aan DGII.` },
@@ -7495,6 +7558,7 @@ const calcIncomeTax = (jurCode, { revenue = 0, costs = 0, isStarter = false, has
   }
 
   if (jurCode === 'EE') {
+    // Schatting: vlakke tarieven (22% inkomsten-/dividendbelasting, 33% social tax), niet jaarlijks bijgewerkt
     const ouDividend = Math.round(winst * 0.22); // dividendbelasting OÜ
     const fieTaxable = Math.max(0, winst * 0.8); // 20% kostenaftrek FIE
     const fieIncome = Math.round(fieTaxable * 0.22);
@@ -7506,6 +7570,7 @@ const calcIncomeTax = (jurCode, { revenue = 0, costs = 0, isStarter = false, has
       effectiefDividend: revenue > 0 ? Math.round((ouDividend / revenue) * 1000) / 10 : 0,
       effectiefFIE: revenue > 0 ? Math.round(((fieIncome + fieSocial) / revenue) * 1000) / 10 : 0,
       alerts: [
+        { type: 'info', msg: `Schatting met vlakke tarieven (22% / 33% social tax) — controleer de actuele EMTA-tarieven.` },
         { type: 'success', msg: `OÜ: 0% belasting op ingehouden winst — ideaal voor digital nomads!` },
         { type: 'info', msg: `Dividenden uitkeren: 22%. Salaris: +33% social tax boven op inkomen.` },
         { type: 'warning', msg: `FIE (eenmanszaak): ~55% effectief — gebruik altijd een OÜ in Estland!` },
@@ -7699,37 +7764,42 @@ const AIAdvisorView = ({ entities, activeEntity, invoices, expenses, clients, se
     const now = new Date();
     const yearStart = new Date(now.getFullYear(), 0, 1);
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const entityInvoices = invoices.filter(i => i.entityId === activeEntity.id);
-    const entityExpenses = expenses.filter(e => e.entityId === activeEntity.id);
+    // Zelfde filter als de App: facturen/bonnen zonder entityId horen bij het actieve bedrijf
+    const entityInvoices = invoices.filter(i => !i.entityId || i.entityId === activeEntity.id);
+    const entityExpenses = expenses.filter(e => !e.entityId || e.entityId === activeEntity.id);
 
-    const yearInvoices = entityInvoices.filter(i => i.status === 'paid' && i.paidAt && new Date(i.paidAt) >= yearStart);
-    const yearExpenses = entityExpenses.filter(e => e.status === 'processed' && e.date && new Date(e.date) >= yearStart);
-    const revenue = yearInvoices.reduce((s, i) => s + computeInvoice(i.items).total, 0);
-    const costs = yearExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
-    const btwOwed = yearInvoices.reduce((s, i) => s + computeInvoice(i.items).btwTotal, 0);
-    const btwReclaim = yearExpenses.reduce((s, e) => s + Number(e.btwAmount || 0), 0);
+    // Rekenregels uit finance.js: omzet = verstuurde facturen excl. BTW (factuurstelsel),
+    // kosten excl. BTW, BTW-saldo incl. verlegde BTW (4a/4b) — gelijk aan Winst & verlies/BTW-aangifte.
+    const year = now.getFullYear();
+    const pl = buildProfitLoss({ invoices: entityInvoices, expenses: entityExpenses, year });
+    const yearInvoices = pl.revInv;
+    const yearExpenses = pl.exp;
+    const revenue = pl.revenue;
+    const costs = pl.costs;
+    const vat = buildVatReturn({ invoices: entityInvoices, expenses: entityExpenses, clients, start: yearStart, end: new Date(year + 1, 0, 1) });
+    const btwOwed = vat.owed;
+    const btwReclaim = vat.deductible;
 
-    // Top clients by revenue
+    // Top clients by revenue (excl. BTW)
     const byClient = {};
     yearInvoices.forEach(inv => {
       const c = clients.find(cl => cl.id === inv.clientId);
       if (!c) return;
-      const t = computeInvoice(inv.items).total;
-      byClient[c.name] = (byClient[c.name] || 0) + t;
+      byClient[c.name] = (byClient[c.name] || 0) + computeInvoice(inv.items).subtotal;
     });
     const topClients = Object.entries(byClient).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
-    // Costs by ledger
+    // Costs by ledger (excl. BTW)
     const byLedger = {};
     yearExpenses.forEach(e => {
       const code = e.ledgerAccount || 'overig';
-      byLedger[code] = (byLedger[code] || 0) + Number(e.amount || 0);
+      byLedger[code] = (byLedger[code] || 0) + expenseNet(e);
     });
     const topCosts = Object.entries(byLedger).sort((a, b) => b[1] - a[1]).slice(0, 6);
 
-    // Outstanding
-    const outstanding = entityInvoices.filter(i => i.status === 'sent').reduce((s, i) => s + computeInvoice(i.items).total, 0);
-    const overdue = entityInvoices.filter(i => computeInvoiceStatus(i) === 'overdue').reduce((s, i) => s + computeInvoice(i.items).total, 0);
+    // Openstaand: werkelijk nog te ontvangen (ook deelbetaald/te laat), niet alleen status 'sent'
+    const outstanding = entityInvoices.reduce((s, i) => s + invoiceOpenAmount(i), 0);
+    const overdue = entityInvoices.filter(i => computeInvoiceStatus(i) === 'overdue').reduce((s, i) => s + invoiceOpenAmount(i), 0);
 
     // Jaarprognose op basis van verstreken dagen
     const dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000);
@@ -7743,7 +7813,7 @@ const AIAdvisorView = ({ entities, activeEntity, invoices, expenses, clients, se
       revenue, costs, profit: revenue - costs,
       projRevenue, projCosts, projProfit: projRevenue - projCosts,
       yearFraction: Math.round(yearFraction * 100),
-      btwOwed, btwReclaim, btwNet: btwOwed - btwReclaim,
+      btwOwed, btwReclaim, btwNet: vat.saldo,
       invoiceCount: yearInvoices.length,
       expenseCount: yearExpenses.length,
       topClients, topCosts,
@@ -7760,25 +7830,25 @@ const AIAdvisorView = ({ entities, activeEntity, invoices, expenses, clients, se
 - ${jur.code === 'NL' ? 'BTW' : 'Tax ID'}: ${snapshot.entity.taxNumber || '—'}
 
 OMZET & KOSTEN year-to-date:
-- Omzet (betaalde facturen): ${fmtCurrency(snapshot.revenue, jur.baseCurrency)}
-- Kosten (verwerkte bonnen): ${fmtCurrency(snapshot.costs, jur.baseCurrency)}
+- Omzet excl. BTW (verstuurde facturen, factuurstelsel): ${fmtCurrency(snapshot.revenue, jur.baseCurrency)}
+- Kosten excl. BTW (verwerkte bonnen): ${fmtCurrency(snapshot.costs, jur.baseCurrency)}
 - Winst voor belasting: ${fmtCurrency(snapshot.profit, jur.baseCurrency)}
 - Aantal facturen: ${snapshot.invoiceCount}
 - Aantal bonnen: ${snapshot.expenseCount}
 
 ${jur.salesTax.name}:
-- Verschuldigd over verkopen: ${fmtCurrency(snapshot.btwOwed, jur.baseCurrency)}
+- Verschuldigd (verkopen + verlegde BTW): ${fmtCurrency(snapshot.btwOwed, jur.baseCurrency)}
 - Voorbelasting (terug te vorderen): ${fmtCurrency(snapshot.btwReclaim, jur.baseCurrency)}
 - Saldo: ${fmtCurrency(snapshot.btwNet, jur.baseCurrency)} (${snapshot.btwNet >= 0 ? 'af te dragen' : 'terug te vorderen'})
 
 OPENSTAAND:
-- Verstuurd, nog niet betaald: ${fmtCurrency(snapshot.outstanding, jur.baseCurrency)}
+- Nog te ontvangen (openstaand saldo): ${fmtCurrency(snapshot.outstanding, jur.baseCurrency)}
 - Te laat (overdue): ${fmtCurrency(snapshot.overdue, jur.baseCurrency)}
 
-TOP KLANTEN (year-to-date):
+TOP KLANTEN (year-to-date, excl. BTW):
 ${snapshot.topClients.map(([n, v], i) => `${i + 1}. ${n}: ${fmtCurrency(v, jur.baseCurrency)}`).join('\n')}
 
-KOSTEN PER GROOTBOEK (year-to-date):
+KOSTEN PER GROOTBOEK (year-to-date, excl. BTW):
 ${snapshot.topCosts.map(([code, v]) => {
   const acct = ledgerAccounts.find(a => a.code === code);
   return `- ${code} ${acct?.name || ''}: ${fmtCurrency(v, jur.baseCurrency)}`;
@@ -7948,61 +8018,48 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="page-title">AI Adviseur</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-          {activeEntity.name} · {jur.flag} {jur.name} · {t('ai.subtitle')}
-        </p>
-      </div>
+      <PageHeader title="AI Adviseur" sub={`${activeEntity.name} · ${jur.flag} ${jur.name} · ${t('ai.subtitle')}`} />
 
-      <Card className="p-2 flex gap-1 flex-wrap">
-        {[
-          { id: 'report', label: t('ai.tabReport'), icon: FileBarChart, action: runReport, desc: t('ai.tabReportDesc') },
-          { id: 'advice', label: t('ai.tabAdvice'), icon: Lightbulb, action: runAdvice, desc: `${jur.salesTax.name}-optimalisatie en aftrekposten specifiek voor ${jur.name}` },
-          { id: 'tax', label: t('ai.tabTax'), icon: Calculator, action: null, desc: t('ai.tabTaxDesc') },
-          { id: 'deduct', label: t('ai.tabDeduct'), icon: Percent, action: null, desc: t('ai.tabDeductDesc') },
-          { id: 'chat', label: t('ai.tabChat'), icon: MessageSquare, action: null, desc: t('ai.tabChatDesc') },
-        ].map(t => (
-          <button
-            key={t.id}
-            onClick={() => { setMode(t.id); setOutput(''); }}
-            className="flex-1 min-w-[160px] flex items-center gap-2 px-3 py-2.5 rounded text-sm font-medium transition-colors"
-            style={{
-              background: mode === t.id ? 'var(--btn-primary)' : 'transparent',
-              color: mode === t.id ? '#fff' : 'var(--ink-2)',
-            }}
-          >
-            <t.icon size={14} />
-            {t.label}
-          </button>
-        ))}
-      </Card>
+      {/* Modus-keuze als Segmented (zelfde toggle-stijl als de rest van de app) */}
+      <div className="overflow-x-auto">
+        <Segmented
+          options={[
+            { id: 'report', label: <span className="inline-flex items-center gap-1.5"><FileBarChart size={13} />{t('ai.tabReport')}</span> },
+            { id: 'advice', label: <span className="inline-flex items-center gap-1.5"><Lightbulb size={13} />{t('ai.tabAdvice')}</span> },
+            { id: 'tax', label: <span className="inline-flex items-center gap-1.5"><Calculator size={13} />{t('ai.tabTax')}</span> },
+            { id: 'deduct', label: <span className="inline-flex items-center gap-1.5"><Percent size={13} />{t('ai.tabDeduct')}</span> },
+            { id: 'chat', label: <span className="inline-flex items-center gap-1.5"><MessageSquare size={13} />{t('ai.tabChat')}</span> },
+          ]}
+          value={mode}
+          onChange={id => { setMode(id); setOutput(''); }}
+        />
+      </div>
 
       {/* Snapshot KPI strip */}
       {snapshot && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Card className="p-4">
-            <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>{t('ai.kpiRevenue')}</div>
-            <div className="font-display text-xl mt-1 num">{fmtCurrency(snapshot.revenue, jur.baseCurrency)}</div>
+            <div className="text-[12px] font-medium" style={{ color: 'var(--muted)' }}>{t('ai.kpiRevenue')}</div>
+            <div className="text-xl mt-1"><Money value={snapshot.revenue} currency={jur.baseCurrency} /></div>
           </Card>
           <Card className="p-4">
-            <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>{t('ai.kpiProfit')}</div>
-            <div className="font-display text-xl mt-1 num" style={{ color: snapshot.profit >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtCurrency(snapshot.profit, jur.baseCurrency)}</div>
+            <div className="text-[12px] font-medium" style={{ color: 'var(--muted)' }}>{t('ai.kpiProfit')}</div>
+            <div className="text-xl mt-1"><Money value={snapshot.profit} currency={jur.baseCurrency} style={{ color: snapshot.profit >= 0 ? 'var(--success)' : 'var(--danger)' }} /></div>
           </Card>
           <Card className="p-4">
-            <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>{jur.salesTax.name} saldo</div>
-            <div className="font-display text-xl mt-1 num" style={{ color: snapshot.btwNet >= 0 ? 'var(--accent)' : 'var(--success)' }}>{fmtCurrency(snapshot.btwNet, jur.baseCurrency)}</div>
+            <div className="text-[12px] font-medium" style={{ color: 'var(--muted)' }}>{jur.salesTax.name}-saldo {snapshot.year}</div>
+            <div className="text-xl mt-1"><Money value={snapshot.btwNet} currency={jur.baseCurrency} style={{ color: snapshot.btwNet >= 0 ? 'var(--accent)' : 'var(--success)' }} /></div>
           </Card>
           <Card className="p-4">
-            <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>{t('ai.kpiOutstanding')}</div>
-            <div className="font-display text-xl mt-1 num" style={{ color: snapshot.overdue > 0 ? 'var(--danger)' : 'var(--ink)' }}>{fmtCurrency(snapshot.outstanding, jur.baseCurrency)}</div>
+            <div className="text-[12px] font-medium" style={{ color: 'var(--muted)' }}>{t('ai.kpiOutstanding')}</div>
+            <div className="text-xl mt-1"><Money value={snapshot.outstanding} currency={jur.baseCurrency} style={{ color: snapshot.overdue > 0 ? 'var(--danger)' : 'var(--ink)' }} /></div>
           </Card>
         </div>
       )}
 
       {/* API key warning */}
       {!apiKey && (
-        <Card className="p-4" style={{ background: 'var(--warning-soft)', borderColor: '#E5C088' }}>
+        <Card className="p-4" style={{ background: 'var(--warning-soft)', borderColor: 'var(--warning)' }}>
           <div className="flex items-start gap-3">
             <AlertCircle size={16} className="mt-0.5" style={{ color: 'var(--warning)' }} />
             <div className="text-xs flex-1" style={{ color: 'var(--ink-2)' }}>
@@ -8038,7 +8095,7 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
                     <button key={code} onClick={() => setDeductJur(code)}
                       className="px-3 py-1.5 rounded text-xs font-semibold"
                       title={name}
-                      style={{ background: activeJur === code ? 'var(--btn-primary)' : 'var(--surface-2)', color: activeJur === code ? '#fff' : 'var(--ink-2)' }}>
+                      style={{ background: activeJur === code ? 'var(--btn-primary)' : 'var(--surface-2)', color: activeJur === code ? 'var(--btn-primary-text)' : 'var(--ink-2)' }}>
                       {flag} {code}
                     </button>
                   ))}
@@ -8049,7 +8106,7 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
                   onChange={e => setDeductSearch(e.target.value)}
                   placeholder="Zoek: kleding, laptop, benzine..."
                   className="flex-1 min-w-[200px] px-3 py-1.5 text-sm rounded-md border"
-                  style={{ borderColor: 'var(--border-strong)', background: 'var(--surface-2)' }}
+                  style={{ borderColor: 'var(--border-strong)', background: 'var(--surface-2)', color: 'var(--text)' }}
                 />
               </div>
               <div className="flex gap-3 mt-3 text-[11px] flex-wrap">
@@ -8090,7 +8147,7 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
                           <div className="px-4 pb-4 pt-2 space-y-2 text-xs" style={{ background: STATUS_BG[item.status] }}>
                             {item.tip && (
                               <div className="p-2.5 rounded-md font-mono text-xs" style={{ background: 'var(--surface)', border: '1px solid var(--border-strong)' }}>
-                                <div className="text-[10px] uppercase tracking-wider mb-1 font-sans" style={{ color: 'var(--muted)' }}>Omschrijving op de bon / in boekhouding</div>
+                                <div className="text-[11px] mb-1 font-sans" style={{ color: 'var(--muted)' }}>Omschrijving op de bon / in boekhouding</div>
                                 {item.tip}
                               </div>
                             )}
@@ -8154,11 +8211,11 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
                 <div className="flex gap-5 flex-wrap text-sm">
                   <label className="flex items-center gap-2 cursor-pointer select-none">
                     <input type="checkbox" checked={taxProfile.hasUrencriterium} onChange={e => setTaxProfile(p => ({ ...p, hasUrencriterium: e.target.checked }))} className="rounded" />
-                    <span>1225+ uur/jaar <span style={{ color: 'var(--muted)' }}>(→ zelfstandigenaftrek €3.750)</span></span>
+                    <span>1225+ uur/jaar <span style={{ color: 'var(--muted)' }}>(→ zelfstandigenaftrek €{TAX_NL_2026.zelfstandigenaftrek.toLocaleString('nl-NL')})</span></span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer select-none">
                     <input type="checkbox" checked={taxProfile.isStarter} onChange={e => setTaxProfile(p => ({ ...p, isStarter: e.target.checked }))} className="rounded" />
-                    <span>Starter (eerste 3 jaar) <span style={{ color: 'var(--muted)' }}>(→ +€2.123 startersaftrek)</span></span>
+                    <span>Starter (eerste 3 jaar) <span style={{ color: 'var(--muted)' }}>(→ +€{TAX_NL_2026.startersaftrek.toLocaleString('nl-NL')} startersaftrek)</span></span>
                   </label>
                 </div>
               </Card>
@@ -8175,28 +8232,10 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium block mb-1" style={{ color: 'var(--muted)' }}>Verwachte jaaromzet</label>
-                  <input
-                    type="number"
-                    value={taxRevOverride}
-                    onChange={e => setTaxRevOverride(e.target.value)}
-                    placeholder={String(snapshot.projRevenue)}
-                    className="w-full px-3 py-2 text-sm rounded-md border num"
-                    style={{ borderColor: 'var(--border-strong)', background: 'var(--surface-2)' }}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium block mb-1" style={{ color: 'var(--muted)' }}>Verwachte jaarkosten</label>
-                  <input
-                    type="number"
-                    value={taxCostOverride}
-                    onChange={e => setTaxCostOverride(e.target.value)}
-                    placeholder={String(snapshot.projCosts)}
-                    className="w-full px-3 py-2 text-sm rounded-md border num"
-                    style={{ borderColor: 'var(--border-strong)', background: 'var(--surface-2)' }}
-                  />
-                </div>
+                <Input label="Verwachte jaaromzet (excl. BTW)" type="number" value={taxRevOverride}
+                  onChange={e => setTaxRevOverride(e.target.value)} placeholder={String(snapshot.projRevenue)} />
+                <Input label="Verwachte jaarkosten (excl. BTW)" type="number" value={taxCostOverride}
+                  onChange={e => setTaxCostOverride(e.target.value)} placeholder={String(snapshot.projCosts)} />
               </div>
             </Card>
 
@@ -8205,10 +8244,10 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
               <div className="flex items-start justify-between gap-4 mb-4">
                 <div>
                   <h3 className="font-display text-base font-medium">Belastingberekening {jur.flag} {jur.name}</h3>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Schatting op basis van {snapshot.year}-tarieven</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{jur.code === 'NL' ? `Schatting op basis van ${TAX_NL_2026.year}-tarieven` : 'Indicatieve schatting — tarieven niet jaarlijks bijgewerkt'}</p>
                 </div>
                 <div className="text-right">
-                  <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Opzij zetten</div>
+                  <div className="text-[12px]" style={{ color: 'var(--muted)' }}>Opzij zetten</div>
                   <div className="font-display text-2xl font-medium num" style={{ color: taxResult.totaal > 0 ? 'var(--accent)' : 'var(--success)' }}>
                     {fmt(taxResult.totaal)}
                   </div>
@@ -8224,14 +8263,14 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
                   <div className="flex justify-between border-t pt-1.5" style={{ borderColor: 'var(--border)' }}><span style={{ color: 'var(--muted)' }}>Winst voor aftrek</span><span className="num font-medium">{fmt(taxResult.winst)}</span></div>
                   {taxResult.zelfstandigenAftrek > 0 && <div className="flex justify-between"><span style={{ color: 'var(--accent)' }}>- Zelfstandigenaftrek</span><span className="num" style={{ color: 'var(--accent)' }}>- {fmt(taxResult.zelfstandigenAftrek)}</span></div>}
                   {taxResult.startersAftrek > 0 && <div className="flex justify-between"><span style={{ color: 'var(--accent)' }}>- Startersaftrek</span><span className="num" style={{ color: 'var(--accent)' }}>- {fmt(taxResult.startersAftrek)}</span></div>}
-                  {taxResult.mkbVrijstelling > 0 && <div className="flex justify-between"><span style={{ color: 'var(--accent)' }}>- MKB-vrijstelling (13,31%)</span><span className="num" style={{ color: 'var(--accent)' }}>- {fmt(taxResult.mkbVrijstelling)}</span></div>}
+                  {taxResult.mkbVrijstelling > 0 && <div className="flex justify-between"><span style={{ color: 'var(--accent)' }}>- MKB-winstvrijstelling ({(TAX_NL_2026.mkbWinstvrijstelling * 100).toLocaleString('nl-NL', { minimumFractionDigits: 2 })}%)</span><span className="num" style={{ color: 'var(--accent)' }}>- {fmt(taxResult.mkbVrijstelling)}</span></div>}
                   <div className="flex justify-between border-t pt-1.5 font-medium" style={{ borderColor: 'var(--border)' }}><span>Belastbaar inkomen</span><span className="num">{fmt(taxResult.belastbaarInkomen)}</span></div>
                   <div className="flex justify-between mt-2">
                     <span style={{ color: taxResult.inkomstenbelasting === 0 ? 'var(--success)' : 'var(--ink-2)' }}>Inkomstenbelasting (na kortingen)</span>
                     <span className="num font-medium" style={{ color: taxResult.inkomstenbelasting === 0 ? 'var(--success)' : 'var(--danger)' }}>{fmt(taxResult.inkomstenbelasting)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span style={{ color: 'var(--ink-2)' }}>Zvw-bijdrage (5,32%)</span>
+                    <span style={{ color: 'var(--ink-2)' }}>Zvw-bijdrage ({(TAX_NL_2026.zvw.rate * 100).toLocaleString('nl-NL', { minimumFractionDigits: 2 })}%)</span>
                     <span className="num font-medium" style={{ color: 'var(--warning)' }}>{fmt(taxResult.zvw)}</span>
                   </div>
                   <div className="flex justify-between border-t pt-2 font-semibold text-base" style={{ borderColor: 'var(--border)' }}>
@@ -8244,10 +8283,10 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
                   <div className="flex justify-between"><span style={{ color: 'var(--muted)' }}>Verwachte kosten</span><span className="num" style={{ color: 'var(--danger)' }}>- {fmt(projCost)}</span></div>
                   <div className="flex justify-between border-t pt-2 font-medium" style={{ borderColor: 'var(--border)' }}><span>Winst (belastbare basis)</span><span className="num">{fmt(taxResult.winst)}</span></div>
                   <div className="h-2" />
-                  <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--muted)' }}>Optie A: Persona Física (jijzelf)</div>
+                  <div className="text-xs font-semibold mb-1" style={{ color: 'var(--muted)' }}>Optie A: Persona Física (jijzelf)</div>
                   <div className="flex justify-between"><span style={{ color: 'var(--ink-2)' }}>ISR progressief (0%–25%)</span><span className="num font-semibold" style={{ color: 'var(--danger)' }}>{fmt(taxResult.isrPF)} ({taxResult.effectief}%)</span></div>
                   <div className="h-1" />
-                  <div className="text-xs font-semibold uppercase tracking-wide mb-1 mt-2" style={{ color: 'var(--muted)' }}>Optie B: SRL (bedrijf)</div>
+                  <div className="text-xs font-semibold mb-1 mt-2" style={{ color: 'var(--muted)' }}>Optie B: SRL (bedrijf)</div>
                   <div className="flex justify-between"><span style={{ color: 'var(--ink-2)' }}>ISR flat 27%</span><span className="num font-semibold" style={{ color: 'var(--warning)' }}>{fmt(taxResult.isrSRL)} ({taxResult.effectiefSRL}%)</span></div>
                   <div className="flex justify-between"><span style={{ color: 'var(--muted)' }}>Anticipos maandelijks (1,5% omzet)</span><span className="num">{fmt(taxResult.anticiposSRL)}/jaar</span></div>
                 </>}
@@ -8332,12 +8371,12 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
                     <div className="grid grid-cols-3 gap-3">
                       {cards.map(({ code, info, card }) => card && (
                         <div key={code} className="rounded-lg p-3 text-center" style={{ background: 'var(--surface-2)', border: code === jur.code ? '2px solid var(--accent)' : '1px solid var(--border)' }}>
-                          {code === jur.code && <div className="text-[9px] uppercase tracking-wider mb-1 font-semibold" style={{ color: 'var(--accent)' }}>Jouw land</div>}
+                          {code === jur.code && <div className="text-[11px] mb-1 font-semibold" style={{ color: 'var(--accent)' }}>Jouw land</div>}
                           <div className="text-2xl mb-1">{info.flag}</div>
                           <div className="font-semibold text-sm">{info.name}</div>
                           <div className="text-[10px] mb-2" style={{ color: 'var(--muted)' }}>{card.struct}</div>
                           <div className="font-display text-xl num font-medium" style={{ color: card.color }}>
-                            {card.tax === 0 ? '€0' : `€${card.tax.toLocaleString('nl-NL')}`}
+                            <Money value={card.tax} />
                           </div>
                           <div className="text-[11px] mb-2" style={{ color: 'var(--muted)' }}>{card.eff}% van omzet</div>
                           <div className="text-[10px] space-y-0.5 text-left border-t pt-2" style={{ borderColor: 'var(--border)', color: 'var(--ink-2)' }}>
@@ -8349,12 +8388,12 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
                     </div>
                     <div className="space-y-2 text-xs p-3 rounded-md" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--ink-2)' }}>
                       <div className="font-semibold text-sm mb-1" style={{ color: 'var(--ink)' }}>Wanneer wordt welk land interessant?</div>
-                      <div><span className="font-medium" style={{ color: 'var(--accent)' }}>Nederland ZZP</span> is verrassend gunstig bij winst onder ~€40k. Dankzij zelfstandigenaftrek, MKB-vrijstelling en heffingskortingen betaal je bij lage winst nauwelijks inkomstenbelasting — alleen Zvw (5,32%). Nadeel: strenge regels, €20k KOR-grens, logo-eis op kleding.</div>
+                      <div><span className="font-medium" style={{ color: 'var(--accent)' }}>Nederland ZZP</span> is verrassend gunstig bij winst onder ~€40k. Dankzij zelfstandigenaftrek, MKB-vrijstelling en heffingskortingen betaal je bij lage winst nauwelijks inkomstenbelasting — alleen Zvw (4,85%). Let op: de zelfstandigenaftrek is in 2026 nog maar €1.200. Nadeel: strenge regels, logo-eis op kleding.</div>
                       <div><span className="font-medium" style={{ color: 'var(--warning)' }}>Dominicaanse Republiek</span> wordt interessanter bij hogere winsten (€60k+). Als individu (Persona Física) betaal je progressief 0%–25% — bij lage inkomens redelijk, bij hoge inkomens loopt het op. Als bedrijf (SRL) betaal je 27% flat, wat bij €20k winst juist nadelig is. Voordeel: soepele aftrekposten, lage levenskosten, geen vermogensbelasting.</div>
                       <div><span className="font-medium" style={{ color: 'var(--success)' }}>Estland OÜ</span> is ideaal voor remote werkers: zolang je winst in de BV laat, betaal je 0%. Pas als je dividend uitkeert, betaal je 22%. Je kunt winst jaren laten groeien en dan pas opnemen als het jou uitkomt — of herinvesteren zonder belasting. Geen verplicht salaris.</div>
                       <div><span className="font-medium" style={{ color: 'var(--ink)' }}>Dubai / UAE</span> kent 0% persoonlijke inkomstenbelasting. Vennootschapsbelasting is 9% maar pas boven ~€102k winst. Hoge levenskosten, maar enorm aantrekkelijk bij hogere inkomens.</div>
                       <div className="pt-1 border-t" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-                        Alle bedragen zijn indicatief — lokale aftrekposten, structuur en adviseur kunnen sterk afwijken.
+                        NL op basis van 2026-tarieven; overige landen zijn grove schattingen. Alle bedragen zijn indicatief — lokale aftrekposten, structuur en adviseur kunnen sterk afwijken.
                       </div>
                     </div>
                   </div>
@@ -8367,7 +8406,7 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
               <Card className="p-6 animate-in">
                 <div className="flex items-center gap-2 mb-4 pb-4 border-b" style={{ borderColor: 'var(--border)' }}>
                   <Sparkles size={16} style={{ color: 'var(--accent)' }} />
-                  <div className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--muted)' }}>AI Belastinguitleg · {new Date().toLocaleString('nl-NL')}</div>
+                  <div className="text-xs font-medium" style={{ color: 'var(--muted)' }}>AI-belastinguitleg · {new Date().toLocaleString('nl-NL')}</div>
                 </div>
                 <div className="prose prose-sm max-w-none" style={{ color: 'var(--ink)' }}>{renderMarkdown(output)}</div>
               </Card>
@@ -8382,21 +8421,20 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
           {chatHistory.length > 0 && (
             <div className="space-y-3 mb-4 max-h-96 overflow-y-auto scrollable">
               {chatHistory.map((msg, i) => (
-                <div key={i} className={`p-3 rounded-lg text-sm ${msg.role === 'user' ? 'ml-8' : 'mr-8'}`} style={{ background: msg.role === 'user' ? 'var(--btn-primary)' : 'var(--surface-2)', color: msg.role === 'user' ? '#fff' : 'var(--ink)' }}>
+                <div key={i} className={`p-3 rounded-lg text-sm ${msg.role === 'user' ? 'ml-8' : 'mr-8'}`} style={{ background: msg.role === 'user' ? 'var(--btn-primary)' : 'var(--surface-2)', color: msg.role === 'user' ? 'var(--btn-primary-text)' : 'var(--ink)' }}>
                   {msg.role === 'user' ? msg.content : renderMarkdown(msg.content)}
                 </div>
               ))}
             </div>
           )}
           <div className="flex gap-2">
-            <input
+            <Input
+              className="flex-1"
               type="text"
               value={chatInput}
               onChange={e => setChatInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && !loading && sendChat()}
               placeholder={t('ai.chatPlaceholder')}
-              className="flex-1 px-3 py-2.5 text-sm bg-white rounded-md border"
-              style={{ borderColor: 'var(--border-strong)' }}
               disabled={loading}
             />
             <Button onClick={sendChat} disabled={loading || !chatInput.trim()}>
@@ -8426,7 +8464,7 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
       )}
 
       {error && (
-        <Card className="p-4" style={{ background: 'var(--danger-soft)', borderColor: '#E5B0B0' }}>
+        <Card className="p-4" style={{ background: 'var(--danger-soft)', borderColor: 'var(--danger)' }}>
           <div className="flex items-start gap-3 text-sm" style={{ color: 'var(--danger)' }}>
             <AlertCircle size={16} className="mt-0.5" />
             <div><strong>Fout bij AI-aanroep:</strong> {error}</div>
@@ -8438,8 +8476,8 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
         <Card className="p-6 md:p-8 animate-in">
           <div className="flex items-center gap-2 mb-4 pb-4 border-b" style={{ borderColor: 'var(--border)' }}>
             <Sparkles size={16} style={{ color: 'var(--accent)' }} />
-            <div className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
-              AI Analyse · {new Date().toLocaleString('nl-NL')}
+            <div className="text-xs font-medium" style={{ color: 'var(--muted)' }}>
+              AI-analyse · {new Date().toLocaleString('nl-NL')}
             </div>
           </div>
           <div className="prose prose-sm max-w-none" style={{ color: 'var(--ink)' }}>
@@ -8507,7 +8545,7 @@ function IntegratiesSection({ importToken, generateImportToken }) {
 
         {/* Token sectie */}
         <div className="space-y-3">
-          <div style={{ color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          <div style={{ color: 'var(--text-2)', fontSize: '12.5px', fontWeight: '600' }}>
             Jouw API-token
           </div>
           {importToken ? (
@@ -8542,7 +8580,7 @@ function IntegratiesSection({ importToken, generateImportToken }) {
               onClick={handleGenerate}
               disabled={generating}
               className="px-4 py-2 text-sm rounded-lg flex items-center gap-2"
-              style={{ background: 'var(--btn-primary)', color: '#fff', opacity: generating ? 0.6 : 1, cursor: generating ? 'wait' : 'pointer' }}
+              style={{ background: 'var(--btn-primary)', color: 'var(--btn-primary-text)', opacity: generating ? 0.6 : 1, cursor: generating ? 'wait' : 'pointer' }}
             >
               <RefreshCw size={13} className={generating ? 'animate-spin' : ''} />
               {importToken ? 'Vernieuw token' : 'Genereer token'}
@@ -8557,8 +8595,8 @@ function IntegratiesSection({ importToken, generateImportToken }) {
 
         {/* Webhook URL */}
         <div className="space-y-2">
-          <div style={{ color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Webhook URL (gebruik in Make)
+          <div style={{ color: 'var(--text-2)', fontSize: '12.5px', fontWeight: '600' }}>
+            Webhook-URL (gebruik in Make)
           </div>
           <div className="flex items-center gap-2">
             <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg font-mono text-xs"
@@ -8585,23 +8623,23 @@ function IntegratiesSection({ importToken, generateImportToken }) {
         </h3>
         <ol className="space-y-3 text-sm" style={{ color: 'var(--text-2)' }}>
           <li className="flex gap-3">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: '#fff' }}>1</span>
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: 'var(--btn-primary-text)' }}>1</span>
             <span>Maak een nieuw scenario in Make.com. Voeg module toe: <strong>Gmail → Watch Emails</strong>. Kies label <strong>Facturen</strong>, filter op <em>Ongelezen</em>.</span>
           </li>
           <li className="flex gap-3">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: '#fff' }}>2</span>
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: 'var(--btn-primary-text)' }}>2</span>
             <span>Voeg module toe: <strong>Gmail → Mark as Read</strong> (zodat elke factuur maar één keer verwerkt wordt).</span>
           </li>
           <li className="flex gap-3">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: '#fff' }}>3</span>
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: 'var(--btn-primary-text)' }}>3</span>
             <span>Voeg module toe: <strong>OpenAI → Create a Completion</strong>. Gebruik de e-mailtekst als input met onderstaand JSON-formaat als output (zie veldlijst).</span>
           </li>
           <li className="flex gap-3">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: '#fff' }}>4</span>
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: 'var(--btn-primary-text)' }}>4</span>
             <span>Voeg module toe: <strong>HTTP → Make a request</strong>. Methode: <code className="px-1 rounded" style={{ background: 'var(--surface-2)' }}>POST</code>, URL: de webhook URL hierboven. Header: <code className="px-1 rounded" style={{ background: 'var(--surface-2)' }}>Authorization: Bearer &lt;jouw token&gt;</code>.</span>
           </li>
           <li className="flex gap-3">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: '#fff' }}>5</span>
+            <span className="flex-shrink-0 w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: 'var(--btn-primary)', color: 'var(--btn-primary-text)' }}>5</span>
             <span>Zet de scenario aan en test met een echte factuur-mail in het label.</span>
           </li>
         </ol>
@@ -8715,15 +8753,15 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
 
   return (
     <div className="space-y-5">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="page-title">{t('settings.title')}</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{t('settings.subtitle')}</p>
-        </div>
-        <Button onClick={save}>
-          {savedFlash ? <><Check size={14} /> {t('settings.saved')}</> : <><Save size={14} /> {t('settings.save')}</>}
-        </Button>
-      </div>
+      <PageHeader
+        title={t('settings.title')}
+        sub={t('settings.subtitle')}
+        actions={
+          <Button onClick={save}>
+            {savedFlash ? <><Check size={14} /> {t('settings.saved')}</> : <><Save size={14} /> {t('settings.save')}</>}
+          </Button>
+        }
+      />
 
       {/* Mobile: compact dropdown nav */}
       <div className="md:hidden">
@@ -8779,10 +8817,11 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
               <label style={{ position: 'relative', cursor: 'pointer', flexShrink: 0 }} title={t('profile.avatarTooltip')}>
                 <div style={{
                   width: '64px', height: '64px', borderRadius: '50%', overflow: 'hidden',
-                  background: profile?.avatar_url ? 'transparent' : 'linear-gradient(135deg, #4f46e5, #818cf8)',
+                  // Accent-tokens i.p.v. vaste indigo (zelfde avatar als in de sidebar)
+                  background: profile?.avatar_url ? 'transparent' : 'linear-gradient(135deg, var(--accent), var(--accent-2))',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '24px', fontWeight: '700', color: '#fff',
-                  boxShadow: '0 4px 12px rgba(79,70,229,0.35)',
+                  fontSize: '24px', fontWeight: '700', color: 'var(--btn-primary-text)',
+                  boxShadow: '0 4px 12px var(--accent-glow)',
                 }}>
                   {profile?.avatar_url
                     ? <img src={profile.avatar_url} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -8874,23 +8913,15 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                     placeholder="Mijn Bedrijf BV"
                   />
                   {profile?.role === 'platform_admin' ? (
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>{t('profile.plan')}</label>
-                      <select
-                        value={orgPlan}
-                        onChange={e => setOrgPlan(e.target.value)}
-                        className="w-full px-3 py-2 text-sm rounded border"
-                        style={{ background: 'var(--bg)', color: 'var(--text)', borderColor: 'var(--border)' }}
-                      >
-                        <option value="starter">Starter</option>
-                        <option value="pro">Pro</option>
-                        <option value="enterprise">Enterprise</option>
-                      </select>
-                    </div>
+                    <Select label={t('profile.plan')} value={orgPlan} onChange={e => setOrgPlan(e.target.value)}>
+                      <option value="starter">Starter</option>
+                      <option value="pro">Pro</option>
+                      <option value="enterprise">Enterprise</option>
+                    </Select>
                   ) : (
                     <div className="space-y-1">
                       <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>{t('profile.plan')}</label>
-                      <div className="px-3 py-2 text-sm rounded border capitalize" style={{ background: 'var(--bg-2)', color: 'var(--text)', borderColor: 'var(--border)' }}>
+                      <div className="px-3 py-2 text-sm rounded border capitalize" style={{ background: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)' }}>
                         {organization.plan || 'starter'}
                       </div>
                     </div>
@@ -8963,7 +8994,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                 <Input label={t('jur.countryName')} value={draft.customJurisdiction?.countryName || ''} onChange={e => update('customJurisdiction.countryName', e.target.value)} placeholder="bijv. Singapore" />
                 <Input label={t('jur.taxType')} value={draft.customJurisdiction?.taxName || ''} onChange={e => update('customJurisdiction.taxName', e.target.value)} placeholder="bijv. GST, VAT, TVA" />
                 <Input label={t('jur.standardRate')} type="number" min="0" max="100" step="0.1" value={draft.customJurisdiction?.standardRate ?? ''} onChange={e => update('customJurisdiction.standardRate', Number(e.target.value))} placeholder="bijv. 9" />
-                <Select label={t('jur.baseCurrencyLabel', t('currency.baseLabel'))} value={draft.customJurisdiction?.currency || 'EUR'} onChange={e => { update('customJurisdiction.currency', e.target.value); update('baseCurrency', e.target.value); }}>
+                <Select label={t('jur.baseCurrencyLabel')} value={draft.customJurisdiction?.currency || 'EUR'} onChange={e => { update('customJurisdiction.currency', e.target.value); update('baseCurrency', e.target.value); }}>
                   {SUPPORTED_CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.symbol} {c.code} — {c.name}</option>)}
                 </Select>
                 <Select label={t('jur.filingPeriod')} value={draft.customJurisdiction?.filingPeriod || 'quarterly'} onChange={e => update('customJurisdiction.filingPeriod', e.target.value)}>
@@ -9054,7 +9085,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
                         className="px-3 py-2 text-xs font-medium rounded border"
                         style={{
                           background: active ? 'var(--accent)' : 'var(--surface-2)',
-                          color: active ? '#fff' : 'var(--text-2)',
+                          color: active ? 'var(--btn-primary-text)' : 'var(--text-2)',
                           borderColor: active ? 'var(--accent)' : 'var(--border-2)',
                         }}
                       >
@@ -9245,8 +9276,8 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
 
           <Card className="p-6 space-y-5">
             <div className="flex items-center gap-2">
-              <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(37,211,102,0.13)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <MessageSquare size={16} style={{ color: '#25d366' }} />
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--success-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <MessageSquare size={16} style={{ color: 'var(--success)' }} />
               </div>
               <div>
                 <h3 className="font-display text-lg font-medium">WhatsApp</h3>
@@ -9267,7 +9298,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
               onChange={e => update('email.whatsappMessage', e.target.value)}
               hint="Variabelen: {{contact}} {{number}} {{amount}} {{dueDate}} {{iban}}"
             />
-            <div className="rounded-md p-3 text-xs flex items-start gap-2" style={{ background: 'rgba(37,211,102,0.08)', color: '#16a34a' }}>
+            <div className="rounded-md p-3 text-xs flex items-start gap-2" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
               <MessageSquare size={13} className="mt-0.5 shrink-0" />
               <div>{t('email.waNote')}</div>
             </div>
@@ -9282,17 +9313,16 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
           <div className="space-y-2">
             {draft.categories.map((cat, idx) => (
               <div key={idx} className="flex gap-2">
-                <input
+                <Input
+                  className="flex-1"
                   value={cat}
                   onChange={e => {
                     const cs = [...draft.categories];
                     cs[idx] = e.target.value;
                     update('categories', cs);
                   }}
-                  className="flex-1 px-3 py-2 text-sm bg-white rounded-md border"
-                  style={{ borderColor: 'var(--border-strong)' }}
                 />
-                <button onClick={() => update('categories', draft.categories.filter((_, i) => i !== idx))} className="p-2 rounded hover:bg-red-50">
+                <button onClick={() => update('categories', draft.categories.filter((_, i) => i !== idx))} className="p-2 rounded hover:bg-[color:var(--danger-soft)]" title="Verwijderen">
                   <Trash2 size={14} style={{ color: 'var(--danger)' }} />
                 </button>
               </div>
@@ -9467,22 +9497,12 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
             <h3 className="font-display text-lg font-medium">{t('settings.appearance')}</h3>
             <div className="space-y-2">
               <label className="text-xs font-medium" style={{ color: 'var(--muted)' }}>{t('settings.language')}</label>
-              <div className="flex flex-wrap gap-2 mt-1">
-                {Object.entries(LANGUAGES).map(([code, name]) => (
-                  <button
-                    key={code}
-                    onClick={() => setLang(code)}
-                    className="px-5 py-2 rounded-lg border-2 text-sm font-semibold transition-all"
-                    style={{
-                      borderColor: lang === code ? 'var(--btn-primary)' : 'var(--border)',
-                      background: lang === code ? 'var(--btn-primary)' : 'transparent',
-                      color: lang === code ? '#fff' : 'var(--text)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {name}
-                  </button>
-                ))}
+              <div className="mt-1">
+                <Segmented
+                  options={Object.entries(LANGUAGES).map(([code, name]) => ({ id: code, label: name }))}
+                  value={lang}
+                  onChange={setLang}
+                />
               </div>
               <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
                 {t('settings.languageHint')}
@@ -9635,15 +9655,12 @@ const LinksView = () => {
   const categories = [...new Set(LINKS.map(l => l.category))];
   return (
     <div className="space-y-8 animate-in">
-      <div>
-        <h1 className="font-display text-2xl font-medium mb-1" style={{ color: 'var(--ink)' }}>Koppelingen</h1>
-        <p className="text-sm" style={{ color: 'var(--muted)' }}>Snelle toegang tot externe tools en diensten.</p>
-      </div>
+      <PageHeader title="Koppelingen" sub="Snelle toegang tot externe tools en diensten." />
 
       {categories.map(cat => (
         <div key={cat}>
           <div className="flex items-center gap-3 mb-4">
-            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--muted)' }}>{cat}</span>
+            <span className="text-[12.5px] font-semibold" style={{ color: 'var(--muted)' }}>{cat}</span>
             <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -9653,7 +9670,7 @@ const LinksView = () => {
                 <Card key={link.id} className="p-5 flex flex-col gap-4 hover:shadow-md transition-shadow">
                   <div className="flex items-start justify-between gap-3">
                     <Icon />
-                    <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: 'var(--surface-2)', color: 'var(--muted)', border: '1px solid var(--border)' }}>
+                    <span className="text-[11px] font-medium px-2 py-0.5 rounded-full" style={{ background: 'var(--surface-2)', color: 'var(--muted)', border: '1px solid var(--border)' }}>
                       {link.category}
                     </span>
                   </div>
@@ -9666,7 +9683,7 @@ const LinksView = () => {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-opacity hover:opacity-80 self-start"
-                    style={{ background: 'var(--btn-primary)', color: '#fff' }}
+                    style={{ background: 'var(--btn-primary)', color: 'var(--btn-primary-text)' }}
                   >
                     <Globe size={13} />
                     Openen
