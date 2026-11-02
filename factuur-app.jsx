@@ -9080,7 +9080,9 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
 // ============================================================================
 const IMPORT_FUNCTION_URL = 'https://iomsezoerbldjwyztlkr.supabase.co/functions/v1/import-invoice';
 
-function IntegratiesSection({ importToken, generateImportToken }) {
+function IntegratiesSection({ importTokenActive, generateImportToken }) {
+  // De token is alleen direct na aanmaken bekend (in de database staat enkel de hash).
+  const [importToken, setImportToken] = useState(null);
   const [copied, setCopied] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -9101,7 +9103,8 @@ function IntegratiesSection({ importToken, generateImportToken }) {
 
   const handleGenerate = async () => {
     setGenerating(true);
-    await generateImportToken();
+    const token = await generateImportToken();
+    if (token) setImportToken(token);
     setGenerating(false);
     setShowToken(true);
   };
@@ -9150,7 +9153,7 @@ function IntegratiesSection({ importToken, generateImportToken }) {
             </div>
           ) : (
             <div className="rounded-md p-3 text-sm" style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', color: 'var(--muted)' }}>
-              Nog geen token gegenereerd.
+              {importTokenActive ? 'Er is een token actief. Hij is om veiligheidsredenen niet meer in te zien; vernieuw hem als je hem kwijt bent.' : 'Nog geen token gegenereerd.'}
             </div>
           )}
           <div className="flex items-center gap-2">
@@ -9161,9 +9164,9 @@ function IntegratiesSection({ importToken, generateImportToken }) {
               style={{ background: 'var(--btn-primary)', color: 'var(--btn-primary-text)', opacity: generating ? 0.6 : 1, cursor: generating ? 'wait' : 'pointer' }}
             >
               <RefreshCw size={13} className={generating ? 'animate-spin' : ''} />
-              {importToken ? 'Vernieuw token' : 'Genereer token'}
+              {importToken || importTokenActive ? 'Vernieuw token' : 'Genereer token'}
             </button>
-            {importToken && (
+            {(importToken || importTokenActive) && (
               <span className="text-xs" style={{ color: 'var(--muted)' }}>
                 Vernieuwen maakt het oude token ongeldig.
               </span>
@@ -9250,7 +9253,7 @@ function IntegratiesSection({ importToken, generateImportToken }) {
   );
 }
 
-const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntities, clients, initialSection, updateProfile, profile, user, organization, updateOrganization, saveUserApiKeys, generateImportToken, importToken }) => {
+const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntities, clients, initialSection, updateProfile, profile, user, organization, updateOrganization, saveUserApiKeys, generateImportToken, importTokenActive }) => {
   const { t, lang, setLang, LANGUAGES } = useLang();
   const [section, setSection] = useState(initialSection || 'jurisdiction');
   const [draft, setDraft] = useState(settings);
@@ -9769,7 +9772,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
       )}
 
       {section === 'integraties' && (
-        <IntegratiesSection importToken={importToken} generateImportToken={generateImportToken} />
+        <IntegratiesSection importTokenActive={importTokenActive} generateImportToken={generateImportToken} />
       )}
 
       {section === 'reminders' && (
@@ -10561,7 +10564,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
             <LinksView />
           )}
           {activeTab === 'settings' && (
-            <SettingsView settings={effectiveSettings} setSettings={setSettings} activeEntity={activeEntity} entities={entities} setEntities={setEntities} clients={clients} initialSection={settingsOpenSection} updateProfile={updateProfile} profile={profile} user={user} organization={organization} updateOrganization={updateOrganization} saveUserApiKeys={saveUserApiKeys} generateImportToken={generateImportToken} importToken={userApiKeys.importToken} />
+            <SettingsView settings={effectiveSettings} setSettings={setSettings} activeEntity={activeEntity} entities={entities} setEntities={setEntities} clients={clients} initialSection={settingsOpenSection} updateProfile={updateProfile} profile={profile} user={user} organization={organization} updateOrganization={updateOrganization} saveUserApiKeys={saveUserApiKeys} generateImportToken={generateImportToken} importTokenActive={userApiKeys.importTokenActive} />
           )}
         </div>
       </main>

@@ -8,3 +8,5 @@ dist
 public/*statement*.csv
 .DS_Store
 .harness*
+
+.claude/

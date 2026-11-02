@@ -397,7 +397,8 @@ const TABLE_CONFIG = {
   purchase_invoices: { table: 'purchase_invoices', mode: 'array', fromDB: pinvFromDB, toDB: pinvToDB, select: '*' },
   userApiKeys: {
     table: 'user_settings', mode: 'user_single',
-    fromDB: (row) => ({ ...(row.data || {}), importToken: row.api_token || null }),
+    // Alleen de hash van de import-token staat in de database; de token zelf wordt één keer getoond.
+    fromDB: (row) => ({ ...(row.data || {}), importTokenActive: !!row.api_token_hash }),
   },
 }
 
