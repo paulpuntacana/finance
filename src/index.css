@@ -122,3 +122,37 @@ input:focus, textarea:focus, select:focus {
     padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important;
   }
 }
+
+/* ── Gedeelde componentstijlen (gebruikt door src/ui.jsx en alle schermen) ── */
+.num { font-family: var(--font-num); font-feature-settings: 'tnum' 1, 'zero' 1; letter-spacing: -0.01em; }
+/* Factuur-preview blijft in Inter, gelijk aan de PDF */
+.invoice-printable, .quote-printable { font-family: 'Inter', -apple-system, sans-serif; }
+.money { font-family: var(--font-num); font-feature-settings: 'tnum' 1, 'zero' 1; letter-spacing: -0.02em; white-space: nowrap; }
+.money .cur { font-size: 0.72em; color: var(--text-3); margin-right: 0.18em; font-weight: 500; }
+.money .cents { font-size: 0.78em; opacity: 0.6; font-weight: inherit; }
+.money.neg { color: var(--danger); }
+
+/* ── Pagina-kop ── */
+.page-title { font-size: 26px; line-height: 1.15; font-weight: 650; letter-spacing: -0.03em; color: var(--text); }
+.page-sub { font-size: 13px; color: var(--text-3); margin-top: 4px; }
+@media (min-width: 768px) { .page-title { font-size: 30px; } }
+
+/* ── Tabellen (data-dicht, rustig, cijfers rechts) ── */
+.ledger { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.ledger thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); text-align: left; font-weight: 500; font-size: 12px; color: var(--text-3); padding: 10px 14px; border-bottom: 1px solid var(--border-2); white-space: nowrap; }
+.ledger tbody td { padding: 11px 14px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: middle; }
+.ledger tbody tr { transition: background 0.12s; }
+.ledger tbody tr:hover { background: var(--surface-2); }
+.ledger tbody tr:last-child td { border-bottom: none; }
+.ledger .r { text-align: right; }
+.ledger tfoot td { padding: 12px 14px; border-top: 1px solid var(--border-2); font-weight: 600; }
+
+/* ── Segmented control (filters) ── */
+.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); flex-wrap: wrap; }
+.seg button { border: 0; background: transparent; color: var(--text-2); font-size: 12.5px; font-weight: 500; padding: 5px 11px; border-radius: 7px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: background .12s, color .12s; }
+.seg button:hover { color: var(--text); }
+.seg button[aria-pressed="true"] { background: var(--seg-active); color: var(--text); box-shadow: var(--shadow-1); }
+.seg .count { font-family: var(--font-num); font-size: 11px; color: var(--text-3); }
+
+/* ── Kbd ── */
+kbd { font-family: var(--font-num); font-size: 10.5px; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text-3); }

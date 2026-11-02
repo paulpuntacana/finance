@@ -8,7 +8,7 @@ import {
   CheckCircle2, CircleDashed, FileWarning, Wallet, Inbox,
   BookOpen, Sparkles, RefreshCw, Globe, Hash, ArrowRight, Zap, FileBarChart,
   Network, Briefcase, Percent, Tag, Lightbulb, Wand2, Brain, MessageSquare, Star,
-  FileCheck2, ShieldCheck, ScanSearch, CloudOff, LogOut, Moon, Sun, Paperclip, ShoppingCart, Calculator,
+  FileCheck2, ShieldCheck, ScanSearch, CloudOff, Compass, LogOut, Moon, Sun, Paperclip, ShoppingCart, Calculator,
   AlignLeft, AlignCenter, AlignRight, Key, Link2, Landmark,
 } from 'lucide-react';
 import { useAuth, useCloudStorage, useSyncStatus } from './src/AuthProvider';
@@ -22,7 +22,9 @@ import CreditManagementView from './src/CreditManagementView';
 import BoekhoudenView from './src/BoekhoudenView';
 import BankView from './src/BankView';
 import CommandPalette from './src/CommandPalette';
+import { Button, Input, Textarea, Select, Badge, Modal, Card, EmptyState, Money, PageHeader, Segmented } from './src/ui';
 import DataCheckView from './src/DataCheckView';
+import StructuurView from './src/StructuurView';
 import { findDataIssues } from './src/finance';
 import { VizStyles, KpiTile, YearChart, CostDonut, VatPot, AgingBar, TopClients } from './src/DashboardCharts';
 import ImportView from './src/ImportView';
@@ -100,37 +102,7 @@ const ThemeStyles = () => (
     .font-mono { font-family: var(--font-num); }
 
     /* ── Bedragen: €-teken klein/gedempt, centen lichter — leest als een kasboek ── */
-    /* Factuur-preview blijft in Inter, gelijk aan de PDF */
-    .invoice-printable, .quote-printable { font-family: 'Inter', -apple-system, sans-serif; }
-    .money { font-family: var(--font-num); font-feature-settings: 'tnum' 1, 'zero' 1; letter-spacing: -0.02em; white-space: nowrap; }
-    .money .cur { font-size: 0.72em; color: var(--text-3); margin-right: 0.18em; font-weight: 500; }
-    .money .cents { font-size: 0.78em; opacity: 0.6; font-weight: inherit; }
-    .money.neg { color: var(--danger); }
-
-    /* ── Pagina-kop ── */
-    .page-title { font-size: 26px; line-height: 1.15; font-weight: 650; letter-spacing: -0.03em; color: var(--text); }
-    .page-sub { font-size: 13px; color: var(--text-3); margin-top: 4px; }
-    @media (min-width: 768px) { .page-title { font-size: 30px; } }
-
-    /* ── Tabellen (data-dicht, rustig, cijfers rechts) ── */
-    .ledger { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
-    .ledger thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); text-align: left; font-weight: 500; font-size: 12px; color: var(--text-3); padding: 10px 14px; border-bottom: 1px solid var(--border-2); white-space: nowrap; }
-    .ledger tbody td { padding: 11px 14px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: middle; }
-    .ledger tbody tr { transition: background 0.12s; }
-    .ledger tbody tr:hover { background: var(--surface-2); }
-    .ledger tbody tr:last-child td { border-bottom: none; }
-    .ledger .r { text-align: right; }
-    .ledger tfoot td { padding: 12px 14px; border-top: 1px solid var(--border-2); font-weight: 600; }
-
-    /* ── Segmented control (filters) ── */
-    .seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); flex-wrap: wrap; }
-    .seg button { border: 0; background: transparent; color: var(--text-2); font-size: 12.5px; font-weight: 500; padding: 5px 11px; border-radius: 7px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: background .12s, color .12s; }
-    .seg button:hover { color: var(--text); }
-    .seg button[aria-pressed="true"] { background: var(--seg-active); color: var(--text); box-shadow: var(--shadow-1); }
-    .seg .count { font-family: var(--font-num); font-size: 11px; color: var(--text-3); }
-
-    /* ── Kbd ── */
-    kbd { font-family: var(--font-num); font-size: 10.5px; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text-3); }
+    /* Money, page-title, ledger, seg, kbd: zie src/index.css */
 
     input, textarea, select {
       background: var(--surface) !important;
@@ -1819,185 +1791,7 @@ const NineDotsIcon = ({ size = 16, color = 'white', animated = false }) => {
   );
 };
 
-const Button = ({ variant = 'primary', size = 'md', className = '', style, children, ...props }) => {
-  const base = 'inline-flex items-center justify-center gap-1.5 font-medium transition-[background,border-color,color,box-shadow,transform] duration-150 disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap active:translate-y-px select-none';
-  const sizes = {
-    sm: 'h-8 px-3 text-[12.5px] rounded-[8px]',
-    md: 'h-9 px-3.5 text-[13.5px] rounded-[9px]',
-    lg: 'h-11 px-5 text-[14.5px] rounded-[10px]',
-  };
-  const styles = {
-    primary: { background: 'var(--accent)', color: '#fff', boxShadow: '0 1px 0 rgba(255,255,255,0.18) inset, 0 1px 2px rgba(0,0,0,0.25)' },
-    secondary: { background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border-2)' },
-    ghost: { background: 'transparent', color: 'var(--text-2)' },
-    danger: { background: 'var(--danger-soft)', color: 'var(--danger)', border: '1px solid transparent' },
-    outline: { background: 'transparent', color: 'var(--text)', border: '1px solid var(--border-2)' },
-  };
-  const hover = {
-    primary: 'hover:brightness-110',
-    secondary: 'hover:border-[color:var(--border-3)]',
-    ghost: 'hover:bg-[color:var(--surface-2)] hover:text-[color:var(--text)]',
-    danger: 'hover:border-[color:var(--danger)]',
-    outline: 'hover:bg-[color:var(--surface-2)]',
-  };
-  return (
-    <button
-      style={{ ...styles[variant], ...style }}
-      className={`${base} ${sizes[size]} ${hover[variant] || ''} ${className}`}
-      {...props}
-    >
-      {children}
-    </button>
-  );
-};
-
-const fieldLabel = 'block text-[12.5px] font-medium mb-1.5';
-const fieldBase = 'w-full h-9 px-3 text-[13.5px] rounded-[9px] border transition-[border-color,box-shadow]';
-
-const Input = ({ label, hint, error, className = '', ...props }) => (
-  <div className={className}>
-    {label && <label className={fieldLabel} style={{ color: 'var(--text-2)' }}>{label}</label>}
-    <input
-      {...props}
-      aria-invalid={!!error}
-      className={fieldBase}
-      style={{ borderColor: error ? 'var(--danger)' : 'var(--border-2)', background: 'var(--surface)', color: 'var(--text)' }}
-    />
-    {hint && <p className="text-xs mt-1.5" style={{ color: 'var(--text-3)' }}>{hint}</p>}
-    {error && <p className="text-xs mt-1.5" style={{ color: 'var(--danger)' }}>{error}</p>}
-  </div>
-);
-
-const Textarea = ({ label, hint, className = '', rows = 3, ...props }) => (
-  <div className={className}>
-    {label && <label className={fieldLabel} style={{ color: 'var(--text-2)' }}>{label}</label>}
-    <textarea
-      rows={rows}
-      {...props}
-      className="w-full px-3 py-2 text-[13.5px] rounded-[9px] border transition-[border-color,box-shadow] resize-y"
-      style={{ borderColor: 'var(--border-2)', background: 'var(--surface)', color: 'var(--text)', minHeight: 64 }}
-    />
-    {hint && <p className="text-xs mt-1.5" style={{ color: 'var(--text-3)' }}>{hint}</p>}
-  </div>
-);
-
-const Select = ({ label, children, className = '', ...props }) => (
-  <div className={className}>
-    {label && <label className={fieldLabel} style={{ color: 'var(--text-2)' }}>{label}</label>}
-    <select
-      {...props}
-      className={`${fieldBase} cursor-pointer`}
-      style={{ borderColor: 'var(--border-2)', background: 'var(--surface)', color: 'var(--text)' }}
-    >
-      {children}
-    </select>
-  </div>
-);
-
-// Status-badge: kleur + stip + woord (nooit alleen kleur)
-const Badge = ({ status, children }) => {
-  const tone = {
-    draft: ['var(--surface-3)', 'var(--text-2)'],
-    sent: ['var(--info-soft)', 'var(--info)'],
-    paid: ['var(--success-soft)', 'var(--success)'],
-    overdue: ['var(--danger-soft)', 'var(--danger)'],
-    open: ['var(--warning-soft)', 'var(--warning)'],
-    processed: ['var(--success-soft)', 'var(--success)'],
-    partial: ['var(--accent-soft)', 'var(--accent)'],
-    credit_note: ['var(--surface-3)', 'var(--danger)'],
-  }[status] || ['var(--surface-3)', 'var(--text-2)'];
-  const labels = {
-    draft: 'Concept', sent: 'Verstuurd', paid: 'Betaald', overdue: 'Te laat', open: 'Open',
-    processed: 'Verwerkt', partial: 'Deels betaald', credit_note: 'Creditnota',
-  };
-  return (
-    <span style={{ background: tone[0], color: tone[1] }} className="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-full text-[11.5px] font-medium whitespace-nowrap">
-      <span style={{ width: 6, height: 6, borderRadius: 999, background: 'currentColor', opacity: status === 'draft' ? 0.5 : 1 }} />
-      {children || labels[status] || status}
-    </span>
-  );
-};
-
-const Modal = ({ open, onClose, children, size = 'md' }) => {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
-    document.addEventListener('keydown', onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
-  }, [open, onClose]);
-  if (!open) return null;
-  const sizes = { sm: 'max-w-md', md: 'max-w-2xl', lg: 'max-w-4xl', xl: 'max-w-6xl', full: 'max-w-7xl' };
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto" style={{ background: 'rgba(5,9,13,0.55)', backdropFilter: 'blur(3px)' }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div
-        role="dialog" aria-modal="true"
-        className={`${sizes[size]} w-full my-8 animate-slide`}
-        style={{ background: 'var(--surface)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-pop)' }}
-      >
-        {children}
-      </div>
-    </div>
-  );
-};
-
-const Card = ({ children, className = '', hover = false, style, ...props }) => (
-  <div
-    className={`${hover ? 'card-hover' : ''} ${className}`}
-    style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', ...style }}
-    {...props}
-  >
-    {children}
-  </div>
-);
-
-const EmptyState = ({ icon: Icon, title, description, action }) => (
-  <div className="text-center py-14 px-6">
-    <div className="inline-flex items-center justify-center w-11 h-11 rounded-[12px] mb-4" style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)' }}>
-      <Icon size={18} style={{ color: 'var(--text-2)' }} />
-    </div>
-    <h3 className="text-[15px] font-semibold mb-1" style={{ color: 'var(--text)' }}>{title}</h3>
-    <p className="text-[13px] mb-5 max-w-sm mx-auto" style={{ color: 'var(--text-3)' }}>{description}</p>
-    {action}
-  </div>
-);
-
-// Bedrag in kasboekstijl: klein €-teken, centen lichter. Gebruik voor elk zichtbaar geldbedrag.
-const Money = ({ value, currency = 'EUR', className = '', signed = false, style }) => {
-  const n = Number(value) || 0;
-  const abs = Math.abs(n);
-  const [whole, cents] = abs.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).split(',');
-  const sym = currency === 'EUR' ? '€' : currency === 'USD' ? '$' : currency === 'GBP' ? '£' : currency;
-  return (
-    <span className={`money ${n < 0 ? 'neg' : ''} ${className}`} style={style}>
-      {n < 0 ? '−' : signed && n > 0 ? '+' : ''}<span className="cur">{sym}</span>{whole}<span className="cents">,{cents}</span>
-    </span>
-  );
-};
-
-// Vaste paginakop: titel, korte uitleg, acties rechts
-const PageHeader = ({ title, sub, actions, children }) => (
-  <div className="flex items-end justify-between gap-4 flex-wrap">
-    <div className="min-w-0">
-      <h1 className="page-title">{title}</h1>
-      {sub && <div className="page-sub">{sub}</div>}
-      {children}
-    </div>
-    {actions && <div className="flex items-center gap-2 flex-wrap">{actions}</div>}
-  </div>
-);
-
-// Segmented filter: [{ id, label, count? }]
-const Segmented = ({ options, value, onChange }) => (
-  <div className="seg" role="group">
-    {options.map(o => (
-      <button key={o.id} type="button" aria-pressed={value === o.id} onClick={() => onChange(o.id)}>
-        {o.label}{o.count !== undefined && <span className="count">{o.count}</span>}
-      </button>
-    ))}
-  </div>
-);
+// Basiscomponenten staan in src/ui.jsx
 
 // ============================================================================
 // ENTITY SWITCHER (sidebar dropdown)
@@ -2095,6 +1889,7 @@ const Sidebar = ({ activeTab, setActiveTab, onOpenSearch, openCount, issueCount 
     { id: 'tax', label: t('nav.tax'), icon: FileBarChart },
     { id: 'boekhouding', label: t('nav.accounting'), icon: BookOpen },
     { id: 'controle', label: 'Data-controle', icon: ScanSearch, badge: issueCount },
+    { id: 'structuur', label: 'Structuur & plan', icon: Compass },
     { id: 'bank', label: t('nav.bank'), icon: Landmark },
     { id: 'horizonplanner', label: t('nav.horizon'), icon: TrendingUp },
     { id: 'ai', label: t('nav.ai'), icon: Brain },
@@ -9948,6 +9743,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
               onSendReminder={handleSendReminder}
             />
           )}
+          {activeTab === 'structuur' && <StructuurView />}
           {activeTab === 'controle' && (
             <DataCheckView invoices={invoices} setInvoices={setInvoices} expenses={expenses} setExpenses={setExpenses} entries={boekEntries} setEntries={setBoekEntries} transactions={bankTransactions} setTransactions={setBankTransactions} clients={clients} purchaseInvoices={purchaseInvoices} setPurchaseInvoices={setPurchaseInvoices} />
           )}
@@ -9985,6 +9781,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
           { id: 'bank', label: 'Bank', icon: Landmark },
           { id: 'boekhouding', label: 'Boekhouding', icon: BookOpen },
           { id: 'tax', label: 'Aangifte', icon: FileBarChart },
+          { id: 'structuur', label: 'Structuur & plan (Zwitserland, LLC, Stripe)', icon: Compass },
           { id: 'settings', label: 'Instellingen', icon: SettingsIcon },
         ]}
         onRun={(r) => {
