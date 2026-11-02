@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useLang } from './LangContext'
+import { computeInvoice, isRevenueInvoice, isCountedExpense, expenseNet, entrySignedAmount as coreEntrySignedAmount, invoiceOpenAmount, invoiceDate, buildVatReturn } from './finance'
 import {
   Plus, Trash2, Edit3, TrendingUp, RotateCcw,
   ChevronDown, ChevronRight, Car, Monitor, Building2, Package,
@@ -61,12 +62,7 @@ const getDepreciationForYear = (assets, year) =>
 // Memoriaalboekingen gebruiken `type: 'credit'|'debet'`, maar journaalposten die vanuit de bank
 // geboekt worden (BankView) gebruiken `isDebit: boolean` zonder `type`. Deze helper ondersteunt beide
 // zodat bank-journaalposten correct meetellen i.p.v. altijd als debet behandeld te worden.
-const entrySignedAmount = (e) => {
-  const amt = Number(e.amount || 0)
-  if (e.type === 'credit') return amt
-  if (e.type === 'debet') return -amt
-  return e.isDebit ? -amt : amt
-}
+const entrySignedAmount = coreEntrySignedAmount
 const entryIsCredit = (e) => e.type ? e.type === 'credit' : !e.isDebit
 
 // Journaalposten/kostenposten die vanuit Bank geboekt zijn slaan de ruwe bank-omschrijving op
@@ -76,18 +72,8 @@ const stripBankPrefix = (text) => (text || '').replace(/^Bank:\s*/i, '').trim()
 // Zoekt de naam van een grootboekrekening op code (bv. "4420" → "Data, AI & API-diensten").
 const ledgerLabel = (ledgerAccounts, code) => (ledgerAccounts || []).find(a => a.code === code)?.name || null
 
-// Shared invoice subtotal excl. BTW
-const invoiceExBtw = (items = []) =>
-  items.reduce((sum, it) => {
-    const base = Number(it.quantity || 0) * Number(it.price || 0)
-    let discount = 0
-    if (it.discount && Number(it.discount.value) > 0) {
-      discount = it.discount.type === 'percent'
-        ? base * (Number(it.discount.value) / 100)
-        : Number(it.discount.value)
-    }
-    return sum + Math.max(0, base - discount)
-  }, 0)
+// Factuur excl. BTW — via finance-kern (creditnota's tellen negatief mee)
+const invoiceExBtw = (items = []) => computeInvoice(items).subtotal
 
 // ── Shared UI primitives ──────────────────────────────────────────────────────
 const inp = {
@@ -138,12 +124,13 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients, ledgerA
   const paidInvoices = useMemo(() =>
     (invoices || []).filter(i => {
       const d = i.issueDate || i.date
-      return i.status === 'paid' && d && new Date(d).getFullYear() === year
+      // Factuurstelsel: alle verstuurde facturen + creditnota's tellen als omzet op factuurdatum
+      return isRevenueInvoice(i) && d && new Date(d).getFullYear() === year
     }),
     [invoices, year])
 
   const processedExpenses = useMemo(() =>
-    (expenses || []).filter(e => e.status === 'processed' && e.date && new Date(e.date).getFullYear() === year),
+    (expenses || []).filter(e => isCountedExpense(e) && e.date && new Date(e.date).getFullYear() === year),
     [expenses, year])
 
   const yearEntries = useMemo(() =>
@@ -151,7 +138,8 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients, ledgerA
     [entries, year])
 
   const totalRevenue = useMemo(() => paidInvoices.reduce((s, i) => s + invoiceExBtw(i.items), 0), [paidInvoices])
-  const totalCosts = useMemo(() => processedExpenses.reduce((s, e) => s + Number(e.amount || 0), 0), [processedExpenses])
+  // Kosten excl. aftrekbare BTW (omzet is ook excl. BTW)
+  const totalCosts = useMemo(() => processedExpenses.reduce((s, e) => s + expenseNet(e), 0), [processedExpenses])
   const totalDepreciation = useMemo(() => getDepreciationForYear(assets, year), [assets, year])
   const memoResult = useMemo(() => yearEntries.reduce((s, e) => s + entrySignedAmount(e), 0), [yearEntries])
 
@@ -225,7 +213,7 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients, ledgerA
         {open.revenue && (
           <>
             {paidInvoices.length === 0
-              ? <div style={{ padding: '10px 32px', fontSize: '12px', color: 'var(--text-3)', fontStyle: 'italic', borderBottom: '1px solid var(--border)' }}>Geen betaalde facturen in {year}</div>
+              ? <div style={{ padding: '10px 32px', fontSize: '12px', color: 'var(--text-3)', fontStyle: 'italic', borderBottom: '1px solid var(--border)' }}>Geen verstuurde facturen in {year}</div>
               : paidInvoices.map(inv => {
                 const clientName = (clients || []).find(c => c.id === inv.clientId)?.name || inv.clientName || '—'
                 return <SubRow key={inv.id} label={`${inv.number || inv.id} — ${clientName}`} value={invoiceExBtw(inv.items)} color="var(--success)" />
@@ -252,7 +240,7 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients, ledgerA
                   ledger,
                   bankText && bankText !== vendor ? bankText : null,
                 ].filter(Boolean).join(' · ')
-                return <SubRow key={exp.id} label={vendor} subLabel={subLabel} value={exp.amount} color="var(--danger)" />
+                return <SubRow key={exp.id} label={vendor} subLabel={subLabel} value={expenseNet(exp)} color="var(--danger)" />
               })
             }
             <TotalRow label={t('bk.totalCosts')} value={totalCosts} color="var(--danger)" />
@@ -736,16 +724,16 @@ function GrootboekTab({ invoices, expenses, entries, clients, ledgerAccounts }) 
     const out = []
     ;(invoices || []).forEach(inv => {
       const d = inv.issueDate || inv.date
-      if (inv.status !== 'paid' || !d || new Date(d).getFullYear() !== year) return
+      if (!isRevenueInvoice(inv) || !d || new Date(d).getFullYear() !== year) return
       const clientName = (clients || []).find(c => c.id === inv.clientId)?.name || inv.clientName || '—'
       out.push({
         id: `inv_${inv.id}`, date: d, type: 'Omzet',
-        title: clientName, subtitle: inv.number || inv.id,
+        title: clientName, subtitle: `${inv.number || inv.id}${inv.status === 'credit_note' ? ' · creditnota' : inv.status !== 'paid' ? ' · nog niet betaald' : ''}`,
         ledger: null, amount: invoiceExBtw(inv.items),
       })
     })
     ;(expenses || []).forEach(exp => {
-      if (exp.status !== 'processed' || !exp.date || new Date(exp.date).getFullYear() !== year) return
+      if (!isCountedExpense(exp) || !exp.date || new Date(exp.date).getFullYear() !== year) return
       const bankText = stripBankPrefix(exp.notes)
       const vendor = exp.vendor || bankText || 'Onbekende leverancier'
       const subtitle = [
@@ -756,7 +744,7 @@ function GrootboekTab({ invoices, expenses, entries, clients, ledgerAccounts }) 
       out.push({
         id: `exp_${exp.id}`, date: exp.date, type: 'Kostenpost',
         title: vendor, subtitle,
-        ledger: exp.ledgerAccount || null, amount: -Number(exp.amount || 0),
+        ledger: exp.ledgerAccount || null, amount: -expenseNet(exp),
       })
     })
     ;(entries || []).forEach(e => {
@@ -883,11 +871,114 @@ function GrootboekTab({ invoices, expenses, entries, clients, ledgerAccounts }) 
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
-export default function BoekhoudenView({ invoices, expenses, assets, setAssets, entries, setEntries, clients, ledgerAccounts }) {
+// ── Balans tab ────────────────────────────────────────────────────────────────
+// Indicatieve balans op een peildatum. Eigen vermogen is de sluitpost (bezittingen − schulden).
+function BalansTab({ invoices, expenses, assets, transactions, purchaseInvoices, clients }) {
+  const currentYear = new Date().getFullYear()
+  const [peil, setPeil] = useState(todayISO())
+  const peilDate = new Date(peil + 'T23:59:59')
+  const peilYear = peilDate.getFullYear()
+
+  const data = useMemo(() => {
+    // Vaste activa: boekwaarde op peildatum (lineair, hele jaren)
+    const fixed = (assets || []).filter(a => a.is_active !== false && a.purchase_date && new Date(a.purchase_date) <= peilDate).map(a => {
+      const pv = parseFloat(a.purchase_value) || 0
+      const rv = parseFloat(a.residual_value) || 0
+      const yrs = parseInt(a.depreciation_years) || 1
+      const elapsed = Math.min(yrs, Math.max(0, peilYear - new Date(a.purchase_date).getFullYear() + (peil.endsWith('12-31') ? 1 : 0)))
+      return { label: a.name, value: Math.max(rv, pv - ((pv - rv) / yrs) * elapsed) }
+    })
+    // Debiteuren: openstaande facturen met factuurdatum t/m peildatum
+    const debtors = (invoices || []).filter(i => invoiceDate(i) && new Date(invoiceDate(i)) <= peilDate)
+      .map(i => ({ label: `${i.number} · ${(clients || []).find(c => c.id === i.clientId)?.name || ''}`, value: invoiceOpenAmount(i) }))
+      .filter(d => d.value > 0.005)
+    // Liquide middelen: laatste saldo per rekening op of vóór peildatum
+    const byAccount = {}
+    ;(transactions || []).filter(t => t.date && t.balance !== null && t.balance !== undefined && new Date(t.date) <= peilDate).forEach(t => {
+      const k = t.account || 'Bank'
+      if (!byAccount[k] || t.date >= byAccount[k].date) byAccount[k] = { date: t.date, value: Number(t.balance) }
+    })
+    const cash = Object.entries(byAccount).map(([label, v]) => ({ label: `${label} (saldo ${fmtDate(v.date)})`, value: v.value }))
+    // BTW lopend kwartaal t/m peildatum
+    const q = Math.floor(peilDate.getMonth() / 3)
+    const vat = buildVatReturn({ invoices, expenses, clients, start: new Date(peilYear, q * 3, 1), end: peilDate })
+    // Crediteuren: onbetaalde inkoopfacturen
+    const creditors = (purchaseInvoices || []).filter(p => p.status !== 'paid' && p.date && new Date(p.date) <= peilDate)
+      .map(p => ({ label: `${p.supplier}${p.invoiceNumber ? ' · ' + p.invoiceNumber : ''}`, value: Number(p.totalAmount || 0) }))
+
+    const sum = (arr) => arr.reduce((s, x) => s + x.value, 0)
+    const activa = [
+      { title: 'Vaste activa', rows: fixed },
+      { title: 'Debiteuren', rows: debtors },
+      { title: 'Liquide middelen', rows: cash },
+      ...(vat.saldo < 0 ? [{ title: 'Te vorderen BTW', rows: [{ label: `Q${q + 1} ${peilYear} t/m peildatum`, value: -vat.saldo }] }] : []),
+    ]
+    const schulden = [
+      { title: 'Crediteuren', rows: creditors },
+      ...(vat.saldo > 0 ? [{ title: 'Af te dragen BTW', rows: [{ label: `Q${q + 1} ${peilYear} t/m peildatum`, value: vat.saldo }] }] : []),
+    ]
+    const totalActiva = activa.reduce((s, g) => s + sum(g.rows), 0)
+    const totalSchulden = schulden.reduce((s, g) => s + sum(g.rows), 0)
+    return { activa, schulden, totalActiva, totalSchulden, equity: totalActiva - totalSchulden, hasBank: cash.length > 0, sum }
+  }, [invoices, expenses, assets, transactions, purchaseInvoices, clients, peil]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const Side = ({ title, groups, total, extra }) => (
+    <Card style={{ flex: 1, minWidth: 300, overflow: 'hidden' }}>
+      <div style={{ padding: '14px 16px', fontWeight: 600, fontSize: '14px', color: 'var(--text)', borderBottom: '1px solid var(--border)' }}>{title}</div>
+      {groups.map(g => (
+        <div key={g.title}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 16px 4px', fontSize: '12.5px', color: 'var(--text-2)', fontWeight: 600 }}>
+            <span>{g.title}</span><span className="money">{fmtEUR(data.sum(g.rows))}</span>
+          </div>
+          {g.rows.length === 0 && <div style={{ padding: '2px 16px 8px 28px', fontSize: '12px', color: 'var(--text-3)' }}>Geen</div>}
+          {g.rows.slice(0, 8).map((r, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '3px 16px 3px 28px', fontSize: '12.5px', color: 'var(--text-3)' }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</span><span className="money">{fmtEUR(r.value)}</span>
+            </div>
+          ))}
+          {g.rows.length > 8 && <div style={{ padding: '2px 16px 6px 28px', fontSize: '12px', color: 'var(--text-3)' }}>en nog {g.rows.length - 8}</div>}
+        </div>
+      ))}
+      {extra}
+      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', marginTop: 8, borderTop: '1px solid var(--border-2)', fontWeight: 700, fontSize: '14px', color: 'var(--text)' }}>
+        <span>Totaal</span><span className="money">{fmtEUR(total)}</span>
+      </div>
+    </Card>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '13px', color: 'var(--text-3)' }}>Peildatum</span>
+        <input type="date" style={{ ...inp, width: 'auto', padding: '6px 10px' }} value={peil} onChange={e => e.target.value && setPeil(e.target.value)} />
+        {[currentYear - 1, currentYear - 2].map(y => (
+          <button key={y} onClick={() => setPeil(`${y}-12-31`)} style={{ fontSize: '12.5px', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-2)', background: peil === `${y}-12-31` ? 'var(--surface-3)' : 'transparent', color: 'var(--text-2)', cursor: 'pointer' }}>31-12-{y}</button>
+        ))}
+        <button onClick={() => setPeil(todayISO())} style={{ fontSize: '12.5px', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-2)', background: peil === todayISO() ? 'var(--surface-3)' : 'transparent', color: 'var(--text-2)', cursor: 'pointer' }}>Vandaag</button>
+      </div>
+      <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        <Side title="Bezittingen" groups={data.activa} total={data.totalActiva} />
+        <Side title="Eigen vermogen en schulden" groups={data.schulden} total={data.totalActiva}
+          extra={
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 16px 4px', fontSize: '12.5px', color: 'var(--text-2)', fontWeight: 600 }}>
+              <span>Eigen vermogen</span><span className="money" style={{ color: data.equity < 0 ? 'var(--danger)' : 'var(--text-2)' }}>{fmtEUR(data.equity)}</span>
+            </div>
+          } />
+      </div>
+      <p style={{ fontSize: '12px', color: 'var(--text-3)', margin: 0, maxWidth: 680, lineHeight: 1.6 }}>
+        Indicatieve balans. Banksaldo komt uit je geïmporteerde bankafschriften{data.hasBank ? '' : ' (nog geen import met saldo gevonden)'}; debiteuren zijn facturen die nu nog openstaan.
+        Eigen vermogen is het verschil tussen bezittingen en schulden. Gebruik dit als overzicht, niet als vervanging van een jaarrekening.
+      </p>
+    </div>
+  )
+}
+
+export default function BoekhoudenView({ invoices, expenses, assets, setAssets, entries, setEntries, clients, ledgerAccounts, transactions = [], purchaseInvoices = [] }) {
   const { t } = useLang()
   const [tab, setTab] = useState('wv')
   const tabs = [
     { id: 'wv', label: t('bk.tabPL') },
+    { id: 'balans', label: 'Balans' },
     { id: 'grootboek', label: 'Grootboek' },
     { id: 'activa', label: t('bk.tabAssets') },
     { id: 'memoriaal', label: t('bk.tabJournal') },
@@ -896,7 +987,7 @@ export default function BoekhoudenView({ invoices, expenses, assets, setAssets, 
   return (
     <div>
       <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '26px', fontWeight: '700', color: 'var(--text)', margin: '0 0 4px', letterSpacing: '-0.02em' }}>{t('bk.title')}</h1>
+        <h1 className="page-title" style={{ margin: '0 0 4px' }}>{t('bk.title')}</h1>
         <p style={{ color: 'var(--text-3)', fontSize: '13px', margin: 0 }}>{t('bk.subtitle')}</p>
       </div>
 
@@ -906,7 +997,7 @@ export default function BoekhoudenView({ invoices, expenses, assets, setAssets, 
             style={{
               padding: '7px 18px', borderRadius: '7px', border: 'none', cursor: 'pointer', fontSize: '13px',
               fontWeight: tab === t.id ? '600' : '500',
-              background: tab === t.id ? 'var(--surface)' : 'transparent',
+              background: tab === t.id ? 'var(--seg-active)' : 'transparent',
               color: tab === t.id ? 'var(--text)' : 'var(--text-3)',
               boxShadow: tab === t.id ? '0 1px 4px rgba(0,0,0,0.12)' : 'none',
               transition: 'all 0.12s',
@@ -917,6 +1008,7 @@ export default function BoekhoudenView({ invoices, expenses, assets, setAssets, 
       </div>
 
       {tab === 'wv' && <WinstVerliesTab invoices={invoices} expenses={expenses} assets={assets} entries={entries} clients={clients} ledgerAccounts={ledgerAccounts} />}
+      {tab === 'balans' && <BalansTab invoices={invoices} expenses={expenses} assets={assets} transactions={transactions} purchaseInvoices={purchaseInvoices} clients={clients} />}
       {tab === 'grootboek' && <GrootboekTab invoices={invoices} expenses={expenses} entries={entries} clients={clients} ledgerAccounts={ledgerAccounts} />}
       {tab === 'activa' && <VasteActivaTab assets={assets} setAssets={setAssets} />}
       {tab === 'memoriaal' && <MemoriaalTab entries={entries} setEntries={setEntries} />}

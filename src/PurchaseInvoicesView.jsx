@@ -315,9 +315,9 @@ export default function PurchaseInvoicesView({ purchaseInvoices, setPurchaseInvo
     const all = allPurchaseInvoices || purchaseInvoices
     const exists = (all || []).find(i => i.id === item.id)
     if (exists) {
-      setPurchaseInvoices((all || []).map(i => i.id === item.id ? { ...i, ...item } : i))
+      setPurchaseInvoices(prev => (prev || []).map(i => i.id === item.id ? { ...i, ...item } : i))
     } else {
-      setPurchaseInvoices([{ ...item, entityId: activeEntity?.id }, ...(all || [])])
+      setPurchaseInvoices(prev => [{ ...item, entityId: activeEntity?.id }, ...(prev || [])])
     }
     setShowModal(false)
     setEditItem(null)
@@ -326,17 +326,17 @@ export default function PurchaseInvoicesView({ purchaseInvoices, setPurchaseInvo
   const handleDelete = (id) => {
     if (!confirm('Factuur verwijderen?')) return
     const all = allPurchaseInvoices || purchaseInvoices
-    setPurchaseInvoices((all || []).filter(i => i.id !== id))
+    setPurchaseInvoices(prev => (prev || []).filter(i => i.id !== id))
   }
 
   const handleMarkPaid = (item) => {
     const all = allPurchaseInvoices || purchaseInvoices
-    setPurchaseInvoices((all || []).map(i => i.id === item.id ? { ...i, status: 'paid', paidAt: i.paidAt || todayISO() } : i))
+    setPurchaseInvoices(prev => (prev || []).map(i => i.id === item.id ? { ...i, status: 'paid', paidAt: i.paidAt || todayISO() } : i))
   }
 
   const handleMarkUnpaid = (item) => {
     const all = allPurchaseInvoices || purchaseInvoices
-    setPurchaseInvoices((all || []).map(i => i.id === item.id ? { ...i, status: 'unpaid', paidAt: '' } : i))
+    setPurchaseInvoices(prev => (prev || []).map(i => i.id === item.id ? { ...i, status: 'unpaid', paidAt: '' } : i))
   }
 
   const isDueStatus = (item) => {
@@ -354,7 +354,7 @@ export default function PurchaseInvoicesView({ purchaseInvoices, setPurchaseInvo
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
         <div>
-          <h1 style={{ fontSize: '26px', fontWeight: '700', color: 'var(--text)', margin: '0 0 4px', letterSpacing: '-0.02em' }}>Inkoop</h1>
+          <h1 className="page-title" style={{ margin: '0 0 4px' }}>Inkoop</h1>
           <p style={{ color: 'var(--text-3)', fontSize: '13px', margin: 0 }}>Inkomende facturen van leveranciers</p>
         </div>
         <button onClick={() => { setEditItem(null); setShowModal(true) }}
@@ -387,7 +387,7 @@ export default function PurchaseInvoicesView({ purchaseInvoices, setPurchaseInvo
             { id: 'paid', label: 'Betaald' },
           ].map(f => (
             <button key={f.id} onClick={() => setFilter(f.id)}
-              style={{ padding: '5px 12px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: filter === f.id ? '600' : '500', background: filter === f.id ? 'var(--surface)' : 'transparent', color: filter === f.id ? 'var(--text)' : 'var(--text-3)', boxShadow: filter === f.id ? '0 1px 4px rgba(0,0,0,0.12)' : 'none', transition: 'all 0.1s' }}>
+              style={{ padding: '5px 12px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: filter === f.id ? '600' : '500', background: filter === f.id ? 'var(--seg-active)' : 'transparent', color: filter === f.id ? 'var(--text)' : 'var(--text-3)', boxShadow: filter === f.id ? '0 1px 4px rgba(0,0,0,0.12)' : 'none', transition: 'all 0.1s' }}>
               {f.label}
             </button>
           ))}

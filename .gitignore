@@ -3,3 +3,8 @@ dist
 .env
 .env.local
 .env.*.local
+
+# Echte bankafschriften — nooit publiceren (public/ wordt openbaar gedeployed)
+public/*statement*.csv
+.DS_Store
+.harness*

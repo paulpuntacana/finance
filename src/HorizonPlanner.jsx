@@ -710,7 +710,7 @@ export default function HorizonPlanner({ invoices, expenses, clients, horizonDat
       <div style={{ marginBottom: '24px' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
           <div>
-            <h1 style={{ fontSize: '32px', fontWeight: '700', color: 'var(--text)', margin: '0 0 4px', letterSpacing: '-0.03em' }}>
+            <h1 className="page-title" style={{ margin: '0 0 4px' }}>
               HorizonPlanner
             </h1>
             <p style={{ color: 'var(--text-3)', fontSize: '13px', margin: 0 }}>{t('horizon.subtitle')}</p>

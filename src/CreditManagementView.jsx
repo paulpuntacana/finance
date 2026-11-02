@@ -585,7 +585,7 @@ export default function CreditManagementView({ clients, invoices, settings, enti
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h1 style={{ fontFamily: 'Inter, sans-serif', fontSize: '32px', fontWeight: '500', margin: '0 0 4px', letterSpacing: '-0.02em', color: 'var(--text)' }}>Creditbeheer</h1>
+          <h1 className="page-title" style={{ margin: '0 0 4px' }}>Creditbeheer</h1>
           <p style={{ fontSize: '13px', color: 'var(--text-3)', margin: 0 }}>
             Betalingsrisico's, achterstallige facturen en dossieraanmaak
           </p>

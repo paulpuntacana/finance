@@ -88,7 +88,7 @@ const QUOTE_STYLES = [
 ]
 
 const ESIGN_FIELDS = [
-  { id: 'handtekening', label: 'Handtekening', icon: PenLine,      color: '#6366f1', w: 200, h: 64 },
+  { id: 'handtekening', label: 'Handtekening', icon: PenLine,      color: 'var(--accent)', w: 200, h: 64 },
   { id: 'naam',         label: 'Naam',         icon: Type,         color: '#3b82f6', w: 180, h: 36 },
   { id: 'datum',        label: 'Datum',        icon: CalendarDays, color: '#10b981', w: 130, h: 36 },
   { id: 'tekst',        label: 'Vrij tekst',   icon: FileText,     color: '#f59e0b', w: 200, h: 36 },
@@ -112,7 +112,7 @@ const printQuotePDF = (quote, client, entity, companyTemplate) => {
   const fmtE = n => '€\u00a0' + Number(n || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2 })
   const fmtD = iso => iso ? new Date(iso).toLocaleDateString('nl-NL') : '—'
   const style = quote.quoteStyle || 'compact'
-  const accent = '#6366f1'
+  const accent = 'var(--accent)'
 
   const companySection = (style === 'presentatie' && companyTemplate?.about)
     ? `<div style="background:#f0f4ff;border-left:4px solid ${accent};border-radius:0 8px 8px 0;padding:18px 22px;margin-bottom:28px">
@@ -249,8 +249,8 @@ const CompanyTemplateModal = ({ template, onSave, onClose }) => {
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: 16, padding: 28, width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.4)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(99,102,241,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Building2 size={18} style={{ color: '#6366f1' }} />
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Building2 size={18} style={{ color: 'var(--accent)' }} />
           </div>
           <div>
             <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>Bedrijfsprofiel</h2>
@@ -283,13 +283,13 @@ const CompanyTemplateModal = ({ template, onSave, onClose }) => {
         </div>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '12px 14px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 20, fontSize: 13, color: 'var(--text)' }}>
-          <input type="checkbox" checked={form.attachToPresentatie} onChange={e => set('attachToPresentatie', e.target.checked)} style={{ width: 16, height: 16, accentColor: '#6366f1' }} />
+          <input type="checkbox" checked={form.attachToPresentatie} onChange={e => set('attachToPresentatie', e.target.checked)} style={{ width: 16, height: 16, accentColor: 'var(--accent)' }} />
           Automatisch toevoegen bij "Presentatie" stijl
         </label>
 
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={() => onSave(form)}
-            style={{ flex: 1, background: '#6366f1', border: 'none', borderRadius: 8, padding: '10px', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+            style={{ flex: 1, background: 'var(--accent)', border: 'none', borderRadius: 8, padding: '10px', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
             Opslaan
           </button>
           <button onClick={onClose} style={{ ...C.btn(), padding: '10px 18px' }}>Annuleren</button>
@@ -343,7 +343,7 @@ Prices are in EUR (numbers only). BTW rates: 0, 9, or 21%. Estimate reasonable p
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end', padding: 16 }}>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 480, maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.5)', marginTop: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Sparkles size={16} color="#fff" />
           </div>
           <div style={{ flex: 1 }}>
@@ -386,7 +386,7 @@ Prices are in EUR (numbers only). BTW rates: 0, 9, or 21%. Estimate reasonable p
         )}
 
         <button onClick={handleGenerate} disabled={loading || !text.trim()}
-          style={{ width: '100%', background: loading ? 'var(--surface-2)' : 'linear-gradient(135deg,#6366f1,#8b5cf6)', border: 'none', borderRadius: 10, padding: '12px', color: loading ? 'var(--text-3)' : '#fff', fontSize: 14, fontWeight: 600, cursor: (loading || !text.trim()) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          style={{ width: '100%', background: loading ? 'var(--surface-2)' : 'var(--accent)', border: 'none', borderRadius: 10, padding: '12px', color: loading ? 'var(--text-3)' : '#fff', fontSize: 14, fontWeight: 600, cursor: (loading || !text.trim()) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
           {loading ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Genereren…</> : <><Sparkles size={16} /> Genereer offerte</>}
         </button>
 
@@ -456,7 +456,7 @@ const QuoteEditor = ({ quote, clients, settings, activeEntity, companyTemplate, 
           </h2>
         </div>
         <button onClick={() => setShowAI(true)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', border: 'none', borderRadius: 9, padding: '9px 16px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', boxShadow: '0 2px 12px rgba(99,102,241,0.3)' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--accent)', border: 'none', borderRadius: 9, padding: '9px 16px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', boxShadow: 'none' }}>
           <Sparkles size={14} /> AI-assistent
         </button>
       </div>
@@ -528,11 +528,11 @@ const QuoteEditor = ({ quote, clients, settings, activeEntity, companyTemplate, 
           ))}
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0 0', fontSize: 17, fontWeight: 700 }}>
             <span style={{ color: 'var(--text)' }}>Totaal</span>
-            <span style={{ color: '#6366f1', fontFamily: 'monospace' }}>{fmtEUR(totals.total)}</span>
+            <span style={{ color: 'var(--accent)', fontFamily: 'monospace' }}>{fmtEUR(totals.total)}</span>
           </div>
 
           {form.quoteStyle === 'presentatie' && companyTemplate?.about && (
-            <div style={{ marginTop: 16, padding: '10px 12px', background: 'rgba(99,102,241,0.08)', borderRadius: 8, border: '1px solid rgba(99,102,241,0.2)', fontSize: 11, color: '#6366f1' }}>
+            <div style={{ marginTop: 16, padding: '10px 12px', background: 'var(--accent-soft)', borderRadius: 8, border: '1px solid rgba(99,102,241,0.2)', fontSize: 11, color: 'var(--accent)' }}>
               <Building2 size={11} style={{ display: 'inline', marginRight: 4 }} />
               Bedrijfsprofiel wordt meegestuurd in PDF
             </div>
@@ -545,7 +545,7 @@ const QuoteEditor = ({ quote, clients, settings, activeEntity, companyTemplate, 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Regelitems</h3>
           <button onClick={addItem}
-            style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(99,102,241,0.1)', border: 'none', borderRadius: 6, padding: '5px 10px', color: '#6366f1', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+            style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--accent-soft)', border: 'none', borderRadius: 6, padding: '5px 10px', color: 'var(--accent)', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
             <Plus size={13} /> Regel
           </button>
         </div>
@@ -574,7 +574,7 @@ const QuoteEditor = ({ quote, clients, settings, activeEntity, companyTemplate, 
 
       <div style={{ display: 'flex', gap: 10 }}>
         <button onClick={handleSave} disabled={saving}
-          style={{ flex: 1, background: '#6366f1', border: 'none', borderRadius: 9, padding: 12, color: '#fff', fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          style={{ flex: 1, background: 'var(--accent)', border: 'none', borderRadius: 9, padding: 12, color: '#fff', fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
           {saving ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Opslaan…</> : 'Offerte opslaan'}
         </button>
         <button onClick={onCancel} style={{ ...C.btn(), padding: '12px 18px', fontSize: 14 }}>Annuleren</button>
@@ -619,12 +619,12 @@ const QuoteDetail = ({ quote, client, companyTemplate, activeEntity, onClose, on
 
       {/* Share link */}
       <div style={{ ...C.card, display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-        <Link2 size={16} style={{ color: '#6366f1', flexShrink: 0 }} />
+        <Link2 size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ color: 'var(--text-3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Deellink voor ondertekening</div>
           <code style={{ color: 'var(--text-3)', fontSize: 11, wordBreak: 'break-all' }}>{shareUrl}</code>
         </div>
-        <button onClick={copyLink} style={C.btn(copied ? 'var(--success)' : '#6366f1', copied ? 'var(--success-soft)' : 'rgba(99,102,241,0.1)', copied ? 'rgba(16,185,129,0.3)' : 'rgba(99,102,241,0.2)')}>
+        <button onClick={copyLink} style={C.btn(copied ? 'var(--success)' : 'var(--accent)', copied ? 'var(--success-soft)' : 'var(--accent-soft)', copied ? 'rgba(16,185,129,0.3)' : 'rgba(99,102,241,0.2)')}>
           {copied ? <><Check size={13} /> Gekopieerd</> : <><Copy size={13} /> Kopieer</>}
         </button>
       </div>
@@ -673,7 +673,7 @@ const QuoteDetail = ({ quote, client, companyTemplate, activeEntity, onClose, on
             ))}
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, fontSize: 16, fontWeight: 700, paddingTop: 8, borderTop: '1px solid var(--border-2)' }}>
               <span style={{ color: 'var(--text)' }}>Totaal</span>
-              <span style={{ color: '#6366f1', fontFamily: 'monospace' }}>{fmtEUR(totals.total)}</span>
+              <span style={{ color: 'var(--accent)', fontFamily: 'monospace' }}>{fmtEUR(totals.total)}</span>
             </div>
           </div>
         </div>
@@ -687,7 +687,7 @@ const QuoteDetail = ({ quote, client, companyTemplate, activeEntity, onClose, on
           <button onClick={() => onStatusChange(quote.id, 'declined')} style={C.btn('var(--danger)', 'var(--danger-soft)', 'rgba(239,68,68,0.2)')}><X size={13} /> Afgewezen</button>
           <button onClick={() => onStatusChange(quote.id, 'expired')} style={C.btn('var(--warning)', 'var(--warning-soft)', 'rgba(245,158,11,0.2)')}><Clock size={13} /> Verlopen</button>
         </>}
-        {quote.status === 'accepted' && <button onClick={() => onConvertToInvoice(quote)} style={{ ...C.btn('#fff', '#6366f1', 'transparent'), boxShadow: '0 2px 8px rgba(99,102,241,0.3)' }}><ArrowRight size={13} /> Omzetten naar factuur</button>}
+        {quote.status === 'accepted' && <button onClick={() => onConvertToInvoice(quote)} style={{ ...C.btn('#fff', 'var(--accent)', 'transparent'), boxShadow: '0 2px 8px rgba(99,102,241,0.3)' }}><ArrowRight size={13} /> Omzetten naar factuur</button>}
         {quote.status !== 'draft' && <button onClick={() => onStatusChange(quote.id, 'draft')} style={C.btn()}>Terug naar concept</button>}
       </div>
 
@@ -751,7 +751,7 @@ const SignView = ({ token, quotes, clients, onSign }) => {
   return (
     <div style={{ maxWidth: 660, margin: '0 auto', padding: '24px 16px', fontFamily: 'Inter, sans-serif' }}>
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px' }}>
+        <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px' }}>
           <FileCheck2 size={20} color="#fff" />
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-3)' }}>DHS Finance · Offertebeheer</div>
@@ -787,7 +787,7 @@ const SignView = ({ token, quotes, clients, onSign }) => {
 
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18, fontWeight: 700, marginBottom: 24 }}>
           <span style={{ color: 'var(--text)' }}>Totaal (incl. BTW)</span>
-          <span style={{ color: '#6366f1', fontFamily: 'monospace' }}>{fmtEUR(totals.total)}</span>
+          <span style={{ color: 'var(--accent)', fontFamily: 'monospace' }}>{fmtEUR(totals.total)}</span>
         </div>
 
         {quote.notes && <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 20, background: 'var(--surface-2)', padding: 12, borderRadius: 8 }}>{quote.notes}</p>}
@@ -1195,7 +1195,7 @@ const QuotesEmpty = ({ onNew }) => (
     <h3 style={{ color: 'var(--text)', margin: '0 0 8px', fontSize: 16, fontWeight: 600 }}>Nog geen offertes</h3>
     <p style={{ color: 'var(--text-3)', fontSize: 13, margin: '0 0 20px' }}>Maak je eerste offerte aan en stuur hem op naar je klant.</p>
     <button onClick={onNew}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#6366f1', border: 'none', borderRadius: 8, padding: '10px 18px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--accent)', border: 'none', borderRadius: 8, padding: '10px 18px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
       <Plus size={15} /> Offerte aanmaken
     </button>
   </div>
@@ -1253,7 +1253,7 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
         clients={clients}
         onSign={(id, status, sig, name) => {
           const signedAt = new Date().toISOString()
-          setQuotes(quotes.map(q => q.id === id ? { ...q, status, signedAt, ...(sig ? { signatureData: sig, signerName: name } : {}), history: [...(q.history || []), { status, at: signedAt, by: name }] } : q))
+          setQuotes(prev => prev.map(q => q.id === id ? { ...q, status, signedAt, ...(sig ? { signatureData: sig, signerName: name } : {}), history: [...(q.history || []), { status, at: signedAt, by: name }] } : q))
         }}
       />
     )
@@ -1274,16 +1274,15 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
 
   // Quote CRUD
   const saveQuote = async q => {
-    const updated = quotes.find(x => x.id === q.id)
-      ? quotes.map(x => x.id === q.id ? q : x)
-      : [q, ...quotes]
-    await setQuotes(updated)
+    await setQuotes(prev => prev.find(x => x.id === q.id)
+      ? prev.map(x => x.id === q.id ? q : x)
+      : [q, ...prev])
     setView('list')
   }
-  const deleteQuote = async id => { await setQuotes(quotes.filter(q => q.id !== id)); setView('list') }
+  const deleteQuote = async id => { await setQuotes(prev => prev.filter(q => q.id !== id)); setView('list') }
   const changeStatus = async (id, status, sig = null, signerName = null) => {
     const signedAt = new Date().toISOString()
-    await setQuotes(quotes.map(q => q.id === id ? {
+    await setQuotes(prev => prev.map(q => q.id === id ? {
       ...q, status, signedAt: (status === 'accepted' || status === 'declined') ? signedAt : q.signedAt,
       ...(sig ? { signatureData: sig, signerName } : {}),
       history: [...(q.history || []), { status, at: signedAt, ...(signerName ? { by: signerName } : {}) }],
@@ -1349,9 +1348,9 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
           { id: 'esign', label: 'E-Sign documenten', icon: FileSignature },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '10px 16px', borderRadius: '8px 8px 0 0', border: 'none', background: tab === t.id ? 'var(--surface)' : 'transparent', color: tab === t.id ? 'var(--text)' : 'var(--text-3)', fontSize: 13, fontWeight: tab === t.id ? 700 : 500, cursor: 'pointer', borderBottom: tab === t.id ? '2px solid #6366f1' : '2px solid transparent', transition: 'all 0.15s', marginBottom: -1 }}>
+            style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '10px 16px', borderRadius: '8px 8px 0 0', border: 'none', background: tab === t.id ? 'var(--surface)' : 'transparent', color: tab === t.id ? 'var(--text)' : 'var(--text-3)', fontSize: 13, fontWeight: tab === t.id ? 700 : 500, cursor: 'pointer', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent', transition: 'all 0.15s', marginBottom: -1 }}>
             <t.icon size={15} /> {t.label}
-            {t.id === 'quotes' && quotes.length > 0 && <span style={{ background: 'rgba(99,102,241,0.15)', color: '#6366f1', fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 10 }}>{quotes.length}</span>}
+            {t.id === 'quotes' && quotes.length > 0 && <span style={{ background: 'var(--accent-soft)', color: 'var(--accent)', fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 10 }}>{quotes.length}</span>}
             {t.id === 'esign' && esignDocs.length > 0 && <span style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 10 }}>{esignDocs.length}</span>}
           </button>
         ))}
@@ -1362,7 +1361,7 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
         <div>
           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
             <div>
-              <h1 style={{ margin: '0 0 4px', fontSize: 28, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.02em' }}>Offertes</h1>
+              <h1 className="page-title" style={{ margin: '0 0 4px' }}>Offertes</h1>
               <p style={{ color: 'var(--text-3)', fontSize: 13, margin: 0 }}>{quotes.length} offerte{quotes.length !== 1 ? 's' : ''} totaal</p>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -1371,7 +1370,7 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
                 <Building2 size={14} /> Bedrijfsprofiel
               </button>
               <button onClick={() => setView('new')}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#6366f1', border: 'none', borderRadius: 8, padding: '10px 16px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--accent)', border: 'none', borderRadius: 8, padding: '10px 16px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                 <Plus size={15} /> Nieuwe offerte
               </button>
             </div>
@@ -1406,7 +1405,7 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
                     <div key={q.id}
                       onClick={() => { setSelected(q); setView('detail') }}
                       style={{ background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', transition: 'border-color 0.15s' }}
-                      onMouseEnter={e => e.currentTarget.style.borderColor = '#6366f1'}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
                       onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-2)'}
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -1437,7 +1436,7 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
         <div>
           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
             <div>
-              <h1 style={{ margin: '0 0 4px', fontSize: 28, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.02em' }}>E-Sign documenten</h1>
+              <h1 className="page-title" style={{ margin: '0 0 4px' }}>E-Sign documenten</h1>
               <p style={{ color: 'var(--text-3)', fontSize: 13, margin: 0 }}>Upload PDF of afbeelding, markeer velden en verstuur de deellink</p>
             </div>
             <button onClick={() => setEsignView('new')}

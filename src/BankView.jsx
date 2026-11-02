@@ -5,6 +5,7 @@ import {
   EyeOff, RotateCcw, AlertCircle, ChevronDown, Loader2, Ban, Landmark,
   ArrowDownCircle, ArrowUpCircle, AlertTriangle, Star,
 } from 'lucide-react'
+import { computeInvoice, suggestVatTreatment, VAT_TREATMENTS, isRevenueInvoice } from './finance'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const genId = (p = 'bt') => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
@@ -33,11 +34,19 @@ const BANK_ENTRY_CATEGORIES = ['Kostenpost', 'Omzetaanpassing', 'Correctie', 'Ov
 // Interne overboeking tussen eigen (Revolut-)rekeningen — waarschuw voor per ongeluk boeken als kosten/omzet.
 // Let op: "TRANSFER" is in Revolut ook het type voor gewone inkomende/uitgaande SEPA-betalingen van
 // klanten/leveranciers, dus daar alleen op matchen geeft valse positieven. Alleen echte interne-signalen tellen mee.
-const isLikelyInternalTransfer = (tx) => {
+// Revolut zet bij eigen rekeningen de rekeningnaam in de omschrijving ("From BTW Rekening",
+// "To Main", "From Euro") en de eigen bedrijfs-/persoonsnaam als tegenpartij.
+const OWN_ACCOUNT_RE = /^(from|to) (btw rekening|main|euro|eur main|savings|spaarrekening|paul d)\b/i
+const isLikelyInternalTransfer = (tx, ownNames = []) => {
   const type = (tx.type || '').toLowerCase()
   const desc = `${tx.description || ''} ${tx.reference || ''}`.toLowerCase()
-  return type.includes('exchange') || desc.includes('between accounts') || desc.includes('to eur balance') || desc.includes('to my')
+  const cp = (tx.counterparty || '').toLowerCase().trim()
+  return type.includes('exchange') || desc.includes('between accounts') || desc.includes('to eur balance') || desc.includes('to my') ||
+    OWN_ACCOUNT_RE.test(tx.description || '') ||
+    (type === 'transfer' && ownNames.some(n => n && cp === n.toLowerCase().trim()))
 }
+
+const optionAmount = (o, mode) => Number(mode === 'invoice' ? computeInvoice(o.items).total : (o.amount || o.amountIncl || 0))
 
 // Beste match op bedrag (exact, binnen 1 cent) voor koppelen aan factuur/uitgave
 const bestAmountMatchId = (tx, options, mode) => {
@@ -45,11 +54,38 @@ const bestAmountMatchId = (tx, options, mode) => {
   let bestId = null
   let bestDiff = Infinity
   ;(options || []).forEach(o => {
-    const oAmt = Number(mode === 'invoice' ? (o.amountIncl || o.total || 0) : (o.amount || o.amountIncl || 0))
-    const diff = Math.abs(oAmt - target)
+    const diff = Math.abs(optionAmount(o, mode) - target)
     if (diff < bestDiff) { bestDiff = diff; bestId = o.id }
   })
   return bestDiff <= 0.01 ? bestId : null
+}
+
+// Zoekt de factuur waar een inkomende betaling bij hoort: eerst op factuurnummer in de
+// omschrijving/referentie (Revolut zet die vaak in "Reference"), dan op exact bedrag bij een open factuur.
+const findInvoiceForIncoming = (tx, invoices) => {
+  if (Number(tx.amount) <= 0) return null
+  const text = `${tx.reference || ''} ${tx.description || ''}`.toLowerCase()
+  const candidates = (invoices || []).filter(i => isRevenueInvoice(i) && i.status !== 'credit_note')
+  const byNumber = candidates.find(i => i.number && text.includes(String(i.number).toLowerCase()))
+  if (byNumber) return byNumber
+  const amt = Math.abs(Number(tx.amount))
+  const sameAmount = candidates.filter(i => i.status !== 'paid' && Math.abs(computeInvoice(i.items).total - amt) < 0.01)
+  return sameAmount.length === 1 ? sameAmount[0] : null
+}
+
+// Bestaande kostenpost met zelfde bedrag rond dezelfde datum (bv. handmatig ingevoerde bon)
+const findExistingExpense = (tx, expenses) => {
+  const amt = Math.abs(Number(tx.amount) || 0)
+  return (expenses || []).find(e => {
+    if (Math.abs(Number(e.amount || 0) - amt) > 0.01 || !e.date || !tx.date) return false
+    return Math.abs(new Date(e.date) - new Date(tx.date)) / 86400000 <= 5
+  }) || null
+}
+
+const vatForExpense = (amountIncl, treatment, rate) => {
+  if (treatment !== 'standard') return { btwRate: 0, btwAmount: 0 }
+  const r = Number(rate) || 0
+  return { btwRate: r, btwAmount: +(amountIncl - amountIncl / (1 + r / 100)).toFixed(2) }
 }
 
 // ── CSV parsing (Revolut export) ─────────────────────────────────────────────
@@ -127,7 +163,7 @@ const btn = (variant = 'ghost') => ({
 
 export default function BankView({
   transactions = [], setTransactions,
-  invoices = [], expenses = [], setExpenses, allExpenses, entries = [], setEntries,
+  invoices = [], setInvoices, expenses = [], setExpenses, allExpenses, entries = [], setEntries,
   clients = [], settings = {}, activeEntity, callAI, suggestLedgerAccount, getLedgerAccounts,
   jurisdictionInfo,
 }) {
@@ -144,6 +180,7 @@ export default function BankView({
   useEffect(() => { setSelected(new Set()) }, [filter, search])
 
   const jurisdiction = settings.jurisdiction || 'NL'
+  const ownNames = useMemo(() => [activeEntity?.name, activeEntity?.legalName, settings.company?.name].filter(Boolean), [activeEntity, settings.company?.name])
   const ledgerAccounts = useMemo(() => (getLedgerAccounts ? getLedgerAccounts(jurisdiction) : []), [jurisdiction, getLedgerAccounts])
   const salesTax = jurisdictionInfo?.salesTax || { name: 'BTW', rates: [0, 9, 21], standard: 21 }
 
@@ -154,8 +191,16 @@ export default function BankView({
     const reader = new FileReader()
     reader.onload = async (ev) => {
       const parsed = parseRevolutCSV(ev.target.result)
-      const existingIds = new Set((transactions || []).map(t => t.externalId).filter(Boolean))
-      const fresh = parsed.filter(r => !existingIds.has(r.externalId))
+      // Dedupe op (externalId, account): beide kanten van een interne overboeking delen het ID
+      const keyOf = (t) => `${t.externalId}|${t.account || ''}`
+      const existingIds = new Set((transactions || []).filter(t => t.externalId).map(keyOf))
+      const seen = new Set()
+      const fresh = parsed.filter(r => {
+        const k = keyOf(r)
+        if (existingIds.has(k) || seen.has(k)) return false
+        seen.add(k)
+        return true
+      })
       const skipped = parsed.length - fresh.length
 
       const rows = fresh.map(r => {
@@ -192,26 +237,37 @@ export default function BankView({
     // Uitgave geboekt als aftrekbare kostenpost → als expense i.p.v. journaalpost,
     // zodat hij automatisch meetelt in de BTW-aangifte (die alleen expenses uitleest).
     if (form.asExpense && Number(tx.amount) < 0) {
-      const btwRate = Number(form.btwRate) || 0
-      const btwAmount = +(amountIncl - amountIncl / (1 + btwRate / 100)).toFixed(2)
+      const { btwRate, btwAmount } = vatForExpense(amountIncl, form.vatTreatment, form.btwRate)
       const expenseId = genId('exp')
       const expense = {
         id: expenseId, entityId: activeEntity?.id || null,
-        status: 'processed', source: 'bank',
+        status: 'processed', source: 'bank', bankTxId: tx.id,
         vendor: form.description || tx.counterparty || tx.description || '',
         date: tx.date,
         currency: tx.currency || 'EUR',
-        originalAmount: amountIncl, exchangeRate: 1,
+        originalAmount: tx.origAmount ? Math.abs(Number(tx.origAmount)) : amountIncl,
+        originalCurrency: tx.origCurrency || tx.currency || 'EUR',
+        exchangeRate: 1,
         amount: amountIncl, btwAmount, btwRate,
+        vatTreatment: form.vatTreatment, vatEstimated: form.vatTreatment === 'standard',
         category: form.category, ledgerAccount: form.ledgerCode || '',
         notes: `Bank: ${tx.description || tx.externalId}`,
         capturedAt: new Date().toISOString(),
       }
-      const base = allExpenses || expenses
-      setExpenses([expense, ...base])
+      setExpenses(prev => [expense, ...(prev || [])])
       updateTx(tx.id, { status: 'matched', matchedExpenseId: expenseId })
       setBookTx(null)
       return
+    }
+
+    // Inkomst die bij een factuur hoort NIET als losse omzet boeken (dan telt hij dubbel)
+    if (Number(tx.amount) > 0) {
+      const inv = findInvoiceForIncoming(tx, invoices)
+      if (inv && window.confirm(`Deze ontvangst hoort waarschijnlijk bij factuur ${inv.number}. Die factuur telt al als omzet — wil je de betaling daaraan koppelen in plaats van een extra omzetboeking te maken?`)) {
+        confirmLink(tx, 'invoice', inv.id)
+        setBookTx(null)
+        return
+      }
     }
 
     const entryId = genId('be')
@@ -229,56 +285,77 @@ export default function BankView({
     setBookTx(null)
   }
 
+  // Koppelen aan een factuur registreert meteen de betaling (factuur → betaald/deels betaald)
+  const markInvoicePaidFromTx = (invoiceId, tx) => {
+    if (!setInvoices) return
+    setInvoices(prev => prev.map(i => {
+      if (i.id !== invoiceId) return i
+      const payments = (i.payments || []).filter(p => p.bankTxId !== tx.id)
+      payments.push({ amount: Math.abs(Number(tx.amount) || 0), date: tx.date, note: `Bank: ${tx.counterparty || tx.description || ''}`.trim(), bankTxId: tx.id })
+      const total = computeInvoice(i.items).total
+      const paid = payments.reduce((s, p) => s + Number(p.amount || 0), 0)
+      const full = paid >= total - 0.01
+      return { ...i, payments, paidAmount: +paid.toFixed(2), status: full ? 'paid' : 'partial', paidAt: full ? (i.paidAt || tx.date) : null }
+    }))
+  }
+
   const confirmLink = (tx, mode, targetId) => {
-    if (mode === 'invoice') updateTx(tx.id, { status: 'matched', matchedInvoiceId: targetId })
-    else updateTx(tx.id, { status: 'matched', matchedExpenseId: targetId })
+    if (mode === 'invoice') {
+      updateTx(tx.id, { status: 'matched', matchedInvoiceId: targetId })
+      if (Number(tx.amount) > 0) markInvoicePaidFromTx(targetId, tx)
+    } else updateTx(tx.id, { status: 'matched', matchedExpenseId: targetId })
     setLinkTx(null)
   }
 
-  // Bouwt de expense/journaalpost die hoort bij de AI-suggestie van een transactie
+  // Bouwt de boeking die hoort bij de AI-suggestie van een transactie
   // (gedeeld door de 1-klik accept en de bulk-accept, zodat de boekingslogica gelijk blijft).
-  const buildAIBooking = (tx) => {
+  //
+  // Let op — hier zaten de grootste fouten:
+  //  • Inkomsten werden als losse omzet-journaalpost geboekt, naast de factuur → omzet dubbel.
+  //    Nu: koppelen aan de bijbehorende factuur (die dan op betaald gaat), of overslaan.
+  //  • Uitgaven kregen altijd 21% BTW, ook Vercel/Anthropic/… (geen NL BTW) → spookvoorbelasting.
+  //    Nu: BTW-behandeling per leverancier/valuta; buitenlandse diensten = verlegd (4a/4b).
+  //  • Bestond er al een bon met hetzelfde bedrag, dan kwam er een tweede bij → kosten dubbel.
+  //    Nu: koppelen aan die bestaande bon.
+  const buildAIBooking = (tx, pendingExpenses = []) => {
     const isExpense = Number(tx.amount) < 0
     const amountIncl = Math.abs(Number(tx.amount) || 0)
-    const category = tx.aiCategory && BANK_ENTRY_CATEGORIES.includes(tx.aiCategory) ? tx.aiCategory : (isExpense ? 'Kostenpost' : 'Omzetaanpassing')
-    if (isExpense) {
-      const btwRate = salesTax?.standard ?? 21
-      const btwAmount = +(amountIncl - amountIncl / (1 + btwRate / 100)).toFixed(2)
-      const expenseId = genId('exp')
-      return {
-        patch: { status: 'matched', matchedExpenseId: expenseId },
-        expense: {
-          id: expenseId, entityId: activeEntity?.id || null,
-          status: 'processed', source: 'bank',
-          vendor: tx.counterparty || tx.description || '',
-          date: tx.date, currency: tx.currency || 'EUR',
-          originalAmount: amountIncl, exchangeRate: 1,
-          amount: amountIncl, btwAmount, btwRate,
-          category, ledgerAccount: tx.aiLedgerCode || '',
-          notes: `Bank: ${tx.description || tx.externalId}`,
-          capturedAt: new Date().toISOString(),
-        },
-      }
+    if (!isExpense) {
+      const inv = findInvoiceForIncoming(tx, invoices)
+      if (!inv) return { skipped: 'Geen bijbehorende factuur gevonden — koppel handmatig' }
+      return { patch: { status: 'matched', matchedInvoiceId: inv.id }, invoiceId: inv.id }
     }
-    const entryId = genId('be')
+    const existing = findExistingExpense(tx, [...(allExpenses || expenses), ...pendingExpenses])
+    if (existing) return { patch: { status: 'matched', matchedExpenseId: existing.id } }
+    const category = tx.aiCategory && BANK_ENTRY_CATEGORIES.includes(tx.aiCategory) ? tx.aiCategory : 'Kostenpost'
+    const vatTreatment = suggestVatTreatment({ vendor: tx.counterparty, description: tx.description, currency: tx.currency, origCurrency: tx.origCurrency })
+    const { btwRate, btwAmount } = vatForExpense(amountIncl, vatTreatment, salesTax?.standard ?? 21)
+    const expenseId = genId('exp')
     return {
-      patch: { status: 'matched', boekEntryId: entryId },
-      entry: {
-        id: entryId, entityId: activeEntity?.id || null,
-        date: tx.date, category,
-        description: tx.counterparty || tx.description,
-        amount: amountIncl, isDebit: false,
-        ledgerCode: tx.aiLedgerCode || null,
-        reference: `Bank: ${tx.description || tx.externalId}`,
+      patch: { status: 'matched', matchedExpenseId: expenseId },
+      expense: {
+        id: expenseId, entityId: activeEntity?.id || null,
+        status: 'processed', source: 'bank', bankTxId: tx.id,
+        vendor: tx.counterparty || tx.description || '',
+        date: tx.date, currency: tx.currency || 'EUR',
+        originalAmount: tx.origAmount ? Math.abs(Number(tx.origAmount)) : amountIncl,
+        originalCurrency: tx.origCurrency || tx.currency || 'EUR',
+        exchangeRate: 1,
+        amount: amountIncl, btwAmount, btwRate,
+        vatTreatment, vatEstimated: vatTreatment === 'standard',
+        category, ledgerAccount: tx.aiLedgerCode || '',
+        notes: `Bank: ${tx.description || tx.externalId}`,
+        capturedAt: new Date().toISOString(),
       },
     }
   }
 
   const quickAcceptAI = (tx) => {
-    if (!tx.aiLedgerCode) return
-    const { patch, expense, entry } = buildAIBooking(tx)
-    if (expense) { const base = allExpenses || expenses; setExpenses([expense, ...base]) }
-    if (entry) setEntries(prev => [entry, ...(prev || [])])
+    if (!tx.aiLedgerCode && Number(tx.amount) < 0) return
+    const { patch, expense, invoiceId, skipped } = buildAIBooking(tx)
+    if (skipped) { setAiError(skipped); return }
+    if (expense) setExpenses(prev => [expense, ...(prev || [])])
+    if (invoiceId) markInvoicePaidFromTx(invoiceId, tx)
     updateTx(tx.id, patch)
   }
 
@@ -303,18 +380,21 @@ export default function BankView({
     clearSelection()
   }
   const bulkAcceptAI = () => {
-    const targets = (transactions || []).filter(t => selected.has(t.id) && t.status === 'unmatched' && t.aiLedgerCode)
+    const targets = (transactions || []).filter(t => selected.has(t.id) && t.status === 'unmatched' && (t.aiLedgerCode || Number(t.amount) > 0))
     if (targets.length === 0) { clearSelection(); return }
-    const newExpenses = [], newEntries = [], patches = {}
+    const newExpenses = [], patches = {}
+    let skipped = 0
     targets.forEach(tx => {
-      const { patch, expense, entry } = buildAIBooking(tx)
+      if (isLikelyInternalTransfer(tx, ownNames)) { skipped++; return }
+      const { patch, expense, invoiceId, skipped: skip } = buildAIBooking(tx, newExpenses)
+      if (skip) { skipped++; return }
       patches[tx.id] = patch
       if (expense) newExpenses.push(expense)
-      if (entry) newEntries.push(entry)
+      if (invoiceId) markInvoicePaidFromTx(invoiceId, tx)
     })
-    if (newExpenses.length) { const base = allExpenses || expenses; setExpenses([...newExpenses, ...base]) }
-    if (newEntries.length) setEntries(prev => [...newEntries, ...(prev || [])])
+    if (newExpenses.length) setExpenses(prev => [...newExpenses, ...(prev || [])])
     setTransactions(prev => prev.map(t => patches[t.id] ? { ...t, ...patches[t.id] } : t))
+    if (skipped) setAiError(`${skipped} transactie(s) overgeslagen (interne overboeking of inkomst zonder bijbehorende factuur) — handmatig verwerken.`)
     clearSelection()
   }
 
@@ -398,7 +478,7 @@ export default function BankView({
 
   // Alle facturen behalve concepten/creditnota's — ook al betaalde facturen zijn koppelbaar
   // (bv. handmatig als betaald gemarkeerd voordat de bank-CSV geïmporteerd werd).
-  const openInvoices = useMemo(() => (invoices || []).filter(i => !['draft', 'credit_note'].includes(i.status)), [invoices])
+  const openInvoices = useMemo(() => (invoices || []).filter(i => !['draft', 'credit_note'].includes(i.status)).sort((a, b) => (a.status === 'paid') - (b.status === 'paid')), [invoices])
 
   const FILTERS = [
     { id: 'unmatched', label: 'Ongematcht' },
@@ -428,7 +508,7 @@ export default function BankView({
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: '700', color: 'var(--text)', letterSpacing: '-0.025em', margin: '0 0 5px', display: 'flex', alignItems: 'center', gap: '9px' }}>
+          <h1 className="page-title" style={{ margin: '0 0 5px', display: 'flex', alignItems: 'center', gap: '9px' }}>
             <Landmark size={22} style={{ color: 'var(--accent)' }} /> Bank bewegingen
           </h1>
           <p style={{ fontSize: '13px', color: 'var(--text-3)', margin: 0 }}>
@@ -536,7 +616,7 @@ export default function BankView({
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '13.5px', fontWeight: '600', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {tx.description || tx.counterparty || '—'}
-                        {isLikelyInternalTransfer(tx) && tx.status === 'unmatched' && (
+                        {isLikelyInternalTransfer(tx, ownNames) && tx.status === 'unmatched' && (
                           <span title="Lijkt een interne overboeking tussen eigen rekeningen — controleer voor je boekt" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: '700', color: 'var(--warning)', background: 'var(--warning-soft)', padding: '2px 6px', borderRadius: '10px', flexShrink: 0 }}>
                             <AlertTriangle size={10} /> Interne overboeking?
                           </span>
@@ -615,7 +695,7 @@ export default function BankView({
           tx={bookTx}
           ledgerAccounts={ledgerAccounts}
           salesTax={salesTax}
-          isInternalTransfer={isLikelyInternalTransfer(bookTx)}
+          isInternalTransfer={isLikelyInternalTransfer(bookTx, ownNames)}
           onCancel={() => setBookTx(null)}
           onConfirm={(form) => confirmBook(bookTx, form)}
         />
@@ -628,7 +708,7 @@ export default function BankView({
           mode={linkTx.mode}
           options={linkTx.mode === 'invoice' ? openInvoices : expenses}
           clients={clients}
-          isInternalTransfer={isLikelyInternalTransfer(linkTx.tx)}
+          isInternalTransfer={isLikelyInternalTransfer(linkTx.tx, ownNames)}
           onCancel={() => setLinkTx(null)}
           onConfirm={(targetId) => confirmLink(linkTx.tx, linkTx.mode, targetId)}
         />
@@ -645,12 +725,12 @@ const BookModal = ({ tx, ledgerAccounts, salesTax, isInternalTransfer, onCancel,
     category: tx.aiCategory && BANK_ENTRY_CATEGORIES.includes(tx.aiCategory) ? tx.aiCategory : (isExpense ? 'Kostenpost' : 'Omzetaanpassing'),
     ledgerCode: tx.aiLedgerCode || '',
     asExpense: isExpense,
+    vatTreatment: suggestVatTreatment({ vendor: tx.counterparty, description: tx.description, currency: tx.currency, origCurrency: tx.origCurrency }),
     btwRate: salesTax?.standard ?? 21,
   })
   const amountIncl = Math.abs(Number(tx.amount) || 0)
-  const btwPreview = form.asExpense
-    ? +(amountIncl - amountIncl / (1 + (Number(form.btwRate) || 0) / 100)).toFixed(2)
-    : 0
+  const { btwAmount: btwPreview } = form.asExpense ? vatForExpense(amountIncl, form.vatTreatment, form.btwRate) : { btwAmount: 0 }
+  const reversePreview = form.asExpense && form.vatTreatment.startsWith('reverse') ? +(amountIncl * 0.21).toFixed(2) : 0
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
       <Card style={{ width: '420px', maxWidth: '90vw', padding: '20px' }}>
@@ -685,14 +765,27 @@ const BookModal = ({ tx, ledgerAccounts, salesTax, isInternalTransfer, onCancel,
             </label>
           )}
           {isExpense && form.asExpense && (
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <select style={{ ...inp, flex: 1 }} value={form.btwRate} onChange={e => setForm(f => ({ ...f, btwRate: Number(e.target.value) }))}>
-                {(salesTax?.rates || [0, 9, 21]).map(r => <option key={r} value={r}>{r}% {salesTax?.name || 'BTW'}</option>)}
+            <>
+              <select style={inp} value={form.vatTreatment} onChange={e => setForm(f => ({ ...f, vatTreatment: e.target.value }))}>
+                {VAT_TREATMENTS.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
               </select>
-              <span style={{ fontSize: '11.5px', color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
-                {salesTax?.name || 'BTW'}: {fmtMoney(btwPreview, tx.currency)}
-              </span>
-            </div>
+              {form.vatTreatment === 'standard' && (
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <select style={{ ...inp, flex: 1 }} value={form.btwRate} onChange={e => setForm(f => ({ ...f, btwRate: Number(e.target.value) }))}>
+                    {(salesTax?.rates || [0, 9, 21]).map(r => <option key={r} value={r}>{r}% {salesTax?.name || 'BTW'}</option>)}
+                  </select>
+                  <span style={{ fontSize: '11.5px', color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
+                    Voorbelasting: {fmtMoney(btwPreview, tx.currency)}
+                  </span>
+                </div>
+              )}
+              <div style={{ fontSize: '11.5px', color: 'var(--text-3)', lineHeight: 1.5 }}>
+                {form.vatTreatment === 'standard' && 'Alleen aftrekbaar met een factuur waarop Nederlandse BTW staat.'}
+                {form.vatTreatment === 'reverse_non_eu' && `Geen BTW op de factuur. Je geeft ${fmtMoney(reversePreview)} aan in rubriek 4a én trekt het af in 5b (netto € 0).`}
+                {form.vatTreatment === 'reverse_eu' && `BTW verlegd door EU-leverancier. ${fmtMoney(reversePreview)} in rubriek 4b én aftrekbaar in 5b (netto € 0).`}
+                {form.vatTreatment === 'none' && 'Telt mee als kosten, niet in de BTW-aangifte.'}
+              </div>
+            </>
           )}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
@@ -763,7 +856,7 @@ const LinkModal = ({ tx, mode, options, clients, isInternalTransfer, onCancel, o
                 )}
               </span>
               <span style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-3)' }}>
-                {fmtMoney(mode === 'invoice' ? (o.amountIncl || o.total || 0) : (o.amountIncl || o.amount || 0))}
+                {fmtMoney(optionAmount(o, mode))}
               </span>
             </button>
           ))}

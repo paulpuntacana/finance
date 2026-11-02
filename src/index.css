@@ -1,77 +1,102 @@
 @import "tailwindcss";
 
 /* ── Global CSS Variables (Dark default, Light override) ───────────────────── */
+/* ── Design tokens ──────────────────────────────────────────────────────────
+   Grafiet + inktblauw. Statuskleuren (success/warning/danger) alleen voor status.
+   Dark is de standaard, light via [data-theme="light"]. Alle schermen lezen deze vars. */
 :root {
-  --bg: #060b15;
-  --bg-alt: #0a1120;
-  --surface: #0e1628;
-  --surface-2: #131e32;
-  --surface-3: #19273f;
-  --border: rgba(59,130,246,0.1);
-  --border-2: rgba(59,130,246,0.18);
-  --border-3: rgba(59,130,246,0.32);
-  --border-strong: rgba(59,130,246,0.18);
-  --text: #dce8ff;
-  --text-2: #7a9cc8;
-  --text-3: #3d5c80;
-  --accent: #3b82f6;
-  --accent-2: #60a5fa;
-  --accent-hover: #2563eb;
-  --accent-soft: rgba(59,130,246,0.13);
-  --accent-glow: rgba(59,130,246,0.25);
-  --success: #10b981;
-  --success-soft: rgba(16,185,129,0.12);
-  --warning: #f59e0b;
-  --warning-soft: rgba(245,158,11,0.12);
-  --danger: #ef4444;
-  --danger-soft: rgba(239,68,68,0.12);
-  --info: #06b6d4;
-  --info-soft: rgba(6,182,212,0.12);
+  color-scheme: dark;
+  --bg: #0b1015;
+  --bg-alt: #0e141a;
+  --surface: #121a21;
+  --surface-2: #17212a;
+  --surface-3: #1e2a35;
+  --border: rgba(206,222,238,0.07);
+  --border-2: rgba(206,222,238,0.12);
+  --border-3: rgba(206,222,238,0.22);
+  --border-strong: rgba(206,222,238,0.12);
+  --text: #e8eef4;
+  --text-2: #a9b7c5;
+  --text-3: #74859a;
+  --accent: #6d8dff;
+  --accent-2: #93acff;
+  --accent-hover: #5877f5;
+  --accent-soft: rgba(109,141,255,0.14);
+  --accent-glow: rgba(109,141,255,0.28);
+  --success: #3fcf8e;
+  --success-soft: rgba(63,207,142,0.12);
+  --warning: #f2a93b;
+  --warning-soft: rgba(242,169,59,0.13);
+  --danger: #f2675c;
+  --danger-soft: rgba(242,103,92,0.13);
+  --info: #4cc3e0;
+  --info-soft: rgba(76,195,224,0.12);
   --ink: var(--text);
   --ink-2: var(--text-2);
   --muted: var(--text-3);
-  --muted-2: #1a2f4a;
-  --btn-primary: #3b82f6;
+  --muted-2: #22303c;
+  --btn-primary: var(--accent);
   --btn-primary-text: #fff;
+  --shadow-1: 0 1px 0 rgba(255,255,255,0.03) inset, 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-pop: 0 18px 48px -12px rgba(0,0,0,0.6), 0 0 0 1px var(--border-2);
+  --seg-active: #2a3846;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --font-ui: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-num: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
 }
 
 [data-theme="light"] {
-  --bg: #f3f7ff;
-  --bg-alt: #e8effc;
+  color-scheme: light;
+  --bg: #f4f6f8;
+  --bg-alt: #eceff3;
   --surface: #ffffff;
-  --surface-2: #eef3ff;
-  --surface-3: #e3ecfd;
-  --border: rgba(30,64,175,0.08);
-  --border-2: rgba(30,64,175,0.15);
-  --border-3: rgba(30,64,175,0.28);
-  --border-strong: rgba(30,64,175,0.15);
-  --text: #071432;
-  --text-2: #395a90;
-  --text-3: #7a9cc8;
-  --accent: #2563eb;
-  --accent-2: #3b82f6;
-  --accent-hover: #1d4ed8;
-  --accent-soft: rgba(37,99,235,0.09);
-  --accent-glow: rgba(37,99,235,0.18);
-  --success: #059669;
-  --success-soft: rgba(5,150,105,0.1);
-  --warning: #d97706;
-  --warning-soft: rgba(217,119,6,0.1);
-  --danger: #dc2626;
-  --danger-soft: rgba(220,38,38,0.1);
-  --info: #0891b2;
-  --info-soft: rgba(8,145,178,0.1);
+  --surface-2: #f2f4f7;
+  --surface-3: #e8ecf1;
+  --border: rgba(17,32,51,0.08);
+  --border-2: rgba(17,32,51,0.13);
+  --border-3: rgba(17,32,51,0.24);
+  --border-strong: rgba(17,32,51,0.13);
+  --text: #121b26;
+  --text-2: #475668;
+  --text-3: #6c7a8b;
+  --accent: #3d5afe;
+  --accent-2: #5b74ff;
+  --accent-hover: #2f49e0;
+  --accent-soft: rgba(61,90,254,0.09);
+  --accent-glow: rgba(61,90,254,0.2);
+  --success: #12935b;
+  --success-soft: rgba(18,147,91,0.1);
+  --warning: #b86e00;
+  --warning-soft: rgba(184,110,0,0.1);
+  --danger: #d23f33;
+  --danger-soft: rgba(210,63,51,0.09);
+  --info: #0b7f9c;
+  --info-soft: rgba(11,127,156,0.09);
   --ink: var(--text);
   --ink-2: var(--text-2);
   --muted: var(--text-3);
-  --muted-2: #c0d4f4;
-  --btn-primary: #1d4ed8;
+  --muted-2: #d5dce4;
+  --btn-primary: var(--accent);
   --btn-primary-text: #fff;
+  --shadow-1: 0 1px 2px rgba(17,32,51,0.06);
+  --seg-active: #ffffff;
+  --shadow-pop: 0 18px 48px -12px rgba(17,32,51,0.25), 0 0 0 1px var(--border-2);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
+/* Tailwind v4 kleurt randen standaard met currentColor (wit in dark mode). Zet de standaard
+   op de rand-token, zodat border/divide-y zonder kleurklasse overal subtiel blijft. */
+@layer base {
+  *, ::before, ::after, ::backdrop { border-color: var(--border); }
+}
 body, html { background: var(--bg); color: var(--text); margin: 0; padding: 0; }
-* { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+body { font-family: var(--font-ui); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; font-feature-settings: 'ss01' 1; }
+button, input, select, textarea { font-family: inherit; }
+::selection { background: var(--accent-glow); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 
 input, textarea, select {
   background: var(--surface) !important;

@@ -226,7 +226,7 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px', marginBottom: '24px' }}>
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: '700', color: 'var(--text)', letterSpacing: '-0.025em', margin: '0 0 5px' }}>
+          <h1 className="page-title" style={{ margin: '0 0 4px' }}>
             Historisch importeren
           </h1>
           <p style={{ fontSize: '13px', color: 'var(--text-3)', margin: 0 }}>

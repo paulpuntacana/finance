@@ -8,10 +8,11 @@ import {
   CheckCircle2, CircleDashed, FileWarning, Wallet, Inbox,
   BookOpen, Sparkles, RefreshCw, Globe, Hash, ArrowRight, Zap, FileBarChart,
   Network, Briefcase, Percent, Tag, Lightbulb, Wand2, Brain, MessageSquare, Star,
-  FileCheck2, ShieldCheck, LogOut, Moon, Sun, Paperclip, ShoppingCart, Calculator,
+  FileCheck2, ShieldCheck, ScanSearch, CloudOff, LogOut, Moon, Sun, Paperclip, ShoppingCart, Calculator,
   AlignLeft, AlignCenter, AlignRight, Key, Link2, Landmark,
 } from 'lucide-react';
-import { useAuth, useCloudStorage } from './src/AuthProvider';
+import { useAuth, useCloudStorage, useSyncStatus } from './src/AuthProvider';
+import { computeInvoice, lineNet, todayISO, isRevenueInvoice, invoiceDate, invoiceOpenAmount, expenseNet, expenseVatTreatment, expenseReverseVat, buildVatReturn, buildProfitLoss, monthlySeries, suggestVatTreatment, VAT_TREATMENTS, yearOf } from './src/finance';
 import { supabase } from './src/supabase';
 import { useLang } from './src/LangContext';
 import OrgUsersView from './src/OrgUsersView';
@@ -20,6 +21,10 @@ import HorizonPlanner from './src/HorizonPlanner';
 import CreditManagementView from './src/CreditManagementView';
 import BoekhoudenView from './src/BoekhoudenView';
 import BankView from './src/BankView';
+import CommandPalette from './src/CommandPalette';
+import DataCheckView from './src/DataCheckView';
+import { findDataIssues } from './src/finance';
+import { VizStyles, KpiTile, YearChart, CostDonut, VatPot, AgingBar, TopClients } from './src/DashboardCharts';
 import ImportView from './src/ImportView';
 import PurchaseInvoicesView from './src/PurchaseInvoicesView';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, Area, AreaChart } from 'recharts';
@@ -86,78 +91,46 @@ const EditableField = ({ value, onChange, className, style }) => {
 const ThemeStyles = () => (
   <style>{`
 
-    :root {
-      --bg: #060b15;
-      --bg-alt: #0a1120;
-      --surface: #0e1628;
-      --surface-2: #131e32;
-      --surface-3: #19273f;
-      --border: rgba(59,130,246,0.1);
-      --border-2: rgba(59,130,246,0.18);
-      --border-3: rgba(59,130,246,0.32);
-      --border-strong: rgba(59,130,246,0.18);
-      --text: #dce8ff;
-      --text-2: #7a9cc8;
-      --text-3: #3d5c80;
-      --accent: #3b82f6;
-      --accent-2: #60a5fa;
-      --accent-hover: #2563eb;
-      --accent-soft: rgba(59,130,246,0.13);
-      --accent-glow: rgba(59,130,246,0.25);
-      --success: #10b981;
-      --success-soft: rgba(16,185,129,0.12);
-      --warning: #f59e0b;
-      --warning-soft: rgba(245,158,11,0.12);
-      --danger: #ef4444;
-      --danger-soft: rgba(239,68,68,0.12);
-      --info: #06b6d4;
-      --info-soft: rgba(6,182,212,0.12);
-      /* Legacy aliases */
-      --ink: var(--text);
-      --ink-2: var(--text-2);
-      --muted: var(--text-3);
-      --muted-2: #1a2f4a;
-    }
-
-    [data-theme="light"] {
-      --bg: #f3f7ff;
-      --bg-alt: #e8effc;
-      --surface: #ffffff;
-      --surface-2: #eef3ff;
-      --surface-3: #e3ecfd;
-      --border: rgba(30,64,175,0.08);
-      --border-2: rgba(30,64,175,0.15);
-      --border-3: rgba(30,64,175,0.28);
-      --border-strong: rgba(30,64,175,0.15);
-      --text: #071432;
-      --text-2: #395a90;
-      --text-3: #7a9cc8;
-      --accent: #2563eb;
-      --accent-2: #3b82f6;
-      --accent-hover: #1d4ed8;
-      --accent-soft: rgba(37,99,235,0.09);
-      --accent-glow: rgba(37,99,235,0.18);
-      --success: #059669;
-      --success-soft: rgba(5,150,105,0.1);
-      --warning: #d97706;
-      --warning-soft: rgba(217,119,6,0.1);
-      --danger: #dc2626;
-      --danger-soft: rgba(220,38,38,0.1);
-      --info: #0891b2;
-      --info-soft: rgba(8,145,178,0.1);
-      --ink: var(--text);
-      --ink-2: var(--text-2);
-      --muted: var(--text-3);
-      --muted-2: #c0d4f4;
-    }
-
+    /* Tokens staan in src/index.css */
     *, *::before, *::after { box-sizing: border-box; }
     body, html { background: var(--bg); color: var(--text); margin: 0; padding: 0; }
-    * { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-    .num { font-family: 'JetBrains Mono', monospace; font-feature-settings: 'tnum' 1, 'zero' 1; letter-spacing: -0.02em; }
-    .font-display { font-family: 'Inter', sans-serif; letter-spacing: -0.03em; }
-    .font-body { font-family: 'Inter', sans-serif; }
-    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .num { font-family: var(--font-num); font-feature-settings: 'tnum' 1, 'zero' 1; letter-spacing: -0.01em; }
+    .font-display { font-family: var(--font-ui); letter-spacing: -0.025em; font-weight: 600; }
+    .font-body { font-family: var(--font-ui); }
+    .font-mono { font-family: var(--font-num); }
+
+    /* ── Bedragen: €-teken klein/gedempt, centen lichter — leest als een kasboek ── */
+    /* Factuur-preview blijft in Inter, gelijk aan de PDF */
+    .invoice-printable, .quote-printable { font-family: 'Inter', -apple-system, sans-serif; }
+    .money { font-family: var(--font-num); font-feature-settings: 'tnum' 1, 'zero' 1; letter-spacing: -0.02em; white-space: nowrap; }
+    .money .cur { font-size: 0.72em; color: var(--text-3); margin-right: 0.18em; font-weight: 500; }
+    .money .cents { font-size: 0.78em; opacity: 0.6; font-weight: inherit; }
+    .money.neg { color: var(--danger); }
+
+    /* ── Pagina-kop ── */
+    .page-title { font-size: 26px; line-height: 1.15; font-weight: 650; letter-spacing: -0.03em; color: var(--text); }
+    .page-sub { font-size: 13px; color: var(--text-3); margin-top: 4px; }
+    @media (min-width: 768px) { .page-title { font-size: 30px; } }
+
+    /* ── Tabellen (data-dicht, rustig, cijfers rechts) ── */
+    .ledger { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+    .ledger thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); text-align: left; font-weight: 500; font-size: 12px; color: var(--text-3); padding: 10px 14px; border-bottom: 1px solid var(--border-2); white-space: nowrap; }
+    .ledger tbody td { padding: 11px 14px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: middle; }
+    .ledger tbody tr { transition: background 0.12s; }
+    .ledger tbody tr:hover { background: var(--surface-2); }
+    .ledger tbody tr:last-child td { border-bottom: none; }
+    .ledger .r { text-align: right; }
+    .ledger tfoot td { padding: 12px 14px; border-top: 1px solid var(--border-2); font-weight: 600; }
+
+    /* ── Segmented control (filters) ── */
+    .seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); flex-wrap: wrap; }
+    .seg button { border: 0; background: transparent; color: var(--text-2); font-size: 12.5px; font-weight: 500; padding: 5px 11px; border-radius: 7px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: background .12s, color .12s; }
+    .seg button:hover { color: var(--text); }
+    .seg button[aria-pressed="true"] { background: var(--seg-active); color: var(--text); box-shadow: var(--shadow-1); }
+    .seg .count { font-family: var(--font-num); font-size: 11px; color: var(--text-3); }
+
+    /* ── Kbd ── */
+    kbd { font-family: var(--font-num); font-size: 10.5px; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text-3); }
 
     input, textarea, select {
       background: var(--surface) !important;
@@ -229,7 +202,6 @@ const fmtDateLong = (iso) => {
   return d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'long', year: 'numeric' });
 };
 
-const todayISO = () => new Date().toISOString().split('T')[0];
 
 // Converteert ISO-timestamp naar YYYY-MM-DD in de LOKALE tijdzone (niet UTC).
 // Voorkomt dat een datum als "10 jun 00:00 CEST" (= "9 jun 22:00 UTC") als "9 jun" wordt weergegeven.
@@ -257,39 +229,30 @@ const daysBetween = (a, b) => {
 
 const generateId = (prefix) => `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-const computeInvoice = (items = []) => {
-  let subtotal = 0;
-  let totalDiscount = 0;
-  const btwByRate = {};
-  items.forEach((it) => {
-    const lineBase = Number(it.quantity || 0) * Number(it.price || 0);
-    let lineDiscount = 0;
-    if (it.discount && Number(it.discount.value) > 0) {
-      lineDiscount = it.discount.type === 'percent'
-        ? lineBase * (Number(it.discount.value) / 100)
-        : Number(it.discount.value);
-    }
-    const lineNet = Math.max(0, lineBase - lineDiscount);
-    const rate = Number(it.btwRate || 0);
-    const lineBtw = lineNet * (rate / 100);
-    subtotal += lineNet;
-    totalDiscount += lineDiscount;
-    btwByRate[rate] = (btwByRate[rate] || 0) + lineBtw;
+// Volgend factuurnummer voor een entiteit. Kijkt naar de teller ÉN naar de hoogste bestaande
+// nummers met hetzelfde prefix, zodat een achterlopende teller nooit een dubbel nummer oplevert.
+const nextInvoiceNumberFor = (entity, allInvoices = []) => {
+  const currentYear = new Date().getFullYear();
+  const prefix = entity?.invoicePrefix ?? `${currentYear}-`;
+  let counter = Number(entity?.nextInvoiceNumber) || 1;
+  if (entity?.yearlyReset && entity?.lastInvoiceYear && entity.lastInvoiceYear < currentYear) counter = 1;
+  let highest = 0;
+  allInvoices.forEach(i => {
+    if (entity?.id && i.entityId && i.entityId !== entity.id) return;
+    const num = String(i.number || '');
+    if (!num.startsWith(prefix)) return;
+    const rest = num.slice(prefix.length);
+    if (/^\d+$/.test(rest)) highest = Math.max(highest, parseInt(rest, 10));
   });
-  const btwTotal = Object.values(btwByRate).reduce((a, b) => a + b, 0);
-  return { subtotal, totalDiscount, btwByRate, btwTotal, total: subtotal + btwTotal };
+  const seq = Math.max(counter, highest + 1);
+  return { number: `${prefix}${String(seq).padStart(4, '0')}`, seq, year: currentYear };
 };
 
-const computeLine = (item) => {
-  const base = Number(item.quantity || 0) * Number(item.price || 0);
-  let discount = 0;
-  if (item.discount && Number(item.discount.value) > 0) {
-    discount = item.discount.type === 'percent'
-      ? base * (Number(item.discount.value) / 100)
-      : Number(item.discount.value);
-  }
-  return { base, discount, net: Math.max(0, base - discount) };
-};
+const isDuplicateInvoiceNumber = (allInvoices, number, entityId, ownId) =>
+  !!number && allInvoices.some(i => i.id !== ownId && i.number === number && (i.entityId || null) === (entityId || null));
+
+// computeInvoice / lineNet komen uit src/finance.js (ook correct voor creditnota's)
+const computeLine = (item) => lineNet(item);
 
 const computeInvoiceStatus = (invoice) => {
   if (invoice.status === 'paid' || invoice.status === 'draft' || invoice.status === 'credit_note') return invoice.status;
@@ -1856,31 +1819,31 @@ const NineDotsIcon = ({ size = 16, color = 'white', animated = false }) => {
   );
 };
 
-const Button = ({ variant = 'primary', size = 'md', className = '', children, ...props }) => {
-  const base = 'inline-flex items-center justify-center gap-2 font-medium transition-all rounded-lg disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap';
+const Button = ({ variant = 'primary', size = 'md', className = '', style, children, ...props }) => {
+  const base = 'inline-flex items-center justify-center gap-1.5 font-medium transition-[background,border-color,color,box-shadow,transform] duration-150 disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap active:translate-y-px select-none';
   const sizes = {
-    sm: 'px-3 py-1.5 text-xs',
-    md: 'px-4 py-2.5 text-sm',
-    lg: 'px-5 py-3 text-base',
-  };
-  const variants = {
-    primary: 'text-white hover:opacity-90 active:scale-[0.98]',
-    secondary: 'border hover:opacity-80 active:scale-[0.98]',
-    ghost: 'hover:opacity-80',
-    danger: 'text-white hover:opacity-90',
-    outline: 'border bg-transparent hover:opacity-80',
+    sm: 'h-8 px-3 text-[12.5px] rounded-[8px]',
+    md: 'h-9 px-3.5 text-[13.5px] rounded-[9px]',
+    lg: 'h-11 px-5 text-[14.5px] rounded-[10px]',
   };
   const styles = {
-    primary: { background: 'var(--accent)', color: '#fff' },
-    secondary: { borderColor: 'var(--border-2)', background: 'var(--surface-2)', color: 'var(--text)' },
+    primary: { background: 'var(--accent)', color: '#fff', boxShadow: '0 1px 0 rgba(255,255,255,0.18) inset, 0 1px 2px rgba(0,0,0,0.25)' },
+    secondary: { background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border-2)' },
     ghost: { background: 'transparent', color: 'var(--text-2)' },
-    danger: { background: 'var(--danger)' },
-    outline: { borderColor: 'var(--border-2)', color: 'var(--text)' },
+    danger: { background: 'var(--danger-soft)', color: 'var(--danger)', border: '1px solid transparent' },
+    outline: { background: 'transparent', color: 'var(--text)', border: '1px solid var(--border-2)' },
+  };
+  const hover = {
+    primary: 'hover:brightness-110',
+    secondary: 'hover:border-[color:var(--border-3)]',
+    ghost: 'hover:bg-[color:var(--surface-2)] hover:text-[color:var(--text)]',
+    danger: 'hover:border-[color:var(--danger)]',
+    outline: 'hover:bg-[color:var(--surface-2)]',
   };
   return (
     <button
-      style={styles[variant]}
-      className={`${base} ${sizes[size]} ${variants[variant]} ${className}`}
+      style={{ ...styles[variant], ...style }}
+      className={`${base} ${sizes[size]} ${hover[variant] || ''} ${className}`}
       {...props}
     >
       {children}
@@ -1888,38 +1851,42 @@ const Button = ({ variant = 'primary', size = 'md', className = '', children, ..
   );
 };
 
+const fieldLabel = 'block text-[12.5px] font-medium mb-1.5';
+const fieldBase = 'w-full h-9 px-3 text-[13.5px] rounded-[9px] border transition-[border-color,box-shadow]';
+
 const Input = ({ label, hint, error, className = '', ...props }) => (
   <div className={className}>
-    {label && <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-2)', letterSpacing: '0.03em' }}>{label}</label>}
+    {label && <label className={fieldLabel} style={{ color: 'var(--text-2)' }}>{label}</label>}
     <input
       {...props}
-      className="w-full px-3 py-2.5 text-sm rounded-lg border transition-colors"
+      aria-invalid={!!error}
+      className={fieldBase}
       style={{ borderColor: error ? 'var(--danger)' : 'var(--border-2)', background: 'var(--surface)', color: 'var(--text)' }}
     />
-    {hint && <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>{hint}</p>}
-    {error && <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>{error}</p>}
+    {hint && <p className="text-xs mt-1.5" style={{ color: 'var(--text-3)' }}>{hint}</p>}
+    {error && <p className="text-xs mt-1.5" style={{ color: 'var(--danger)' }}>{error}</p>}
   </div>
 );
 
 const Textarea = ({ label, hint, className = '', rows = 3, ...props }) => (
   <div className={className}>
-    {label && <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-2)', letterSpacing: '0.03em' }}>{label}</label>}
+    {label && <label className={fieldLabel} style={{ color: 'var(--text-2)' }}>{label}</label>}
     <textarea
       rows={rows}
       {...props}
-      className="w-full px-3 py-2.5 text-sm rounded-lg border transition-colors resize-none"
-      style={{ borderColor: 'var(--border-2)', background: 'var(--surface)', color: 'var(--text)' }}
+      className="w-full px-3 py-2 text-[13.5px] rounded-[9px] border transition-[border-color,box-shadow] resize-y"
+      style={{ borderColor: 'var(--border-2)', background: 'var(--surface)', color: 'var(--text)', minHeight: 64 }}
     />
-    {hint && <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>{hint}</p>}
+    {hint && <p className="text-xs mt-1.5" style={{ color: 'var(--text-3)' }}>{hint}</p>}
   </div>
 );
 
 const Select = ({ label, children, className = '', ...props }) => (
   <div className={className}>
-    {label && <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-2)', letterSpacing: '0.03em' }}>{label}</label>}
+    {label && <label className={fieldLabel} style={{ color: 'var(--text-2)' }}>{label}</label>}
     <select
       {...props}
-      className="w-full px-3 py-2.5 text-sm rounded-lg border transition-colors cursor-pointer"
+      className={`${fieldBase} cursor-pointer`}
       style={{ borderColor: 'var(--border-2)', background: 'var(--surface)', color: 'var(--text)' }}
     >
       {children}
@@ -1927,42 +1894,47 @@ const Select = ({ label, children, className = '', ...props }) => (
   </div>
 );
 
+// Status-badge: kleur + stip + woord (nooit alleen kleur)
 const Badge = ({ status, children }) => {
-  const styles = {
-    draft: { background: '#F4F2EC', color: '#6B6359' },
-    sent: { background: 'var(--info-soft)', color: 'var(--info)' },
-    paid: { background: 'var(--success-soft)', color: 'var(--success)' },
-    overdue: { background: 'var(--danger-soft)', color: 'var(--danger)' },
-    open: { background: 'var(--warning-soft)', color: 'var(--warning)' },
-    processed: { background: 'var(--success-soft)', color: 'var(--success)' },
-    partial: { background: 'rgba(139,92,246,0.12)', color: '#7c3aed' },
-    credit_note: { background: 'var(--danger-soft)', color: 'var(--danger)' },
-  };
+  const tone = {
+    draft: ['var(--surface-3)', 'var(--text-2)'],
+    sent: ['var(--info-soft)', 'var(--info)'],
+    paid: ['var(--success-soft)', 'var(--success)'],
+    overdue: ['var(--danger-soft)', 'var(--danger)'],
+    open: ['var(--warning-soft)', 'var(--warning)'],
+    processed: ['var(--success-soft)', 'var(--success)'],
+    partial: ['var(--accent-soft)', 'var(--accent)'],
+    credit_note: ['var(--surface-3)', 'var(--danger)'],
+  }[status] || ['var(--surface-3)', 'var(--text-2)'];
   const labels = {
-    draft: 'Concept',
-    sent: 'Verstuurd',
-    paid: 'Betaald',
-    overdue: 'Te laat',
-    open: 'Open',
-    processed: 'Verwerkt',
-    partial: 'Deelbetaling',
-    credit_note: 'Creditnota',
+    draft: 'Concept', sent: 'Verstuurd', paid: 'Betaald', overdue: 'Te laat', open: 'Open',
+    processed: 'Verwerkt', partial: 'Deels betaald', credit_note: 'Creditnota',
   };
   return (
-    <span style={styles[status] || styles.draft} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider">
+    <span style={{ background: tone[0], color: tone[1] }} className="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-full text-[11.5px] font-medium whitespace-nowrap">
+      <span style={{ width: 6, height: 6, borderRadius: 999, background: 'currentColor', opacity: status === 'draft' ? 0.5 : 1 }} />
       {children || labels[status] || status}
     </span>
   );
 };
 
 const Modal = ({ open, onClose, children, size = 'md' }) => {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, [open, onClose]);
   if (!open) return null;
   const sizes = { sm: 'max-w-md', md: 'max-w-2xl', lg: 'max-w-4xl', xl: 'max-w-6xl', full: 'max-w-7xl' };
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto" style={{ background: 'rgba(26, 22, 18, 0.4)' }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto" style={{ background: 'rgba(5,9,13,0.55)', backdropFilter: 'blur(3px)' }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div
-        className={`${sizes[size]} w-full rounded-xl shadow-2xl my-8 animate-slide`}
-        style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        role="dialog" aria-modal="true"
+        className={`${sizes[size]} w-full my-8 animate-slide`}
+        style={{ background: 'var(--surface)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-pop)' }}
       >
         {children}
       </div>
@@ -1970,10 +1942,10 @@ const Modal = ({ open, onClose, children, size = 'md' }) => {
   );
 };
 
-const Card = ({ children, className = '', hover = false, ...props }) => (
+const Card = ({ children, className = '', hover = false, style, ...props }) => (
   <div
-    className={`rounded-xl ${hover ? 'card-hover' : ''} ${className}`}
-    style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+    className={`${hover ? 'card-hover' : ''} ${className}`}
+    style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', ...style }}
     {...props}
   >
     {children}
@@ -1981,13 +1953,49 @@ const Card = ({ children, className = '', hover = false, ...props }) => (
 );
 
 const EmptyState = ({ icon: Icon, title, description, action }) => (
-  <div className="text-center py-16 px-6">
-    <div className="inline-flex items-center justify-center w-14 h-14 rounded-full mb-4" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-      <Icon size={22} style={{ color: 'var(--muted)' }} />
+  <div className="text-center py-14 px-6">
+    <div className="inline-flex items-center justify-center w-11 h-11 rounded-[12px] mb-4" style={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)' }}>
+      <Icon size={18} style={{ color: 'var(--text-2)' }} />
     </div>
-    <h3 className="font-display text-xl mb-2" style={{ color: 'var(--ink)' }}>{title}</h3>
-    <p className="text-sm mb-5 max-w-sm mx-auto" style={{ color: 'var(--muted)' }}>{description}</p>
+    <h3 className="text-[15px] font-semibold mb-1" style={{ color: 'var(--text)' }}>{title}</h3>
+    <p className="text-[13px] mb-5 max-w-sm mx-auto" style={{ color: 'var(--text-3)' }}>{description}</p>
     {action}
+  </div>
+);
+
+// Bedrag in kasboekstijl: klein €-teken, centen lichter. Gebruik voor elk zichtbaar geldbedrag.
+const Money = ({ value, currency = 'EUR', className = '', signed = false, style }) => {
+  const n = Number(value) || 0;
+  const abs = Math.abs(n);
+  const [whole, cents] = abs.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).split(',');
+  const sym = currency === 'EUR' ? '€' : currency === 'USD' ? '$' : currency === 'GBP' ? '£' : currency;
+  return (
+    <span className={`money ${n < 0 ? 'neg' : ''} ${className}`} style={style}>
+      {n < 0 ? '−' : signed && n > 0 ? '+' : ''}<span className="cur">{sym}</span>{whole}<span className="cents">,{cents}</span>
+    </span>
+  );
+};
+
+// Vaste paginakop: titel, korte uitleg, acties rechts
+const PageHeader = ({ title, sub, actions, children }) => (
+  <div className="flex items-end justify-between gap-4 flex-wrap">
+    <div className="min-w-0">
+      <h1 className="page-title">{title}</h1>
+      {sub && <div className="page-sub">{sub}</div>}
+      {children}
+    </div>
+    {actions && <div className="flex items-center gap-2 flex-wrap">{actions}</div>}
+  </div>
+);
+
+// Segmented filter: [{ id, label, count? }]
+const Segmented = ({ options, value, onChange }) => (
+  <div className="seg" role="group">
+    {options.map(o => (
+      <button key={o.id} type="button" aria-pressed={value === o.id} onClick={() => onChange(o.id)}>
+        {o.label}{o.count !== undefined && <span className="count">{o.count}</span>}
+      </button>
+    ))}
   </div>
 );
 
@@ -2056,7 +2064,7 @@ const EntitySwitcher = ({ activeEntity, entities, onSwitch, onManage }) => {
           <div className="border-t mt-1 pt-1" style={{ borderColor: 'var(--border)' }}>
             <button
               onClick={() => { onManage(); setOpen(false); }}
-              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-stone-50 text-left text-sm"
+              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[color:var(--surface-2)] text-left text-sm"
               style={{ color: 'var(--accent)' }}
             >
               <Plus size={14} /> Bedrijven beheren
@@ -2071,7 +2079,7 @@ const EntitySwitcher = ({ activeEntity, entities, onSwitch, onManage }) => {
 // ============================================================================
 // SIDEBAR / NAV
 // ============================================================================
-const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, onSwitchEntity, user, profile, onSignOut, theme, onToggleTheme, onGoToProfile }) => {
+const Sidebar = ({ activeTab, setActiveTab, onOpenSearch, openCount, issueCount = 0, activeEntity, entities, onSwitchEntity, user, profile, onSignOut, theme, onToggleTheme, onGoToProfile }) => {
   const { t } = useLang();
   const mainItems = [
     { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
@@ -2086,6 +2094,7 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
     { id: 'entities', label: t('nav.entities'), icon: Network },
     { id: 'tax', label: t('nav.tax'), icon: FileBarChart },
     { id: 'boekhouding', label: t('nav.accounting'), icon: BookOpen },
+    { id: 'controle', label: 'Data-controle', icon: ScanSearch, badge: issueCount },
     { id: 'bank', label: t('nav.bank'), icon: Landmark },
     { id: 'horizonplanner', label: t('nav.horizon'), icon: TrendingUp },
     { id: 'ai', label: t('nav.ai'), icon: Brain },
@@ -2112,25 +2121,26 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
     return (
       <button
         onClick={() => setActiveTab(item.id)}
+        aria-current={isActive ? 'page' : undefined}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          width: '100%', padding: '7px 10px', borderRadius: '8px', marginBottom: '1px',
-          background: isActive ? 'var(--accent-soft)' : 'transparent',
+          width: '100%', height: '32px', padding: '0 10px', borderRadius: '8px', marginBottom: '1px',
+          background: isActive ? 'var(--surface-3)' : 'transparent',
+          boxShadow: isActive ? 'inset 0 0 0 1px var(--border-2)' : 'none',
           border: 'none', cursor: 'pointer',
-          borderLeft: `2px solid ${isActive ? 'var(--accent)' : 'transparent'}`,
-          transition: 'all 0.12s ease',
+          transition: 'background 0.12s ease',
         }}
-        onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--surface-3)'; }}
+        onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--surface-2)'; }}
         onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
       >
         <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Icon size={15} style={{ color: isActive ? 'var(--accent)' : 'var(--text-3)', flexShrink: 0 }} />
-          <span style={{ fontSize: '13px', fontWeight: isActive ? '600' : '500', color: isActive ? 'var(--accent)' : 'var(--text-2)' }}>
+          <Icon size={15} strokeWidth={isActive ? 2.2 : 1.8} style={{ color: isActive ? 'var(--accent)' : 'var(--text-3)', flexShrink: 0 }} />
+          <span style={{ fontSize: '13.5px', fontWeight: isActive ? 600 : 450, color: isActive ? 'var(--text)' : 'var(--text-2)' }}>
             {item.label}
           </span>
         </span>
         {item.badge > 0 && (
-          <span style={{ fontSize: '10px', fontWeight: '700', padding: '2px 6px', borderRadius: '10px', background: 'var(--danger)', color: '#fff', minWidth: '18px', textAlign: 'center' }}>
+          <span className="num" style={{ fontSize: '11px', fontWeight: 600, padding: '1px 6px', borderRadius: '999px', background: item.id === 'controle' ? 'var(--warning-soft)' : 'var(--danger-soft)', color: item.id === 'controle' ? 'var(--warning)' : 'var(--danger)', minWidth: '20px', textAlign: 'center' }}>
             {item.badge}
           </span>
         )}
@@ -2139,7 +2149,7 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
   };
 
   const Section = ({ label }) => (
-    <div style={{ fontSize: '10px', fontWeight: '600', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)', padding: '14px 10px 5px' }}>
+    <div style={{ fontSize: '11.5px', fontWeight: 500, color: 'var(--text-3)', padding: '16px 10px 6px' }}>
       {label}
     </div>
   );
@@ -2171,13 +2181,20 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
         <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-2)', position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
           {activeLabel}
         </span>
-        {/* Theme toggle */}
+        {/* Zoeken + theme toggle */}
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+        {onOpenSearch && (
+          <button onClick={onOpenSearch} aria-label="Zoeken" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px', borderRadius: '8px', color: 'var(--text-2)', display: 'flex' }}>
+            <Search size={18} />
+          </button>
+        )}
         {onToggleTheme && (
           <button onClick={onToggleTheme}
             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px', borderRadius: '8px', color: 'var(--text-2)', display: 'flex', alignItems: 'center' }}>
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
         )}
+        </div>
       </header>
 
       {/* Desktop sidebar */}
@@ -2203,8 +2220,17 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
           </div>
         )}
 
+        {/* Zoeken / ⌘K */}
+        {onOpenSearch && (
+          <div style={{ padding: '10px 8px 0' }}>
+            <button onClick={onOpenSearch} style={{ width: '100%', height: '34px', display: 'flex', alignItems: 'center', gap: '8px', padding: '0 10px', borderRadius: '9px', border: '1px solid var(--border-2)', background: 'var(--bg)', color: 'var(--text-3)', cursor: 'pointer', fontSize: '13px' }}>
+              <Search size={14} /> <span style={{ flex: 1, textAlign: 'left' }}>Zoeken of snel naar…</span> <kbd>⌘K</kbd>
+            </button>
+          </div>
+        )}
+
         {/* Nav */}
-        <nav style={{ flex: 1, overflowY: 'auto', padding: '4px 8px 8px' }} className="scrollable">
+        <nav style={{ flex: 1, overflowY: 'auto', padding: '0 8px 8px' }} className="scrollable">
           <Section label={t('nav.sectionManage')} />
           {mainItems.map(item => <NavItem key={item.id} item={item} />)}
           <Section label={t('nav.sectionFinance')} />
@@ -2298,7 +2324,7 @@ const Sidebar = ({ activeTab, setActiveTab, openCount, activeEntity, entities, o
 // ============================================================================
 // DASHBOARD
 // ============================================================================
-const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setActiveTab, onSendReminder }) => {
+const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setActiveTab, onSendReminder, dataIssueCount = 0 }) => {
   const { t } = useLang();
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -2309,59 +2335,33 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
   const msgContainerRef = useRef(null);
   const autoAnalyzed = useRef(false);
 
+  const [year, setYear] = useState(now.getFullYear());
+  const isCurrentYear = year === now.getFullYear();
+
+  // Alle bedragen excl. BTW (omzet én kosten), via src/finance.js — zelfde regels als W&V en aangifte
+  const series = useMemo(() => monthlySeries({ invoices, expenses, year }), [invoices, expenses, year]);
   const stats = useMemo(() => {
-    // Omzet = alle gefactureerde bedragen deze maand (niet draft/cancelled)
-    const issuedThisMonth = invoices.filter(i => {
-      if (['draft', 'cancelled'].includes(i.status)) return false;
-      const ds = i.issueDate || i.date;
-      return ds && new Date(ds) >= monthStart;
-    });
-    const omzet = issuedThisMonth.reduce((sum, i) => sum + computeInvoice(i.items).total, 0);
-    const btwOwed = issuedThisMonth.reduce((sum, i) => sum + computeInvoice(i.items).btwTotal, 0);
-
-    const expensesThisMonth = expenses.filter(e => e.status === 'processed' && e.date && new Date(e.date) >= monthStart);
-    const costs = expensesThisMonth.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-    const btwReclaim = expensesThisMonth.reduce((sum, e) => sum + Number(e.btwAmount || 0), 0);
-
-    const outstanding = invoices
-      .filter(i => ['sent', 'partial', 'overdue'].includes(computeInvoiceStatus(i)))
-      .reduce((sum, i) => sum + computeInvoice(i.items).total - (i.paidAmount || 0), 0);
-    const overdue = invoices
-      .filter(i => computeInvoiceStatus(i) === 'overdue')
-      .reduce((sum, i) => sum + computeInvoice(i.items).total - (i.paidAmount || 0), 0);
+    const thisMonth = series[now.getMonth()] || { revenue: 0, costs: 0 };
+    const ytd = series.reduce((a, m) => ({ revenue: a.revenue + m.revenue, costs: a.costs + m.costs }), { revenue: 0, costs: 0 });
+    const outstanding = invoices.reduce((s, i) => s + invoiceOpenAmount(i), 0);
+    const overdue = invoices.filter(i => computeInvoiceStatus(i) === 'overdue').reduce((s, i) => s + invoiceOpenAmount(i), 0);
     const openExpenses = expenses.filter(e => e.status === 'open').length;
+    const prevYearRevenue = monthlySeries({ invoices, expenses, year: year - 1 })
+      .slice(0, isCurrentYear ? now.getMonth() + 1 : 12).reduce((s, m) => s + m.revenue, 0);
+    return {
+      omzet: thisMonth.revenue, costs: thisMonth.costs, profit: thisMonth.revenue - thisMonth.costs,
+      ytdRevenue: ytd.revenue, ytdCosts: ytd.costs, ytdProfit: ytd.revenue - ytd.costs,
+      revenueGrowth: prevYearRevenue > 0 ? (ytd.revenue - prevYearRevenue) / prevYearRevenue : null,
+      outstanding, overdue, openExpenses,
+      btwNet: series.reduce((s, m) => s + m.vat, 0),
+    };
+  }, [series, invoices, expenses, year]);
 
-    return { omzet, costs, btwOwed, btwReclaim, btwNet: btwOwed - btwReclaim, outstanding, overdue, openExpenses, profit: omzet - costs };
-  }, [invoices, expenses]);
-
-  // Grafiek: gefactureerde omzet per maand (niet alleen betaald)
-  const chartData = useMemo(() => {
-    const ref = new Date();
-    const months = [];
-    for (let i = 5; i >= 0; i--) {
-      const mStart = new Date(ref.getFullYear(), ref.getMonth() - i, 1);
-      const mEnd   = new Date(ref.getFullYear(), ref.getMonth() - i + 1, 1);
-      const label  = mStart.toLocaleDateString('nl-NL', { month: 'short' });
-      const rev = invoices
-        .filter(inv => {
-          if (['draft', 'cancelled'].includes(inv.status)) return false;
-          const ds = inv.issueDate || inv.date;
-          if (!ds) return false;
-          const t = new Date(ds).getTime();
-          return t >= mStart.getTime() && t < mEnd.getTime();
-        })
-        .reduce((s, inv) => s + computeInvoice(inv.items).total, 0);
-      const cost = expenses
-        .filter(e => {
-          if (e.status !== 'processed' || !e.date) return false;
-          const t = new Date(e.date).getTime();
-          return t >= mStart.getTime() && t < mEnd.getTime();
-        })
-        .reduce((s, e) => s + Number(e.amount || 0), 0);
-      months.push({ month: label, omzet: rev, kosten: cost });
-    }
-    return months;
-  }, [invoices, expenses]);
+  const yearOptions = useMemo(() => {
+    const set = new Set([now.getFullYear()]);
+    invoices.forEach(i => { const y = yearOf(invoiceDate(i)); if (y) set.add(y); });
+    return [...set].sort((a, b) => b - a).slice(0, 5);
+  }, [invoices]);
 
   const dueReminders = useMemo(() => {
     if (!settings.reminders?.enabled) return [];
@@ -2415,6 +2415,16 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
         onAction: () => onSendReminder(dueReminders[0].invoice, dueReminders[0].level),
       });
     }
+    if (dataIssueCount > 0) {
+      list.unshift({
+        level: 'warning',
+        icon: AlertCircle,
+        title: `${dataIssueCount} ${dataIssueCount === 1 ? 'mogelijk probleem' : 'mogelijke problemen'} in je administratie`,
+        text: 'Dubbele factuurnummers, dubbel geboekte omzet of verkeerd berekende BTW. Controleer en herstel met één klik.',
+        action: 'Data-controle',
+        tab: 'controle',
+      });
+    }
     if (stats.profit < 0 && stats.omzet > 0) {
       list.push({
         level: 'danger',
@@ -2434,7 +2444,7 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
       });
     }
     return list;
-  }, [invoices, expenses, stats, dueReminders]);
+  }, [invoices, expenses, stats, dueReminders, dataIssueCount]);
 
   const recentInvoices = [...invoices]
     .sort((a, b) => new Date(b.issueDate || b.date || 0) - new Date(a.issueDate || a.date || 0))
@@ -2479,9 +2489,10 @@ const Dashboard = ({ invoices, expenses, clients, settings, activeEntity, setAct
       ? `${nextBTWDeadline.toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' })} (over ${daysToBTW} dagen)`
       : 'onbekend';
     return `Financieel overzicht ${activeEntity?.name || 'Den Hartogh Solutions'} — ${monthName}:
-• Omzet (gefactureerd): ${fmtEUR(stats.omzet)}
-• Kosten (verwerkt): ${fmtEUR(stats.costs)}
-• Nettowinst: ${fmtEUR(stats.profit)}
+• Omzet deze maand (excl. BTW): ${fmtEUR(stats.omzet)}
+• Kosten deze maand (excl. BTW): ${fmtEUR(stats.costs)}
+• Resultaat deze maand: ${fmtEUR(stats.profit)}
+• Omzet ${year} t/m nu: ${fmtEUR(stats.ytdRevenue)} | Kosten: ${fmtEUR(stats.ytdCosts)} | Resultaat: ${fmtEUR(stats.ytdProfit)}
 • BTW saldo: ${fmtEUR(Math.abs(stats.btwNet))} (${stats.btwNet > 0 ? 'af te dragen' : 'terug te vorderen'})
 • Volgende BTW-aangifte deadline: ${btwDeadlineStr}
 • Openstaand: ${fmtEUR(stats.outstanding)} | Achterstallig: ${fmtEUR(stats.overdue)}
@@ -2543,10 +2554,10 @@ Wanneer je antwoordt:
   ];
 
   const INSIGHT_STYLE = {
-    danger: { bg: '#fef2f2', border: '#fecaca', iconColor: '#ef4444', textColor: '#991b1b', btnBg: '#fee2e2' },
-    warning: { bg: '#fffbeb', border: '#fde68a', iconColor: '#d97706', textColor: '#92400e', btnBg: '#fef3c7' },
-    ok:      { bg: '#f0fdf4', border: '#bbf7d0', iconColor: '#16a34a', textColor: '#166534', btnBg: '#dcfce7' },
-    info:    { bg: '#eff6ff', border: '#bfdbfe', iconColor: '#3b82f6', textColor: '#1e40af', btnBg: '#dbeafe' },
+    danger: { iconColor: 'var(--danger)', soft: 'var(--danger-soft)' },
+    warning: { iconColor: 'var(--warning)', soft: 'var(--warning-soft)' },
+    ok: { iconColor: 'var(--success)', soft: 'var(--success-soft)' },
+    info: { iconColor: 'var(--info)', soft: 'var(--info-soft)' },
   };
 
   return (
@@ -2554,10 +2565,10 @@ Wanneer je antwoordt:
       {/* ── Header ── */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="font-display text-2xl md:text-4xl font-medium truncate" style={{ color: 'var(--ink)' }}>
+          <h1 className="page-title truncate">
             {activeEntity?.name || 'Overzicht'}
           </h1>
-          <p className="text-xs md:text-sm mt-0.5" style={{ color: 'var(--muted)' }}>
+          <p className="page-sub">
             {activeEntity && (
               <>{JURISDICTIONS[activeEntity.jurisdiction || 'NL'].flag} {getEntityType(activeEntity.type).label} · </>
             )}
@@ -2585,25 +2596,28 @@ Wanneer je antwoordt:
         </div>
       </div>
 
-      {/* ── KPI Cards — 2×2 mobiel, 4 desktop ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: t('dash.statRevenue'), value: fmtEUR(stats.omzet), sub: t('dash.statRevenueSub'), icon: TrendingUp, color: '#3b82f6' },
-          { label: t('dash.statOutstanding'), value: fmtEUR(stats.outstanding), sub: stats.overdue > 0 ? `${fmtEUR(stats.overdue)} ${t('dash.statLate')}` : t('dash.statAllOnTime'), icon: Clock, color: stats.overdue > 0 ? '#ef4444' : '#10b981' },
-          { label: t('dash.statVat'), value: fmtEUR(Math.abs(stats.btwNet)), sub: stats.btwNet >= 0 ? t('dash.statVatDue') : t('dash.statVatBack'), icon: Percent, color: '#f59e0b' },
-          { label: t('dash.statProfit'), value: fmtEUR(stats.profit), sub: t('dash.statThisMonth'), icon: Zap, color: stats.profit >= 0 ? '#10b981' : '#ef4444' },
-        ].map((k, i) => (
-          <Card key={i} className="p-4">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-[10px] uppercase tracking-[0.08em] font-semibold" style={{ color: 'var(--text-3)' }}>{k.label}</div>
-              <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${k.color}18` }}>
-                <k.icon size={12} style={{ color: k.color }} />
-              </div>
-            </div>
-            <div className="num font-bold" style={{ fontSize: '18px', color: 'var(--text)', letterSpacing: '-0.03em', lineHeight: 1.1 }}>{k.value}</div>
-            <div className="text-[11px] mt-1.5" style={{ color: 'var(--text-3)' }}>{k.sub}</div>
-          </Card>
+      <VizStyles />
+      {/* ── Jaar-keuze ── */}
+      <div className="flex items-center gap-1 viz">
+        {yearOptions.map(y => (
+          <button key={y} onClick={() => setYear(y)} className="px-3 py-1 text-xs rounded-lg font-semibold transition-colors"
+            style={{ background: year === y ? 'var(--accent)' : 'transparent', color: year === y ? '#fff' : 'var(--text-3)' }}>{y}</button>
         ))}
+      </div>
+
+      {/* ── KPI-tegels met sparkline — 2×2 mobiel, 4 desktop ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 viz">
+        <KpiTile delay={0} label={`Omzet ${year}`} value={stats.ytdRevenue} color="var(--viz-1)" spark={series} sparkKey="revenue"
+          sub={stats.revenueGrowth === null ? 'excl. BTW' : `${stats.revenueGrowth >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(stats.revenueGrowth * 100))}% t.o.v. ${year - 1}`}
+          subTone={stats.revenueGrowth === null ? undefined : stats.revenueGrowth >= 0 ? 'var(--success)' : 'var(--danger)'}
+          onClick={() => setActiveTab('boekhouding')} />
+        <KpiTile delay={60} label={`Kosten ${year}`} value={stats.ytdCosts} color="var(--viz-2)" spark={series} sparkKey="costs" sub="excl. aftrekbare BTW" onClick={() => setActiveTab('expenses')} />
+        <KpiTile delay={120} label="Resultaat" value={stats.ytdProfit} color="var(--viz-3)" spark={series} sparkKey="profit"
+          sub={stats.ytdRevenue > 0 ? `marge ${Math.round(stats.ytdProfit / stats.ytdRevenue * 100)}%` : 'omzet − kosten'}
+          subTone={stats.ytdProfit < 0 ? 'var(--danger)' : undefined} onClick={() => setActiveTab('boekhouding')} />
+        <KpiTile delay={180} label={t('dash.statOutstanding')} value={stats.outstanding}
+          sub={stats.overdue > 0 ? `${fmtEUR(stats.overdue)} ${t('dash.statLate')}` : t('dash.statAllOnTime')}
+          subTone={stats.overdue > 0 ? 'var(--danger)' : 'var(--success)'} onClick={() => setActiveTab('invoices')} />
       </div>
 
       {/* ── Insights / Actiepunten ── */}
@@ -2613,26 +2627,60 @@ Wanneer je antwoordt:
           return (
             <div
               key={i}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl"
-              style={{ background: s.bg, border: `1px solid ${s.border}` }}
+              className="flex items-center gap-3 px-4 py-3 rounded-[12px]"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: `inset 3px 0 0 ${s.iconColor}` }}
             >
-              <ins.icon size={16} style={{ color: s.iconColor, flexShrink: 0 }} />
+              <span className="w-8 h-8 rounded-[9px] flex items-center justify-center flex-shrink-0" style={{ background: s.soft }}>
+                <ins.icon size={15} style={{ color: s.iconColor }} />
+              </span>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold leading-tight" style={{ color: s.textColor }}>{ins.title}</div>
-                <div className="text-[11px] mt-0.5 leading-snug" style={{ color: s.textColor, opacity: 0.8 }}>{ins.text}</div>
+                <div className="text-[13.5px] font-semibold leading-tight" style={{ color: 'var(--text)' }}>{ins.title}</div>
+                <div className="text-[12px] mt-0.5 leading-snug" style={{ color: 'var(--text-3)' }}>{ins.text}</div>
               </div>
               {ins.action && (
-                <button
-                  onClick={ins.onAction ? ins.onAction : () => setActiveTab(ins.tab)}
-                  className="text-xs font-semibold flex-shrink-0 px-3 py-1.5 rounded-lg transition-colors active:scale-95"
-                  style={{ background: s.btnBg, color: s.textColor }}
-                >
+                <Button size="sm" variant="secondary" onClick={ins.onAction ? ins.onAction : () => setActiveTab(ins.tab)}>
                   {ins.action}
-                </button>
+                </Button>
               )}
             </div>
           );
         })}
+      </div>
+
+      {/* ── Jaargrafiek + BTW-pot ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="viz-rise rounded-xl border p-5 lg:col-span-2" style={{ background: 'var(--surface)', borderColor: 'var(--border)', animationDelay: '200ms' }}>
+          <div className="mb-2">
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Omzet, kosten en resultaat per maand — {year}</h2>
+            <p className="text-[11px]" style={{ color: 'var(--muted)' }}>Factuurdatum, excl. BTW, creditnota's verrekend</p>
+          </div>
+          <YearChart series={series} year={year} />
+        </div>
+        <div className="flex flex-col gap-4">
+          <div className="viz-rise rounded-xl border p-5" style={{ background: 'var(--surface)', borderColor: 'var(--border)', animationDelay: '260ms' }}>
+            <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--ink)' }}>BTW dit kwartaal</h3>
+            <VatPot invoices={invoices} expenses={expenses} clients={clients} />
+            <button onClick={() => setActiveTab('tax')} className="mt-3 text-xs font-medium flex items-center gap-1 hover:underline" style={{ color: 'var(--accent)' }}>
+              Naar aangifte <ChevronRight size={12} />
+            </button>
+          </div>
+          <div className="viz-rise rounded-xl border p-5 flex-1" style={{ background: 'var(--surface)', borderColor: 'var(--border)', animationDelay: '320ms' }}>
+            <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--ink)' }}>Te ontvangen</h3>
+            <AgingBar invoices={invoices} />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Kostenverdeling + topklanten ── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="viz-rise rounded-xl border p-5" style={{ background: 'var(--surface)', borderColor: 'var(--border)', animationDelay: '380ms' }}>
+          <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--ink)' }}>Waar gaat het geld naartoe — {year}</h3>
+          <CostDonut expenses={expenses} year={year} />
+        </div>
+        <div className="viz-rise rounded-xl border p-5" style={{ background: 'var(--surface)', borderColor: 'var(--border)', animationDelay: '440ms' }}>
+          <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--ink)' }}>Topklanten — {year}</h3>
+          <TopClients invoices={invoices} clients={clients} year={year} />
+        </div>
       </div>
 
       {/* ── AI Assistent — full width, prominent ── */}
@@ -2640,7 +2688,7 @@ Wanneer je antwoordt:
         <div className="px-4 py-3 border-b flex items-center gap-3" style={{ borderColor: 'var(--border)' }}>
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}
+            style={{ background: 'var(--accent)' }}
           >
             <NineDotsIcon size={16} color="white" animated={true} />
           </div>
@@ -2660,7 +2708,7 @@ Wanneer je antwoordt:
             </button>
           )}
           {!hasApiKey && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold flex-shrink-0" style={{ background: '#fef3c7', color: '#92400e' }}>
+            <span className="text-[11px] px-2 py-0.5 rounded-full font-medium flex-shrink-0" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
               {t('dash.aiNoKey')}
             </span>
           )}
@@ -2675,7 +2723,7 @@ Wanneer je antwoordt:
                   key={i}
                   onClick={() => sendAiMessage(q)}
                   disabled={aiLoading}
-                  className="text-xs px-3 py-1.5 rounded-full border transition-colors hover:bg-stone-50 active:scale-95 disabled:opacity-50"
+                  className="text-xs px-3 py-1.5 rounded-full border transition-colors hover:bg-[color:var(--surface-2)] active:scale-95 disabled:opacity-50"
                   style={{ borderColor: 'var(--border)', color: 'var(--ink-2)' }}
                 >
                   {q}
@@ -2688,7 +2736,7 @@ Wanneer je antwoordt:
                 <div
                   className="rounded-2xl px-3 py-2 text-sm max-w-[88%] leading-relaxed"
                   style={m.role === 'user'
-                    ? { background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', color: 'white' }
+                    ? { background: 'var(--accent)', color: 'white' }
                     : { background: 'var(--surface-2)', color: 'var(--ink)', border: '1px solid var(--border)' }
                   }
                 >
@@ -2726,103 +2774,13 @@ Wanneer je antwoordt:
               onClick={() => sendAiMessage()}
               disabled={!aiInput.trim() || aiLoading}
               className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-30 transition-all active:scale-95"
-              style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
+              style={{ background: 'var(--accent)' }}
             >
               <Send size={14} color="white" />
             </button>
           </div>
         </div>
       </Card>
-
-      {/* ── Grafiek + rechterkolom (desktop) ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card className="p-5 lg:col-span-2">
-          <div className="mb-3">
-            <h2 className="font-display text-base font-semibold" style={{ color: 'var(--ink)' }}>{t('dash.chartTitle')}</h2>
-            <p className="text-[11px]" style={{ color: 'var(--muted)' }}>{t('dash.chartSub')}</p>
-          </div>
-          <ResponsiveContainer width="100%" height={170}>
-            <AreaChart data={chartData} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>
-              <defs>
-                <linearGradient id="omzetGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25}/>
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                </linearGradient>
-                <linearGradient id="kostenGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#ef4444" stopOpacity={0.15}/>
-                  <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="2 6" stroke="rgba(59,130,246,0.07)" vertical={false} />
-              <XAxis dataKey="month" stroke="var(--text-3)" fontSize={10} tickLine={false} axisLine={false} />
-              <YAxis
-                stroke="var(--text-3)"
-                fontSize={10}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={(v) => v >= 1000 ? `€${(v / 1000).toFixed(0)}k` : `€${v}`}
-              />
-              <Tooltip
-                contentStyle={{ background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 10, fontSize: 12, color: 'var(--text)' }}
-                formatter={(v, name) => [fmtEUR(v), name === 'omzet' ? t('dash.chartRevenue') : t('dash.chartCosts')]}
-              />
-              <Area type="monotone" dataKey="omzet" stroke="#3b82f6" strokeWidth={2} fill="url(#omzetGrad)" name="omzet" />
-              <Area type="monotone" dataKey="kosten" stroke="#ef4444" strokeWidth={1.5} fill="url(#kostenGrad)" name="kosten" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </Card>
-
-        {/* Desktop right panel */}
-        <div className="hidden lg:flex flex-col gap-4">
-          <Card className="p-4 flex-1">
-            <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--ink)' }}>{t('dash.receivable')}</h3>
-            <div className="space-y-2.5">
-              {[
-                { label: t('dash.outstanding'), value: fmtEUR(stats.outstanding), danger: false },
-                { label: t('dash.overdue'), value: fmtEUR(stats.overdue), danger: stats.overdue > 0 },
-              ].map(r => (
-                <div key={r.label} className="flex items-center justify-between">
-                  <span className="text-xs" style={{ color: 'var(--muted)' }}>{r.label}</span>
-                  <span className="font-display text-base num font-semibold" style={{ color: r.danger ? 'var(--danger)' : 'var(--text)' }}>{r.value}</span>
-                </div>
-              ))}
-            </div>
-            <button onClick={() => setActiveTab('invoices')} className="mt-3 text-xs font-medium flex items-center gap-1 hover:underline" style={{ color: 'var(--accent)' }}>
-              {t('dash.viewInvoices')} <ChevronRight size={12} />
-            </button>
-          </Card>
-          <Card className="p-4 flex-1">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>{t('dash.openReceipts')}</h3>
-              <span className="text-sm num font-bold" style={{ color: stats.openExpenses > 0 ? 'var(--warning)' : 'var(--muted)' }}>{stats.openExpenses}</span>
-            </div>
-            <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
-              {stats.openExpenses === 0 ? t('dash.allProcessed') : `${stats.openExpenses} ${stats.openExpenses !== 1 ? t('dash.receiptPlural') : t('dash.receiptSingle')} ${t('dash.waitingShort')}`}
-            </p>
-            <button onClick={() => setActiveTab('expenses')} className="text-xs font-medium flex items-center gap-1 hover:underline" style={{ color: 'var(--accent)' }}>
-              {t('dash.toReceipts')} <ChevronRight size={12} />
-            </button>
-          </Card>
-        </div>
-      </div>
-
-      {/* ── Mobiel: compacte stats onder grafiek ── */}
-      <div className="grid grid-cols-2 gap-3 lg:hidden">
-        <Card className="p-4">
-          <div className="text-[10px] uppercase tracking-[0.08em] font-semibold mb-1.5" style={{ color: 'var(--text-3)' }}>{t('dash.outstanding')}</div>
-          <div className="num font-bold" style={{ fontSize: '17px', color: 'var(--text)', letterSpacing: '-0.02em' }}>{fmtEUR(stats.outstanding)}</div>
-          <div className="text-[11px] mt-1" style={{ color: stats.overdue > 0 ? 'var(--danger)' : 'var(--text-3)' }}>
-            {stats.overdue > 0 ? `${fmtEUR(stats.overdue)} ${t('dash.statLate')}` : t('dash.statAllOnTime')}
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="text-[10px] uppercase tracking-[0.08em] font-semibold mb-1.5" style={{ color: 'var(--text-3)' }}>{t('dash.openReceipts')}</div>
-          <div className="num font-bold" style={{ fontSize: '17px', color: stats.openExpenses > 0 ? 'var(--warning)' : 'var(--text)', letterSpacing: '-0.02em' }}>{stats.openExpenses}</div>
-          <div className="text-[11px] mt-1" style={{ color: 'var(--text-3)' }}>
-            {stats.openExpenses === 0 ? t('dash.allProcessedShort') : t('dash.awaitingProcessing')}
-          </div>
-        </Card>
-      </div>
 
       {/* ── Recente facturen ── */}
       <Card>
@@ -2883,10 +2841,10 @@ const ClientsView = ({ clients, setClients, invoices, settings }) => {
 
   const handleSave = (data) => {
     if (data.id) {
-      setClients(clients.map(c => c.id === data.id ? data : c));
+      setClients(prev => prev.map(c => c.id === data.id ? data : c));
     } else {
       const newClient = { ...data, id: generateId('cli'), createdAt: new Date().toISOString() };
-      setClients([...clients, newClient]);
+      setClients(prev => [...prev, newClient]);
     }
     setEditing(null);
   };
@@ -2897,7 +2855,7 @@ const ClientsView = ({ clients, setClients, invoices, settings }) => {
       return;
     }
     if (window.confirm('Klant verwijderen?')) {
-      setClients(clients.filter(c => c.id !== id));
+      setClients(prev => prev.filter(c => c.id !== id));
     }
   };
 
@@ -2905,7 +2863,7 @@ const ClientsView = ({ clients, setClients, invoices, settings }) => {
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="font-display text-4xl font-medium">Klanten</h1>
+          <h1 className="page-title">Klanten</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{clients.length} klant{clients.length !== 1 ? 'en' : ''}</p>
         </div>
         <Button onClick={() => setEditing({})}><Plus size={16} /> Nieuwe klant</Button>
@@ -2940,7 +2898,7 @@ const ClientsView = ({ clients, setClients, invoices, settings }) => {
             {filtered.map(c => {
               const stats = clientStats(c.id);
               return (
-                <div key={c.id} className="px-5 py-4 hover:bg-stone-50 transition-colors flex items-center justify-between gap-4">
+                <div key={c.id} className="px-5 py-4 hover:bg-[color:var(--surface-2)] transition-colors flex items-center justify-between gap-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <h3 className="font-medium truncate">{c.name}</h3>
@@ -2953,11 +2911,11 @@ const ClientsView = ({ clients, setClients, invoices, settings }) => {
                     </div>
                   </div>
                   <div className="hidden md:flex flex-col items-end text-right">
-                    <span className="font-display text-base num font-medium">{fmtEUR(stats.total)}</span>
+                    <span className="text-[15px] font-semibold"><Money value={stats.total} /></span>
                     <span className="text-xs" style={{ color: 'var(--muted)' }}>{stats.count} factu{stats.count === 1 ? 'ur' : 'ren'}</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => setEditing(c)} className="p-2 rounded hover:bg-stone-100" title="Bewerken">
+                    <button onClick={() => setEditing(c)} className="p-2 rounded hover:bg-[color:var(--surface-2)]" title="Bewerken">
                       <Edit3 size={14} style={{ color: 'var(--muted)' }} />
                     </button>
                     <button onClick={() => handleDelete(c.id)} className="p-2 rounded hover:bg-red-50" title="Verwijderen">
@@ -3046,7 +3004,7 @@ const ClientForm = ({ client, onSave, onClose, settings }) => {
     <Modal open onClose={onClose} size="lg">
       <div className="px-6 py-5 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
         <h2 className="font-display text-2xl">{form.id ? 'Klant bewerken' : 'Nieuwe klant'}</h2>
-        <button onClick={onClose} className="p-1.5 rounded hover:bg-stone-100"><X size={16} /></button>
+        <button onClick={onClose} className="p-1.5 rounded hover:bg-[color:var(--surface-2)]"><X size={16} /></button>
       </div>
       <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto scrollable">
         {/* AI-assisted lookup */}
@@ -3108,15 +3066,62 @@ const ClientForm = ({ client, onSave, onClose, settings }) => {
 };
 
 // ============================================================================
+// SYNC-INDICATOR — laat zien of wijzigingen in Supabase staan (voorheen faalde sync onzichtbaar)
+// ============================================================================
+const SyncIndicator = () => {
+  const { pending, error } = useSyncStatus();
+  const [showSaved, setShowSaved] = useState(false);
+  const wasPending = useRef(false);
+  useEffect(() => {
+    if (pending > 0) { wasPending.current = true; return; }
+    if (wasPending.current && !error) {
+      wasPending.current = false;
+      setShowSaved(true);
+      const t = setTimeout(() => setShowSaved(false), 1600);
+      return () => clearTimeout(t);
+    }
+  }, [pending, error]);
+  if (!pending && !error && !showSaved) return null;
+  const state = error && !pending ? 'error' : pending ? 'saving' : 'saved';
+  const cfg = {
+    saving: { icon: RefreshCw, text: 'Opslaan…', color: 'var(--text-2)', spin: true },
+    saved: { icon: CheckCircle2, text: 'Opgeslagen', color: 'var(--success)' },
+    error: { icon: CloudOff, text: 'Opslaan mislukt — wordt bij de volgende wijziging opnieuw geprobeerd', color: 'var(--danger)' },
+  }[state];
+  const Icon = cfg.icon;
+  return (
+    <div className="no-print" title={error || ''} style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 200, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 999, background: 'var(--surface)', border: `1px solid ${state === 'error' ? 'var(--danger)' : 'var(--border-2)'}`, boxShadow: '0 6px 20px rgba(0,0,0,0.18)', fontSize: 12, fontWeight: 600, color: cfg.color, maxWidth: 'calc(100vw - 32px)' }}>
+      <Icon size={13} className={cfg.spin ? 'animate-spin' : ''} />
+      <span>{cfg.text}</span>
+    </div>
+  );
+};
+
+// ============================================================================
 // INVOICES VIEW
 // ============================================================================
-const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients, settings, setSettings, activeEntity, setEntities, entities, onSendReminder }) => {
+const InvoicesView = ({ intent, invoices, setInvoices, allInvoices, clients, setClients, settings, setSettings, activeEntity, setEntities, entities, onSendReminder }) => {
   const { t } = useLang();
   const [view, setView] = useState({ mode: 'list' });
   const [statusFilter, setStatusFilter] = useState('all');
   const [listEdit, setListEdit] = useState(null); // { invId, field: 'client' }
+  const [search, setSearch] = useState('');
+  const [yearFilter, setYearFilter] = useState('all');
 
   const [showAging, setShowAging] = useState(false);
+
+  // Vanuit ⌘K: factuur direct openen of nieuwe factuur starten
+  useEffect(() => {
+    if (!intent) return;
+    if (intent.type === 'open') {
+      const inv = (allInvoices || invoices).find(i => i.id === intent.id);
+      if (inv) setView({ mode: 'view', invoice: inv });
+    } else if (intent.type === 'new') {
+      const terms = activeEntity?.paymentTerms || settings.invoice?.paymentTerms || 14;
+      setView({ mode: 'edit', invoice: { issueDate: todayISO(), dueDate: addDays(todayISO(), terms), items: [{ description: '', quantity: 1, price: 0, btwRate: JURISDICTIONS[activeEntity?.jurisdiction || 'NL'].salesTax.standard }] } });
+    }
+  }, [intent?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const filtered = invoices
     .filter(i => statusFilter === 'all' || computeInvoiceStatus(i) === statusFilter)
     .sort((a, b) => new Date(b.issueDate) - new Date(a.issueDate));
@@ -3141,70 +3146,80 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
   const handleSave = async (invoice) => {
     const allInv = allInvoices || invoices;
     if (invoice.id && allInv.find(i => i.id === invoice.id)) {
-      // Uniqueness check on edit
-      const duplicate = allInv.find(i => i.id !== invoice.id && i.number === invoice.number && i.entityId === invoice.entityId);
-      if (duplicate && !window.confirm(`Factuurnummer ${invoice.number} bestaat al. Toch opslaan?`)) return;
-      await setInvoices(allInv.map(i => i.id === invoice.id ? invoice : i));
-    } else {
-      const currentYear = new Date().getFullYear();
-      let nextNum = activeEntity?.nextInvoiceNumber || 1;
-      // Year-reset: if yearlyReset enabled and last number was from a different year, reset to 1
-      if (activeEntity?.yearlyReset && activeEntity?.lastInvoiceYear && activeEntity.lastInvoiceYear < currentYear) {
-        nextNum = 1;
+      // Dubbele nummers zijn niet toegestaan (wettelijk verplicht doorlopende, unieke reeks)
+      if (isDuplicateInvoiceNumber(allInv, invoice.number, invoice.entityId, invoice.id)) {
+        window.alert(`Factuurnummer ${invoice.number} bestaat al. Kies een ander nummer.`);
+        return;
       }
-      const prefix = activeEntity?.invoicePrefix || `${currentYear}-`;
-      const autoNumber = `${prefix}${String(nextNum).padStart(4, '0')}`;
-      // Uniqueness check on new
-      const duplicate = allInv.find(i => i.number === (invoice.number || autoNumber) && i.entityId === activeEntity?.id);
-      if (duplicate && !window.confirm(`Factuurnummer ${invoice.number || autoNumber} bestaat al. Toch opslaan?`)) return;
-      const newInv = {
-        ...invoice,
-        id: generateId('inv'),
-        entityId: activeEntity?.id,
-        number: invoice.number || autoNumber,
-        status: invoice.status || 'draft',
-        remindersSent: [],
-        payments: [],
-      };
-      await setInvoices([...allInv, newInv]);
-      if (!invoice.number && activeEntity) {
-        await setEntities(entities.map(e => e.id === activeEntity.id
-          ? { ...e, nextInvoiceNumber: nextNum + 1, lastInvoiceYear: currentYear }
-          : e));
-      }
+      const saved = { ...invoice, invoiceNumber: invoice.number };
+      setInvoices(prev => prev.map(i => i.id === invoice.id ? saved : i));
+      setView({ mode: 'view', invoice: saved });
+      return;
     }
-    setView({ mode: 'list' });
+    const next = nextInvoiceNumberFor(activeEntity, allInv);
+    const number = invoice.number || next.number;
+    if (isDuplicateInvoiceNumber(allInv, number, activeEntity?.id)) {
+      window.alert(`Factuurnummer ${number} bestaat al. Kies een ander nummer.`);
+      return;
+    }
+    const newInv = {
+      ...invoice,
+      id: generateId('inv'),
+      entityId: activeEntity?.id,
+      number,
+      invoiceNumber: number,
+      status: invoice.status || 'draft',
+      remindersSent: [],
+      payments: [],
+      createdAt: new Date().toISOString(),
+    };
+    setInvoices(prev => [...prev, newInv]);
+    if (!invoice.number && activeEntity) {
+      setEntities(prev => prev.map(e => e.id === activeEntity.id
+        ? { ...e, nextInvoiceNumber: next.seq + 1, lastInvoiceYear: next.year }
+        : e));
+    }
+    setView({ mode: 'view', invoice: newInv });
   };
 
   const handleDelete = async (id) => {
     if (window.confirm('Factuur verwijderen? Dit kan niet ongedaan worden gemaakt.')) {
-      const allInv = allInvoices || invoices;
-      await setInvoices(allInv.filter(i => i.id !== id));
+      setInvoices(prev => prev.filter(i => i.id !== id));
       setView({ mode: 'list' });
     }
   };
 
-  const handleStatusChange = async (id, newStatus, extra = {}) => {
-    const allInv = allInvoices || invoices;
-    await setInvoices(allInv.map(i => i.id === id ? { ...i, status: newStatus, ...extra } : i));
+  // Werkt zowel de lijst als de open detailweergave direct bij (voorheen bleef de detailweergave
+  // op de oude status staan tot je terugging naar de lijst — "er gebeurt niets").
+  const handleUpdateInvoice = async (id, fields) => {
+    if (fields.number !== undefined) {
+      const current = (allInvoices || invoices).find(i => i.id === id);
+      if (isDuplicateInvoiceNumber(allInvoices || invoices, fields.number, current?.entityId, id)) {
+        window.alert(`Factuurnummer ${fields.number} bestaat al. Kies een ander nummer.`);
+        return;
+      }
+      fields = { ...fields, invoiceNumber: fields.number };
+    }
+    setInvoices(prev => prev.map(i => i.id === id ? { ...i, ...fields } : i));
+    setView(v => (v.invoice?.id === id ? { ...v, invoice: { ...v.invoice, ...fields } } : v));
   };
 
-  const handleUpdateInvoice = async (id, fields) => {
-    const allInv = allInvoices || invoices;
-    await setInvoices(allInv.map(i => i.id === id ? { ...i, ...fields } : i));
-    if (view.invoice?.id === id) {
-      setView(v => ({ ...v, invoice: { ...v.invoice, ...fields } }));
-    }
-  };
+  const handleStatusChange = async (id, newStatus, extra = {}) => handleUpdateInvoice(id, { status: newStatus, ...extra });
 
   const handleDuplicate = (inv) => {
     const newInv = {
       ...inv,
       id: undefined,
       number: undefined,
+      invoiceNumber: undefined,
       status: 'draft',
       sentAt: null,
       paidAt: null,
+      paidAmount: 0,
+      payments: [],
+      creditNoteFor: undefined,
+      signToken: null, signedAt: null, signedByName: null, signedByIp: null,
+      createdAt: undefined,
       remindersSent: [],
       issueDate: todayISO(),
       dueDate: addDays(todayISO(), settings.invoice.paymentTerms),
@@ -3214,12 +3229,15 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
 
   const handleCreateCreditNote = async (origInv) => {
     const allInv = allInvoices || invoices;
-    const nextNum = activeEntity?.nextInvoiceNumber || 1;
-    const prefix = activeEntity?.invoicePrefix || '';
+    if (allInv.some(i => i.creditNoteFor === origInv.id) && !window.confirm(`Er bestaat al een creditnota voor ${origInv.number}. Nog een maken?`)) return;
+    const cnBase = `CN-${origInv.number}`;
+    let cnNumber = cnBase;
+    for (let n = 2; allInv.some(i => i.number === cnNumber); n++) cnNumber = `${cnBase}-${n}`;
     const creditNote = {
       ...origInv,
       id: generateId('inv'),
-      number: `CN-${origInv.number}`,
+      number: cnNumber,
+      invoiceNumber: cnNumber,
       status: 'credit_note',
       creditNoteFor: origInv.id,
       issueDate: todayISO(),
@@ -3231,7 +3249,7 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
       items: origInv.items.map(it => ({ ...it, price: -Math.abs(Number(it.price)) })),
       notes: `Creditnota voor factuur ${origInv.number}`,
     };
-    await setInvoices([...allInv, creditNote]);
+    setInvoices(prev => [...prev, creditNote]);
     setView({ mode: 'view', invoice: creditNote });
   };
 
@@ -3248,17 +3266,17 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
       paidAmount: totalPaid,
       paidAt: isFullyPaid ? new Date().toISOString() : null,
     };
-    await setInvoices(allInv.map(i => i.id === inv.id ? updated : i));
+    setInvoices(prev => prev.map(i => i.id === inv.id ? updated : i));
     setView({ mode: 'view', invoice: updated });
   };
 
   if (view.mode === 'edit') {
-    return <InvoiceEditor invoice={view.invoice} clients={clients} setClients={setClients} settings={settings} activeEntity={activeEntity} onSave={handleSave} onCancel={() => setView({ mode: 'list' })} />;
+    return <InvoiceEditor invoice={view.invoice} clients={clients} setClients={setClients} settings={settings} activeEntity={activeEntity} nextNumberPreview={nextInvoiceNumberFor(activeEntity, allInvoices || invoices).number} onSave={handleSave} onCancel={() => setView(view.invoice?.id ? { mode: 'view', invoice: view.invoice } : { mode: 'list' })} />;
   }
 
   if (view.mode === 'view') {
     return <InvoiceDetail
-      invoice={view.invoice}
+      invoice={(allInvoices || invoices).find(i => i.id === view.invoice?.id) || view.invoice}
       clients={clients}
       settings={settings}
       activeEntity={activeEntity}
@@ -3277,46 +3295,84 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
 
   const paymentTermsForEntity = activeEntity?.paymentTerms || settings.invoice?.paymentTerms || 14;
   const defaultBtw = JURISDICTIONS[activeEntity?.jurisdiction || 'NL'].salesTax.standard;
-  const nextPrefix = activeEntity?.invoicePrefix || '';
-  const nextNum = activeEntity?.nextInvoiceNumber || 1;
+  const nextNumberPreview = nextInvoiceNumberFor(activeEntity, allInvoices || invoices).number;
+  const startNew = () => setView({ mode: 'edit', invoice: { issueDate: todayISO(), dueDate: addDays(todayISO(), paymentTermsForEntity), items: [{ description: '', quantity: 1, price: 0, btwRate: defaultBtw }] } });
+  const clientName = (id) => clients.find(x => x.id === id)?.name || '';
+  const counts = invoices.reduce((acc, i) => { const st = computeInvoiceStatus(i); acc[st] = (acc[st] || 0) + 1; return acc; }, {});
+  const yearsAvailable = [...new Set(invoices.map(i => yearOf(invoiceDate(i))).filter(Boolean))].sort((a, b) => b - a);
+  const listed = filtered
+    .filter(i => yearFilter === 'all' || yearOf(invoiceDate(i)) === Number(yearFilter))
+    .filter(i => {
+      const q = search.trim().toLowerCase();
+      if (!q) return true;
+      return String(i.number || '').toLowerCase().includes(q) || String(i.numberAsSent || '').toLowerCase().includes(q) ||
+        clientName(i.clientId).toLowerCase().includes(q) || (i.items || []).some(it => String(it.description || '').toLowerCase().includes(q));
+    });
+  const listedTotal = listed.reduce((s, i) => s + computeInvoice(i.items).total, 0);
+  const summary = [
+    { id: 'open', label: 'Openstaand', value: invoices.reduce((s, i) => s + invoiceOpenAmount(i), 0), filter: 'sent', tone: 'var(--text)' },
+    { id: 'overdue', label: 'Te laat', value: invoices.filter(i => computeInvoiceStatus(i) === 'overdue').reduce((s, i) => s + invoiceOpenAmount(i), 0), filter: 'overdue', tone: 'var(--danger)' },
+    { id: 'paid', label: `Betaald ${new Date().getFullYear()}`, value: invoices.filter(i => i.status === 'paid' && yearOf(invoiceDate(i)) === new Date().getFullYear()).reduce((s, i) => s + computeInvoice(i.items).total, 0), filter: 'paid', tone: 'var(--success)' },
+    { id: 'draft', label: 'Concepten', value: invoices.filter(i => i.status === 'draft').reduce((s, i) => s + computeInvoice(i.items).total, 0), filter: 'draft', tone: 'var(--text-2)' },
+  ];
+  const dateCell = (inv, field, label, color) => {
+    if (listEdit?.invId === inv.id && listEdit?.field === field) {
+      const value = field === 'paidAt' ? isoToLocalDate(inv.paidAt) : (inv[field] || '');
+      return (
+        <input type="date" defaultValue={value} autoFocus onClick={e => e.stopPropagation()}
+          className="h-7 px-1.5 text-[12px] rounded border" style={{ borderColor: 'var(--border-2)' }}
+          onKeyDown={e => { if (e.key === 'Escape') setListEdit(null); }}
+          onBlur={e => { const v = e.target.value; setTimeout(() => { if (v) handleUpdateInvoice(inv.id, { [field]: field === 'paidAt' ? v + 'T12:00:00.000Z' : v }); setListEdit(null); }, 150); }} />
+      );
+    }
+    return (
+      <span className="num text-[12.5px] cursor-text hover:underline" style={{ color: color || 'var(--text-2)' }} title={`Klik om ${label} te wijzigen`}
+        onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field }); }}>
+        {inv[field] ? fmtDate(inv[field]) : '—'}
+      </span>
+    );
+  };
 
   return (
     <div className="space-y-5">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="font-display text-4xl font-medium">{t('inv.title')}</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-            {invoices.length} {invoices.length === 1 ? t('inv.countSingle') : t('inv.countMulti')} · {t('inv.nextNr')}: <span className="font-mono">{nextPrefix}{String(nextNum).padStart(4, '0')}</span> · {activeEntity?.name}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={() => setShowAging(a => !a)}>
+      <PageHeader
+        title={t('inv.title')}
+        sub={<>Volgend nummer <span className="num" style={{ color: 'var(--text-2)' }}>{nextNumberPreview}</span> · {activeEntity?.name}</>}
+        actions={<>
+          <Button variant="secondary" size="md" onClick={() => setShowAging(a => !a)} aria-pressed={showAging}>
             <FileBarChart size={14} /> {t('inv.aging')}
           </Button>
-          <Button onClick={() => {
-            setView({ mode: 'edit', invoice: { issueDate: todayISO(), dueDate: addDays(todayISO(), paymentTermsForEntity), items: [{ description: '', quantity: 1, price: 0, btwRate: defaultBtw }] } });
-          }}>
-            <Plus size={16} /> {t('inv.new')}
-          </Button>
-        </div>
+          <Button onClick={startNew}><Plus size={15} /> {t('inv.new')}</Button>
+        </>}
+      />
+
+      {/* Samenvatting = snelfilters */}
+      <div className="grid grid-cols-2 md:grid-cols-4 rounded-[14px] overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--border)', gap: 1 }}>
+        {summary.map(sm => (
+          <button key={sm.id} onClick={() => setStatusFilter(statusFilter === sm.filter ? 'all' : sm.filter)}
+            className="text-left px-4 py-3.5 transition-colors"
+            style={{ background: statusFilter === sm.filter ? 'var(--surface-2)' : 'var(--surface)', border: 'none', cursor: 'pointer' }}>
+            <div className="text-[12px]" style={{ color: 'var(--text-3)' }}>{sm.label}</div>
+            <div className="text-[19px] font-semibold mt-0.5" style={{ color: sm.value ? sm.tone : 'var(--text-3)' }}><Money value={sm.value} /></div>
+          </button>
+        ))}
       </div>
 
       {showAging && (
         <Card className="p-5">
-          <h3 className="font-display text-base font-medium mb-4">{t('inv.agingTitle')}</h3>
+          <h3 className="text-[14px] font-semibold mb-4">{t('inv.agingTitle')}</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[['0-30', '0–30 dagen', 'var(--info)'], ['31-60', '31–60 dagen', 'var(--warning)'], ['61-90', '61–90 dagen', 'var(--danger)'], ['90+', '> 90 dagen', '#7c3aed']].map(([key, label, color]) => {
+            {[['0-30', '0–30 dagen', 'var(--info)'], ['31-60', '31–60 dagen', 'var(--warning)'], ['61-90', '61–90 dagen', 'var(--danger)'], ['90+', 'Meer dan 90 dagen', 'var(--danger)']].map(([key, label, color]) => {
               const entries = agingBuckets[key] || [];
               const total = entries.reduce((s, e) => s + e.total, 0);
               return (
-                <div key={key} className="rounded-lg p-3" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                  <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--muted)' }}>{label}</div>
-                  <div className="font-display text-lg num font-medium" style={{ color }}>{fmtEUR(total)}</div>
-                  <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{entries.length} factuu{entries.length === 1 ? 'r' : 'ren'}</div>
-                  {entries.slice(0,3).map(({inv}) => {
-                    const c = clients?.find(x => x.id === inv.clientId);
-                    return <div key={inv.id} className="text-xs mt-1 truncate" style={{ color: 'var(--text-2)' }}>{c?.name || inv.number}</div>;
-                  })}
+                <div key={key} className="rounded-[10px] p-3" style={{ background: 'var(--surface-2)' }}>
+                  <div className="text-[12px] mb-1" style={{ color: 'var(--text-3)' }}>{label}</div>
+                  <div className="text-[17px] font-semibold" style={{ color: total ? color : 'var(--text-3)' }}><Money value={total} /></div>
+                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>{entries.length} factu{entries.length === 1 ? 'ur' : 'ren'}</div>
+                  {entries.slice(0, 3).map(({ inv }) => (
+                    <div key={inv.id} className="text-xs mt-1 truncate" style={{ color: 'var(--text-2)' }}>{clientName(inv.clientId) || inv.number}</div>
+                  ))}
                 </div>
               );
             })}
@@ -3324,145 +3380,131 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
         </Card>
       )}
 
-      <Card className="p-3">
-        <div className="flex flex-wrap gap-1">
-          {[{ id: 'all', label: t('inv.filterAll') }, { id: 'draft', label: t('inv.filterDraft') }, { id: 'sent', label: t('inv.filterSent') }, { id: 'partial', label: t('inv.filterPartial') }, { id: 'overdue', label: t('inv.filterOverdue') }, { id: 'paid', label: t('inv.filterPaid') }, { id: 'credit_note', label: t('inv.filterCreditNote') }].map(f => (
-            <button
-              key={f.id}
-              onClick={() => setStatusFilter(f.id)}
-              className="px-3 py-1.5 text-xs font-medium rounded transition-colors"
-              style={{
-                background: statusFilter === f.id ? 'var(--accent)' : 'transparent',
-                color: statusFilter === f.id ? '#fff' : 'var(--ink-2)',
-              }}
-            >
-              {f.label}
-            </button>
-          ))}
+      {/* Filters */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <Segmented value={statusFilter} onChange={setStatusFilter} options={[
+          { id: 'all', label: t('inv.filterAll'), count: invoices.length },
+          { id: 'draft', label: t('inv.filterDraft'), count: counts.draft || 0 },
+          { id: 'sent', label: t('inv.filterSent'), count: counts.sent || 0 },
+          { id: 'overdue', label: t('inv.filterOverdue'), count: counts.overdue || 0 },
+          { id: 'partial', label: t('inv.filterPartial'), count: counts.partial || 0 },
+          { id: 'paid', label: t('inv.filterPaid'), count: counts.paid || 0 },
+          { id: 'credit_note', label: t('inv.filterCreditNote'), count: counts.credit_note || 0 },
+        ].filter(o => o.id === 'all' || o.count > 0 || o.id === statusFilter)} />
+        <div className="flex items-center gap-2 ml-auto">
+          <select value={yearFilter} onChange={e => setYearFilter(e.target.value)} className="h-9 px-2.5 text-[13px] rounded-[9px] border" aria-label="Jaar">
+            <option value="all">Alle jaren</option>
+            {yearsAvailable.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-3)' }} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Zoek nummer, klant of regel"
+              className="h-9 pl-8 pr-3 text-[13px] rounded-[9px] border w-[220px]" />
+          </div>
         </div>
-      </Card>
+      </div>
 
-      {filtered.length === 0 ? (
+      {listed.length === 0 ? (
         <Card>
           <EmptyState
             icon={FileText}
-            title={statusFilter !== 'all' ? t('inv.emptyFilterTitle') : t('inv.emptyTitle')}
-            description={statusFilter !== 'all' ? t('inv.emptyFilterDesc') : t('inv.emptyDesc')}
-            action={statusFilter === 'all' && clients.length > 0 && (
-              <Button onClick={() => setView({ mode: 'edit', invoice: { issueDate: todayISO(), dueDate: addDays(todayISO(), paymentTermsForEntity), items: [{ description: '', quantity: 1, price: 0, btwRate: defaultBtw }] } })}>
-                <Plus size={14} /> {t('inv.first')}
-              </Button>
+            title={statusFilter !== 'all' || search || yearFilter !== 'all' ? t('inv.emptyFilterTitle') : t('inv.emptyTitle')}
+            description={statusFilter !== 'all' || search || yearFilter !== 'all' ? t('inv.emptyFilterDesc') : t('inv.emptyDesc')}
+            action={statusFilter === 'all' && !search && clients.length > 0 && (
+              <Button onClick={startNew}><Plus size={14} /> {t('inv.first')}</Button>
             )}
           />
         </Card>
       ) : (
-        <Card>
-          <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-            {filtered.map(inv => {
-              const c = clients.find(x => x.id === inv.clientId);
+        <Card className="overflow-hidden">
+          {/* Desktop: kasboek-tabel */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="ledger">
+              <thead>
+                <tr>
+                  <th style={{ width: 150 }}>Nummer</th>
+                  <th>Klant</th>
+                  <th style={{ width: 110 }}>Datum</th>
+                  <th style={{ width: 110 }}>Vervalt</th>
+                  <th style={{ width: 140 }}>Status</th>
+                  <th className="r" style={{ width: 140 }}>Bedrag</th>
+                </tr>
+              </thead>
+              <tbody>
+                {listed.map(inv => {
+                  const status = computeInvoiceStatus(inv);
+                  const total = computeInvoice(inv.items).total;
+                  const open = invoiceOpenAmount(inv);
+                  const overdueDays = inv.dueDate ? daysBetween(inv.dueDate, todayISO()) : 0;
+                  const editingClient = listEdit?.invId === inv.id && listEdit?.field === 'client';
+                  return (
+                    <tr key={inv.id} style={{ cursor: 'pointer' }} onClick={() => { if (!listEdit) setView({ mode: 'view', invoice: inv }); }}>
+                      <td>
+                        <span className="num text-[13px] font-medium cursor-text hover:underline" title="Klik om factuurnummer te wijzigen"
+                          onClick={e => { e.stopPropagation(); const nr = window.prompt('Factuurnummer:', inv.number || ''); if (nr !== null && nr.trim() !== '') handleUpdateInvoice(inv.id, { number: nr.trim() }); }}>
+                          {inv.number || <span style={{ color: 'var(--warning)' }}>geen nr.</span>}
+                        </span>
+                        {inv.numberAsSent && <div className="text-[11px] whitespace-nowrap" style={{ color: 'var(--text-3)' }} title="Intern achtervoegsel; de klant kreeg dit nummer">klant: {inv.numberAsSent}</div>}
+                      </td>
+                      <td className="max-w-0" style={{ width: '40%' }}>
+                        {editingClient ? (
+                          <select defaultValue={inv.clientId || ''} autoFocus onClick={e => e.stopPropagation()}
+                            className="h-7 px-1.5 text-[12.5px] rounded border w-full"
+                            onChange={e => { handleUpdateInvoice(inv.id, { clientId: e.target.value || null }); setListEdit(null); }}
+                            onBlur={() => setListEdit(null)}>
+                            <option value="">Geen klant</option>
+                            {clients.map(cl => <option key={cl.id} value={cl.id}>{cl.name || cl.email || cl.id}</option>)}
+                          </select>
+                        ) : (
+                          <div className="truncate cursor-text hover:underline" title="Klik om klant te wijzigen" style={{ color: inv.clientId ? 'var(--text)' : 'var(--text-3)' }}
+                            onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field: 'client' }); }}>
+                            {clientName(inv.clientId) || 'Geen klant'}
+                          </div>
+                        )}
+                        <div className="truncate text-[11.5px]" style={{ color: 'var(--text-3)' }}>{(inv.items || [])[0]?.description}</div>
+                      </td>
+                      <td>{dateCell(inv, 'issueDate', 'factuurdatum')}</td>
+                      <td>{status === 'paid' ? dateCell(inv, 'paidAt', 'betaaldatum', 'var(--success)') : dateCell(inv, 'dueDate', 'vervaldatum', status === 'overdue' ? 'var(--danger)' : undefined)}</td>
+                      <td>
+                        <Badge status={status} />
+                        {status === 'overdue' && overdueDays > 0 && <div className="text-[11px] mt-0.5" style={{ color: 'var(--danger)' }}>{overdueDays} dagen te laat</div>}
+                      </td>
+                      <td className="r">
+                        <div className="text-[14px] font-medium"><Money value={total} currency={inv.currency || 'EUR'} /></div>
+                        {status === 'partial' && <div className="text-[11px]" style={{ color: 'var(--text-3)' }}>nog <Money value={open} /></div>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={5} style={{ color: 'var(--text-3)', fontWeight: 500 }}>{listed.length} {listed.length === 1 ? 'factuur' : 'facturen'}</td>
+                  <td className="r"><Money value={listedTotal} /></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          {/* Mobiel: compacte rijen */}
+          <div className="md:hidden">
+            {listed.map(inv => {
               const status = computeInvoiceStatus(inv);
-              const total = computeInvoice(inv.items).total;
-              const overdueDays = inv.dueDate ? daysBetween(inv.dueDate, todayISO()) : 0;
-              const editingClient = listEdit?.invId === inv.id && listEdit?.field === 'client';
               return (
-                <div
-                  key={inv.id}
-                  className="w-full px-5 py-4 hover:bg-stone-50 transition-colors flex items-center gap-4 text-left"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => { if (!listEdit) setView({ mode: 'view', invoice: inv }); }}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span
-                        className="font-mono text-sm font-medium hover:underline"
-                        style={{ cursor: 'text' }}
-                        title="Klik om factuurnummer te wijzigen"
-                        onClick={e => {
-                          e.stopPropagation();
-                          const nr = window.prompt('Factuurnummer:', inv.number || '');
-                          if (nr !== null && nr.trim() !== '') handleUpdateInvoice(inv.id, { number: nr.trim() });
-                        }}
-                      >{inv.number || <span style={{ color: 'var(--warning)' }}>— nr. —</span>}</span>
-                      <Badge status={status} />
-                      {status === 'overdue' && overdueDays > 0 && (
-                        <span className="text-[10px]" style={{ color: 'var(--danger)' }}>{overdueDays}{t('inv.overduedays')}</span>
-                      )}
-                    </div>
-                    {editingClient ? (
-                      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                        <select
-                          defaultValue={inv.clientId || ''}
-                          autoFocus
-                          style={{ fontSize: '12px', padding: '2px 6px', borderRadius: '5px', border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--ink)' }}
-                          onChange={e => {
-                            handleUpdateInvoice(inv.id, { clientId: e.target.value || null });
-                            setListEdit(null);
-                          }}
-                          onBlur={() => setListEdit(null)}
-                        >
-                          <option value="">— Geen klant —</option>
-                          {clients.map(cl => <option key={cl.id} value={cl.id}>{cl.name || cl.company || cl.email || cl.id}</option>)}
-                        </select>
-                      </div>
-                    ) : (
-                      <div
-                        className="text-sm truncate hover:underline"
-                        style={{ cursor: 'text', color: c ? 'inherit' : 'var(--muted)' }}
-                        title="Klik om klant te wijzigen"
-                        onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field: 'client' }); }}
-                      >{c?.name || '— klant —'}</div>
-                    )}
+                <button key={inv.id} onClick={() => setView({ mode: 'view', invoice: inv })}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left" style={{ borderBottom: '1px solid var(--border)', background: 'none', cursor: 'pointer' }}>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2"><span className="num text-[12.5px]" style={{ color: 'var(--text-2)' }}>{inv.number || 'geen nr.'}</span><Badge status={status} /></div>
+                    <div className="truncate text-[14px] mt-0.5" style={{ color: 'var(--text)' }}>{clientName(inv.clientId) || 'Geen klant'}</div>
                   </div>
-                  <div className="hidden md:block text-xs text-right" style={{ color: 'var(--muted)' }}>
-                    {listEdit?.invId === inv.id && listEdit?.field === 'issueDate' ? (
-                      <div onClick={e => e.stopPropagation()}>
-                        <input type="date" defaultValue={inv.issueDate || ''} autoFocus
-                          style={{ fontSize: '11px', padding: '1px 4px', borderRadius: '4px', border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--ink)' }}
-                          onKeyDown={e => { if (e.key === 'Escape') setListEdit(null); }}
-                          onBlur={e => { const v = e.target.value; setTimeout(() => { if (v) handleUpdateInvoice(inv.id, { issueDate: v }); setListEdit(null); }, 200); }} />
-                      </div>
-                    ) : (
-                      <div style={{ cursor: 'pointer' }} title="Klik om factuurdatum te wijzigen"
-                        onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field: 'issueDate' }); }}>
-                        {t('inv.dateLabel')}: {fmtDate(inv.issueDate)}
-                      </div>
-                    )}
-                    {listEdit?.invId === inv.id && listEdit?.field === 'dueDate' ? (
-                      <div onClick={e => e.stopPropagation()}>
-                        <input type="date" defaultValue={inv.dueDate || ''} autoFocus
-                          style={{ fontSize: '11px', padding: '1px 4px', borderRadius: '4px', border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--ink)' }}
-                          onKeyDown={e => { if (e.key === 'Escape') setListEdit(null); }}
-                          onBlur={e => { const v = e.target.value; setTimeout(() => { if (v) handleUpdateInvoice(inv.id, { dueDate: v }); setListEdit(null); }, 200); }} />
-                      </div>
-                    ) : (
-                      <div style={{ cursor: 'pointer' }} title="Klik om vervaldatum te wijzigen"
-                        onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field: 'dueDate' }); }}>
-                        {t('inv.dueLabel')}: {fmtDate(inv.dueDate)}
-                      </div>
-                    )}
-                    {(status === 'paid' || status === 'partial') && (
-                      listEdit?.invId === inv.id && listEdit?.field === 'paidAt' ? (
-                        <div onClick={e => e.stopPropagation()}>
-                          <input type="date" defaultValue={isoToLocalDate(inv.paidAt)} autoFocus
-                            style={{ fontSize: '11px', padding: '1px 4px', borderRadius: '4px', border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--ink)' }}
-                            onKeyDown={e => { if (e.key === 'Escape') setListEdit(null); }}
-                            onBlur={e => { const v = e.target.value; setTimeout(() => { if (v) handleUpdateInvoice(inv.id, { paidAt: v + 'T12:00:00.000Z' }); setListEdit(null); }, 200); }} />
-                        </div>
-                      ) : (
-                        <div style={{ color: 'var(--success)', cursor: 'pointer' }} title="Klik om betaaldatum te wijzigen"
-                          onClick={e => { e.stopPropagation(); setListEdit({ invId: inv.id, field: 'paidAt' }); }}>
-                          {t('inv.paidLabel')}: {inv.paidAt ? fmtDate(inv.paidAt) : '—'}
-                        </div>
-                      )
-                    )}
+                  <div className="text-right">
+                    <div className="text-[14px] font-medium"><Money value={computeInvoice(inv.items).total} currency={inv.currency || 'EUR'} /></div>
+                    <div className="num text-[11.5px]" style={{ color: 'var(--text-3)' }}>{fmtDate(inv.issueDate)}</div>
                   </div>
-                  <div className="text-right" onClick={e => { e.stopPropagation(); setView({ mode: 'view', invoice: inv }); }}>
-                    <div className="font-display text-lg num font-medium">{fmtCurrency(total, inv.currency)}</div>
-                  </div>
-                  <ChevronRight size={16} style={{ color: 'var(--muted)' }} onClick={e => { e.stopPropagation(); setView({ mode: 'view', invoice: inv }); }} />
-                </div>
+                </button>
               );
             })}
+            <div className="flex justify-between px-4 py-3 text-[13px] font-semibold"><span style={{ color: 'var(--text-3)' }}>{listed.length} facturen</span><Money value={listedTotal} /></div>
           </div>
         </Card>
       )}
@@ -3473,7 +3515,7 @@ const InvoicesView = ({ invoices, setInvoices, allInvoices, clients, setClients,
 // ============================================================================
 // INVOICE EDITOR
 // ============================================================================
-const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, onSave, onCancel }) => {
+const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, nextNumberPreview, onSave, onCancel }) => {
   const { t } = useLang();
   const paymentTerms = activeEntity?.paymentTerms || settings.invoice?.paymentTerms || 14;
   const jurisdiction = JURISDICTIONS[activeEntity?.jurisdiction || 'NL'] || JURISDICTIONS.NL;
@@ -3549,9 +3591,6 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
   const totals = computeInvoice(form.items);
 
   const isValid = form.clientId && form.items.length > 0 && form.items.every(i => i.description) && form.issueDate;
-  const nextNum = activeEntity?.nextInvoiceNumber || 1;
-  const prefix = activeEntity?.invoicePrefix || '';
-
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-4">
@@ -3561,9 +3600,9 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
       </div>
 
       <div>
-        <h1 className="font-display text-4xl font-medium">{form.id ? `${t('editor.titleEdit')} ${form.number}` : t('editor.titleNew')}</h1>
+        <h1 className="page-title">{form.id ? `${t('editor.titleEdit')} ${form.number}` : t('editor.titleNew')}</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-          {form.id ? t('editor.subtitleEdit') : `${t('editor.subtitleNew')}: ${prefix}${String(nextNum).padStart(4, '0')} · ${activeEntity?.name}`}
+          {form.id ? t('editor.subtitleEdit') : `${t('editor.subtitleNew')}: ${nextNumberPreview} · ${activeEntity?.name}`}
         </p>
       </div>
 
@@ -3738,7 +3777,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, o
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => toggleDiscount(idx)}
-                              className={`text-[11px] font-medium rounded px-1.5 py-0.5 whitespace-nowrap transition-colors ${hasDiscount ? 'hover:bg-red-50' : 'hover:bg-stone-100'}`}
+                              className={`text-[11px] font-medium rounded px-1.5 py-0.5 whitespace-nowrap transition-colors ${hasDiscount ? 'hover:bg-red-50' : 'hover:bg-[color:var(--surface-2)]'}`}
                               style={{ color: hasDiscount ? 'var(--accent)' : 'var(--muted)' }}
                               title={hasDiscount ? 'Korting verwijderen' : 'Korting toevoegen'}
                             >
@@ -3998,7 +4037,7 @@ const InvoiceDetail = ({ invoice, clients, settings, activeEntity, entities, onC
   <script src="https://cdn.tailwindcss.com"><\/script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
-    body { margin: 0; padding: 0; background: #fff; }
+    body { margin: 0; padding: 0; background: #fff; font-family: 'Inter', -apple-system, sans-serif; }
     :root {
       --text: #1a1a1a; --text-2: #4a4a4a; --text-3: #888;
       --surface: #fff; --surface-2: #f9fafb; --surface-3: #f3f4f6;
@@ -4105,10 +4144,10 @@ ${clone.innerHTML}
             <Button size="sm" variant="secondary" onClick={() => setShowPaymentModal(true)}><Wallet size={13} /> {t('detail.registerPayment')}</Button>
           )}
           {status !== 'paid' && status !== 'draft' && status !== 'credit_note' && (
-            <Button size="sm" onClick={() => onStatusChange(invoice.id, 'paid', { paidAt: new Date().toISOString(), payments: [...payments, { amount: remaining, date: todayISO(), note: 'Volledig betaald' }] })}><Check size={13} /> {t('detail.markPaid')}</Button>
+            <Button size="sm" onClick={() => onStatusChange(invoice.id, 'paid', { paidAt: new Date().toISOString(), paidAmount: totals.total, payments: [...payments, { amount: +remaining.toFixed(2), date: todayISO(), note: 'Volledig betaald' }] })}><Check size={13} /> {t('detail.markPaid')}</Button>
           )}
           {status === 'paid' && (
-            <Button size="sm" variant="secondary" onClick={() => onStatusChange(invoice.id, 'sent', { paidAt: null })}><X size={13} /> {t('detail.markUnpaid')}</Button>
+            <Button size="sm" variant="secondary" onClick={() => onStatusChange(invoice.id, 'sent', { paidAt: null, paidAmount: 0, payments: [] })}><X size={13} /> {t('detail.markUnpaid')}</Button>
           )}
           {status === 'paid' && onCreateCreditNote && (
             <Button size="sm" variant="secondary" onClick={() => onCreateCreditNote(invoice)}><FileCheck2 size={13} /> {t('detail.creditNote')}</Button>
@@ -4118,7 +4157,12 @@ ${clone.innerHTML}
       </div>
 
       <div className="no-print flex items-center gap-3 flex-wrap">
-        <h1 className="font-display text-3xl font-medium">Factuur {invoice.number}</h1>
+        <h1 className="page-title">Factuur {invoice.number}</h1>
+        {invoice.numberAsSent && (
+          <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }} title="Intern achtervoegsel; de klant kreeg dit nummer">
+            verstuurd als {invoice.numberAsSent}
+          </span>
+        )}
         <Badge status={status} />
         {invoice.sentAt && <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('detail.sentOn')} {fmtDate(invoice.sentAt)}</span>}
         {invoice.paidAt && <span className="text-xs" style={{ color: 'var(--success)' }}>{t('detail.paidOn')} {fmtDate(invoice.paidAt)}</span>}
@@ -4227,7 +4271,7 @@ const RegisterPaymentModal = ({ invoice, remaining, totals, onSave, onClose }) =
           <h2 className="font-display text-xl">{t('payment.title')}</h2>
           <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Factuur {invoice.number} · {t('payment.subtitle')} {fmtCurrency(remaining, invoice.currency)}</p>
         </div>
-        <button onClick={onClose} className="p-1.5 rounded hover:bg-stone-100"><X size={16} /></button>
+        <button onClick={onClose} className="p-1.5 rounded hover:bg-[color:var(--surface-2)]"><X size={16} /></button>
       </div>
       <div className="p-6 space-y-4">
         <Input label={t('payment.amountLabel')} type="number" step="0.01" min="0" value={amount} onChange={e => setAmount(e.target.value)} />
@@ -4301,7 +4345,7 @@ const SendInvoiceModal = ({ invoice, client, settings, onSend, onClose, mode = '
             {isReminder ? template.name : `Factuur ${invoice.number}`} → {client?.email || client?.name}
           </p>
         </div>
-        <button onClick={onClose} className="p-1.5 rounded hover:bg-stone-100"><X size={16} /></button>
+        <button onClick={onClose} className="p-1.5 rounded hover:bg-[color:var(--surface-2)]"><X size={16} /></button>
       </div>
 
       {/* Channel selector */}
@@ -4448,7 +4492,7 @@ const ExpensesView = ({ expenses, setExpenses, allExpenses, settings, setSetting
         notes: '',
       };
       const all = allExpenses || expenses;
-      setExpenses([newExpense, ...all]);
+      setExpenses(prev => [newExpense, ...prev]);
     } catch (e) {
       alert('Foto kon niet worden verwerkt: ' + e.message);
     } finally {
@@ -4462,163 +4506,172 @@ const ExpensesView = ({ expenses, setExpenses, allExpenses, settings, setSetting
 
   const handleProcess = (expense) => {
     const all = allExpenses || expenses;
-    setExpenses(all.map(e => e.id === expense.id ? { ...e, ...expense, status: 'processed' } : e));
+    setExpenses(prev => prev.map(e => e.id === expense.id ? { ...e, ...expense, status: 'processed' } : e));
     setProcessing(null);
   };
 
   const handleDelete = (id) => {
     if (window.confirm('Bon verwijderen?')) {
       const all = allExpenses || expenses;
-      setExpenses(all.filter(e => e.id !== id));
+      setExpenses(prev => prev.filter(e => e.id !== id));
       setProcessing(null);
     }
   };
 
+  const [search, setSearch] = useState('');
+  const [vatFilter, setVatFilter] = useState('all');
+  const [dragOver, setDragOver] = useState(false);
+  const thisYear = new Date().getFullYear();
+  const openOnes = expenses.filter(e => e.status === 'open');
+  const processedRows = expenses
+    .filter(e => e.status === 'processed')
+    .filter(e => vatFilter === 'all' || expenseVatTreatment(e) === vatFilter)
+    .filter(e => {
+      const q = search.trim().toLowerCase();
+      return !q || String(e.vendor || '').toLowerCase().includes(q) || String(e.category || '').toLowerCase().includes(q) || String(e.notes || '').toLowerCase().includes(q) || String(e.amount || '').includes(q);
+    })
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const yearRows = expenses.filter(e => e.status === 'processed' && yearOf(e.date) === thisYear);
+  const yearNet = yearRows.reduce((s, e) => s + expenseNet(e), 0);
+  const yearVat = yearRows.filter(e => expenseVatTreatment(e) === 'standard').reduce((s, e) => s + Number(e.btwAmount || 0), 0);
+  const yearReverse = yearRows.reduce((s, e) => s + expenseReverseVat(e), 0);
+  const tableTotals = processedRows.reduce((a, e) => ({ net: a.net + expenseNet(e), vat: a.vat + (expenseVatTreatment(e) === 'standard' ? Number(e.btwAmount || 0) : 0), total: a.total + Number(e.amount || 0) }), { net: 0, vat: 0, total: 0 });
+  const onDropFiles = async (files) => { for (const f of Array.from(files || [])) await handleCapture(f, 'upload'); };
+  const vatChip = (e) => {
+    const tr = expenseVatTreatment(e);
+    const label = VAT_TREATMENTS.find(v => v.id === tr)?.short || tr;
+    const tone = tr === 'standard' ? ['var(--success-soft)', 'var(--success)'] : tr === 'none' ? ['var(--surface-3)', 'var(--text-3)'] : ['var(--accent-soft)', 'var(--accent)'];
+    return <span className="inline-flex h-[22px] items-center px-2 rounded-full text-[11.5px] font-medium whitespace-nowrap" style={{ background: tone[0], color: tone[1] }}>{label}</span>;
+  };
+
   return (
-    <div className="space-y-5 pb-24 lg:pb-0">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
+    <div className="space-y-5 pb-24 lg:pb-0"
+      onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={e => { if (e.currentTarget === e.target) setDragOver(false); }}
+      onDrop={e => { e.preventDefault(); setDragOver(false); onDropFiles(e.dataTransfer.files); }}>
+      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleCapture(e.target.files?.[0], 'camera')} />
+      <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => { onDropFiles(e.target.files); e.target.value = ''; }} />
+
+      <PageHeader
+        title="Bonnen en kosten"
+        sub={openCount > 0 ? `${openCount} ${openCount === 1 ? 'bon wacht' : 'bonnen wachten'} op verwerking · ${expenses.length} totaal` : `${expenses.length} bonnen, alles verwerkt`}
+        actions={<>
+          <Button variant="secondary" onClick={() => cameraInputRef.current?.click()} disabled={uploading}><Camera size={14} /> Foto maken</Button>
+          <Button onClick={() => fileInputRef.current?.click()} disabled={uploading}><Upload size={14} /> {uploading ? 'Bezig…' : 'Bonnen uploaden'}</Button>
+        </>}
+      />
+
+      {/* Samenvatting dit jaar */}
+      <div className="grid grid-cols-2 md:grid-cols-4 rounded-[14px] overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--border)', gap: 1 }}>
+        {[
+          { label: `Kosten ${thisYear}`, sub: 'excl. BTW', value: <Money value={yearNet} /> },
+          { label: 'Voorbelasting', sub: 'NL BTW, aftrekbaar (5b)', value: <Money value={yearVat} /> },
+          { label: 'Verlegde BTW', sub: '4a/4b, netto € 0', value: <Money value={yearReverse} /> },
+          { label: 'Te verwerken', sub: openCount ? 'klik een bon om te verwerken' : 'niets open', value: <span className="money">{openCount}</span>, tone: openCount ? 'var(--warning)' : undefined },
+        ].map(c => (
+          <div key={c.label} className="px-4 py-3.5" style={{ background: 'var(--surface)' }}>
+            <div className="text-[12px]" style={{ color: 'var(--text-3)' }}>{c.label}</div>
+            <div className="text-[19px] font-semibold mt-0.5" style={{ color: c.tone || 'var(--text)' }}>{c.value}</div>
+            <div className="text-[11.5px]" style={{ color: 'var(--text-3)' }}>{c.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Te verwerken: bonnen met foto/bestand die nog wachten */}
+      {openOnes.length > 0 && (
         <div>
-          <h1 className="font-display text-4xl font-medium">Bonnen</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-            {openCount > 0 ? `${openCount} open · ` : ''}{expenses.length} totaal
-          </p>
+          <div className="text-[13px] font-semibold mb-2" style={{ color: 'var(--text)' }}>Te verwerken</div>
+          <div className="flex gap-3 overflow-x-auto scrollable pb-1">
+            {openOnes.map(e => (
+              <button key={e.id} onClick={() => setProcessing(e)} className="flex-shrink-0 w-36 text-left rounded-[12px] overflow-hidden transition-[border-color]"
+                style={{ border: '1px solid var(--border-2)', background: 'var(--surface)', cursor: 'pointer' }}>
+                <div className="h-24 flex items-center justify-center" style={{ background: 'var(--surface-2)' }}>
+                  {e.image ? <img src={e.image} alt="" className="w-full h-full object-cover" /> : e.attachment ? <Paperclip size={20} style={{ color: 'var(--text-3)' }} /> : <ImageIcon size={20} style={{ color: 'var(--text-3)' }} />}
+                </div>
+                <div className="px-2.5 py-2">
+                  <div className="text-[12.5px] font-medium" style={{ color: 'var(--warning)' }}>Verwerken</div>
+                  <div className="text-[11.5px] num" style={{ color: 'var(--text-3)' }}>{fmtDate(e.capturedAt)}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Uploadzone (ook slepen en loslaten op de hele pagina) */}
+      <button onClick={() => fileInputRef.current?.click()} className="w-full rounded-[12px] py-4 text-[13px] flex items-center justify-center gap-2 transition-colors"
+        style={{ border: `1.5px dashed ${dragOver ? 'var(--accent)' : 'var(--border-2)'}`, background: dragOver ? 'var(--accent-soft)' : 'transparent', color: dragOver ? 'var(--accent)' : 'var(--text-3)', cursor: 'pointer' }}>
+        <Upload size={14} /> {dragOver ? 'Laat los om te uploaden' : 'Sleep bonnen of PDF-facturen hierheen, of klik om te kiezen'}
+      </button>
+
+      {/* Filters */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <Segmented value={vatFilter} onChange={setVatFilter} options={[
+          { id: 'all', label: 'Alle BTW-soorten' },
+          ...VAT_TREATMENTS.map(v => ({ id: v.id, label: v.short, count: expenses.filter(e => e.status === 'processed' && expenseVatTreatment(e) === v.id).length })).filter(o => o.count > 0),
+        ]} />
+        <div className="relative ml-auto">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-3)' }} />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Zoek leverancier, categorie of bedrag" className="h-9 pl-8 pr-3 text-[13px] rounded-[9px] border w-[260px]" />
         </div>
       </div>
 
-      {/* Quick capture card */}
-      <Card className="p-6" style={{ background: 'linear-gradient(135deg, #1A1612 0%, #2D2520 100%)', borderColor: 'transparent' }}>
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="text-white">
-            <h3 className="font-display text-xl font-medium">Bon vastleggen</h3>
-            <p className="text-sm opacity-70 mt-0.5">Foto maken of bestand kiezen — verwerk je later</p>
-          </div>
-          <div className="flex gap-2">
-            <input
-              ref={cameraInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              onChange={(e) => handleCapture(e.target.files?.[0], 'camera')}
-            />
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,application/pdf"
-              className="hidden"
-              onChange={(e) => handleCapture(e.target.files?.[0], 'upload')}
-            />
-            <button
-              onClick={() => cameraInputRef.current?.click()}
-              disabled={uploading}
-              className="px-4 py-2.5 rounded-md text-sm font-medium bg-white text-stone-900 flex items-center gap-2 hover:bg-stone-100 transition disabled:opacity-50"
-            >
-              <Camera size={16} /> {uploading ? 'Bezig...' : 'Foto'}
-            </button>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="px-4 py-2.5 rounded-md text-sm font-medium border border-white/20 text-white flex items-center gap-2 hover:bg-white/10 transition disabled:opacity-50"
-            >
-              <Upload size={16} /> Bestand
-            </button>
-          </div>
-        </div>
-      </Card>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
-        <Card className="p-4">
-          <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>Open</div>
-          <div className="font-display text-2xl num mt-1" style={{ color: openCount > 0 ? 'var(--accent)' : 'var(--ink)' }}>{openCount}</div>
-        </Card>
-        <Card className="p-4">
-          <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>Totaal kosten</div>
-          <div className="font-display text-xl num mt-1">{fmtEUR(totalCosts)}</div>
-        </Card>
-        <Card className="p-4">
-          <div className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>BTW terug</div>
-          <div className="font-display text-xl num mt-1" style={{ color: 'var(--success)' }}>{fmtEUR(totalBtw)}</div>
-        </Card>
-      </div>
-
-      {/* Filter tabs */}
-      <Card className="p-3">
-        <div className="flex flex-wrap gap-1">
-          {[{ id: 'all', label: 'Alles' }, { id: 'open', label: `Open${openCount > 0 ? ` (${openCount})` : ''}` }, { id: 'processed', label: 'Verwerkt' }].map(f => (
-            <button
-              key={f.id}
-              onClick={() => setFilter(f.id)}
-              className="px-3 py-1.5 text-xs font-medium rounded transition-colors"
-              style={{
-                background: filter === f.id ? 'var(--btn-primary)' : 'transparent',
-                color: filter === f.id ? '#fff' : 'var(--ink-2)',
-              }}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-      </Card>
-
-      {filtered.length === 0 ? (
+      {processedRows.length === 0 ? (
         <Card>
-          <EmptyState
-            icon={ReceiptIcon}
-            title={filter === 'open' ? 'Geen open bonnen' : filter === 'processed' ? 'Geen verwerkte bonnen' : 'Nog geen bonnen'}
-            description={filter === 'all' ? 'Maak een foto van een bon om te beginnen.' : 'Wissel van filter om andere bonnen te zien.'}
-          />
+          <EmptyState icon={ReceiptIcon}
+            title={search || vatFilter !== 'all' ? 'Geen kosten gevonden' : 'Nog geen verwerkte kosten'}
+            description={search || vatFilter !== 'all' ? 'Pas je zoekopdracht of filter aan.' : 'Upload een bon of boek een uitgave vanuit Bank.'} />
         </Card>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          {filtered.map(e => (
-            <button
-              key={e.id}
-              onClick={() => setProcessing(e)}
-              className="text-left rounded-xl overflow-hidden border bg-white hover:shadow-md transition-shadow group"
-              style={{ borderColor: 'var(--border)' }}
-            >
-              <div className="aspect-square bg-stone-100 relative overflow-hidden">
-                {e.image ? (
-                  <img src={e.image} alt="bon" className="w-full h-full object-cover" />
-                ) : e.attachment ? (
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-1">
-                    <Paperclip size={28} style={{ color: 'var(--muted)' }} />
-                    <span className="text-[10px]" style={{ color: 'var(--muted)' }}>PDF</span>
-                  </div>
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <ImageIcon size={32} style={{ color: 'var(--muted)' }} />
-                  </div>
-                )}
-                <div className="absolute top-2 right-2">
-                  <Badge status={e.status} />
-                </div>
-                {e.attachment && (
-                  <div className="absolute bottom-2 left-2">
-                    <Paperclip size={12} style={{ color: 'var(--muted)' }} />
-                  </div>
-                )}
-              </div>
-              <div className="p-3">
-                {e.status === 'processed' ? (
-                  <>
-                    <div className="text-sm font-medium truncate">{e.vendor || 'Onbekend'}</div>
-                    <div className="text-xs mt-0.5 flex items-center justify-between" style={{ color: 'var(--muted)' }}>
-                      <span>{fmtDate(e.date)}</span>
-                      <span className="num font-medium" style={{ color: 'var(--ink)' }}>{fmtEUR(e.amount)}</span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="text-sm font-medium" style={{ color: 'var(--warning)' }}>Te verwerken</div>
-                    <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{fmtDate(e.capturedAt)}</div>
-                  </>
-                )}
-              </div>
-            </button>
-          ))}
-        </div>
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="ledger">
+              <thead>
+                <tr>
+                  <th style={{ width: 100 }}>Datum</th>
+                  <th>Leverancier</th>
+                  <th style={{ width: 120 }}>BTW-soort</th>
+                  <th className="r" style={{ width: 120 }}>Excl. BTW</th>
+                  <th className="r hidden md:table-cell" style={{ width: 100 }}>BTW</th>
+                  <th className="r" style={{ width: 120 }}>Totaal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {processedRows.map(e => (
+                  <tr key={e.id} onClick={() => setProcessing(e)} style={{ cursor: 'pointer' }}>
+                    <td><span className="num text-[12.5px]" style={{ color: 'var(--text-2)' }}>{fmtDate(e.date)}</span></td>
+                    <td className="max-w-0" style={{ width: '45%' }}>
+                      <div className="flex items-center gap-2 min-w-0">
+                        {e.image ? <img src={e.image} alt="" className="w-7 h-7 rounded-[6px] object-cover flex-shrink-0" />
+                          : <span className="w-7 h-7 rounded-[6px] flex items-center justify-center flex-shrink-0" style={{ background: 'var(--surface-2)' }} title={e.source === 'bank' ? 'Uit bankafschrift' : e.attachment ? 'PDF' : 'Geen bijlage'}>
+                              {e.source === 'bank' ? <Landmark size={13} style={{ color: 'var(--text-3)' }} /> : <Paperclip size={13} style={{ color: 'var(--text-3)' }} />}
+                            </span>}
+                        <div className="min-w-0">
+                          <div className="truncate" style={{ color: 'var(--text)' }}>{e.vendor || 'Onbekende leverancier'}</div>
+                          <div className="truncate text-[11.5px]" style={{ color: 'var(--text-3)' }}>{[e.category, e.ledgerAccount].filter(Boolean).join(' · ') || 'Geen categorie'}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td>{vatChip(e)}</td>
+                    <td className="r"><Money value={expenseNet(e)} /></td>
+                    <td className="r hidden md:table-cell" style={{ color: 'var(--text-2)' }}>
+                      {expenseVatTreatment(e) === 'standard' ? <Money value={e.btwAmount} /> : expenseReverseVat(e) ? <span title="Verlegd: aangegeven én afgetrokken" style={{ color: 'var(--text-3)' }}><Money value={expenseReverseVat(e)} /></span> : <span style={{ color: 'var(--text-3)' }}>—</span>}
+                    </td>
+                    <td className="r font-medium"><Money value={e.amount} /></td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={3} style={{ color: 'var(--text-3)', fontWeight: 500 }}>{processedRows.length} kostenposten</td>
+                  <td className="r"><Money value={tableTotals.net} /></td>
+                  <td className="r hidden md:table-cell"><Money value={tableTotals.vat} /></td>
+                  <td className="r"><Money value={tableTotals.total} /></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </Card>
       )}
 
       {processing && (
@@ -4651,7 +4704,11 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
     category: '', ledgerAccount: '', notes: '',
     source: 'manual',
     ...expense,
+    vatTreatment: expense.vatTreatment || (jur.code === 'NL'
+      ? (Number(expense.btwAmount) > 0 ? 'standard' : suggestVatTreatment({ vendor: expense.vendor, currency: expense.currency }))
+      : 'standard'),
   });
+  const vatSuggestion = jur.code === 'NL' ? suggestVatTreatment({ vendor: form.vendor, currency: form.currency }) : 'standard';
 
   const [fetchingRate, setFetchingRate] = useState(false);
   const [rateError, setRateError] = useState(null);
@@ -4734,6 +4791,8 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
     const orig = Number(next.originalAmount || 0);
     const rate = Number(next.exchangeRate || 1);
     const amtBase = +(orig * rate).toFixed(2);
+    // Verlegde BTW / geen BTW: er staat geen NL BTW op de factuur, dus niets aftrekbaars in het bedrag
+    if (next.vatTreatment && next.vatTreatment !== 'standard') return { ...next, amount: amtBase, btwAmount: 0 };
     const btwRate = Number(next.btwRate || 0);
     const btw = +(amtBase - (amtBase / (1 + btwRate / 100))).toFixed(2);
     return { ...next, amount: amtBase, btwAmount: btw };
@@ -4790,7 +4849,7 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
               {scanning ? 'Scannen...' : 'Scan met AI'}
             </Button>
           )}
-          <button onClick={onClose} className="p-1.5 rounded hover:bg-stone-100"><X size={16} /></button>
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-[color:var(--surface-2)]"><X size={16} /></button>
         </div>
       </div>
       {scanResult && !scanError && (
@@ -4948,10 +5007,28 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
             </div>
           )}
 
+          {jur.code === 'NL' && (
+            <div className="space-y-1">
+              <Select label="BTW-behandeling" value={form.vatTreatment} onChange={e => update('vatTreatment', e.target.value)}>
+                {VAT_TREATMENTS.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
+              </Select>
+              {vatSuggestion !== form.vatTreatment && (
+                <button type="button" onClick={() => update('vatTreatment', vatSuggestion)} className="text-xs hover:underline" style={{ color: 'var(--warning)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                  Voorstel voor {form.vendor || 'deze leverancier'}: {VAT_TREATMENTS.find(v => v.id === vatSuggestion)?.label} — toepassen
+                </button>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
-            <Select label={`${jur.salesTax.name} %`} value={form.btwRate} onChange={e => update('btwRate', Number(e.target.value))}>
-              {jur.salesTax.rates.map(r => <option key={r} value={r}>{r}%</option>)}
-            </Select>
+            {form.vatTreatment === 'standard' ? (
+              <Select label={`${jur.salesTax.name} %`} value={form.btwRate} onChange={e => update('btwRate', Number(e.target.value))}>
+                {jur.salesTax.rates.map(r => <option key={r} value={r}>{r}%</option>)}
+              </Select>
+            ) : (
+              <div className="text-xs p-2 rounded" style={{ background: 'var(--surface-2)', color: 'var(--muted)' }}>
+                {form.vatTreatment === 'none' ? 'Geen BTW — telt alleen als kosten.' : `Verlegd: ${fmtCurrency(+(Number(form.amount) * 0.21).toFixed(2), baseCurr)} in rubriek ${form.vatTreatment === 'reverse_eu' ? '4b' : '4a'} én aftrekbaar in 5b.`}
+              </div>
+            )}
             <div className="flex items-end">
               <div className="text-xs" style={{ color: 'var(--muted)' }}>
                 <div>Excl: <span className="num" style={{ color: 'var(--ink)' }}>{fmtCurrency(Number(form.amount) - Number(form.btwAmount), baseCurr)}</span></div>
@@ -5870,7 +5947,12 @@ const TemplateVelvet = ({ invoice, entity, client, totals, parentEntity }) => {
   );
 };
 
-const renderTemplate = (templateId, props) => {
+const renderTemplate = (templateId, rawProps) => {
+  // Facturen die (door een oude bug) met een dubbel nummer verstuurd zijn, hebben intern een
+  // A/B/C-achtervoegsel. Op de factuur zelf blijft het nummer staan zoals de klant het kreeg.
+  const props = rawProps.invoice?.numberAsSent
+    ? { ...rawProps, invoice: { ...rawProps.invoice, number: rawProps.invoice.numberAsSent } }
+    : rawProps;
   switch (templateId) {
     case 'modern': return <TemplateModern {...props} />;
     case 'minimal': return <TemplateMinimal {...props} />;
@@ -6557,10 +6639,10 @@ const EntitiesView = ({ entities, setEntities, activeEntityId, setActiveEntityId
 
   const handleSave = (entity) => {
     if (entity.id && entities.find(e => e.id === entity.id)) {
-      setEntities(entities.map(e => e.id === entity.id ? entity : e));
+      setEntities(prev => prev.map(e => e.id === entity.id ? entity : e));
     } else {
       const newEnt = { ...entity, id: generateId('ent'), createdAt: new Date().toISOString() };
-      setEntities([...entities, newEnt]);
+      setEntities(prev => [...prev, newEnt]);
     }
     setEditing(null);
   };
@@ -6572,7 +6654,7 @@ const EntitiesView = ({ entities, setEntities, activeEntityId, setActiveEntityId
     if (invCount + expCount > 0) {
       if (!window.confirm(`Dit bedrijf heeft ${invCount} facturen en ${expCount} bonnen. Deze blijven bestaan maar verliezen koppeling. Doorgaan?`)) return;
     }
-    setEntities(entities.filter(e => e.id !== id));
+    setEntities(prev => prev.filter(e => e.id !== id));
     if (id === activeEntityId) setActiveEntityId(entities.find(e => e.id !== id)?.id);
   };
 
@@ -6617,11 +6699,11 @@ const EntitiesView = ({ entities, setEntities, activeEntityId, setActiveEntityId
               </div>
               <div className="flex flex-col gap-1">
                 {!isActive && (
-                  <button onClick={() => setActiveEntityId(entity.id)} className="text-[10px] font-medium px-2 py-1 rounded hover:bg-stone-100" style={{ color: 'var(--accent)' }}>
+                  <button onClick={() => setActiveEntityId(entity.id)} className="text-[10px] font-medium px-2 py-1 rounded hover:bg-[color:var(--surface-2)]" style={{ color: 'var(--accent)' }}>
                     Activeer
                   </button>
                 )}
-                <button onClick={() => setEditing(entity)} className="p-1.5 rounded hover:bg-stone-100">
+                <button onClick={() => setEditing(entity)} className="p-1.5 rounded hover:bg-[color:var(--surface-2)]">
                   <Edit3 size={13} style={{ color: 'var(--muted)' }} />
                 </button>
                 {entities.length > 1 && (
@@ -6646,7 +6728,7 @@ const EntitiesView = ({ entities, setEntities, activeEntityId, setActiveEntityId
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="font-display text-4xl font-medium">Bedrijven</h1>
+          <h1 className="page-title">Bedrijven</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
             {entities.length} bedrijf{entities.length !== 1 ? 'sentiteiten' : ''} · Structuur + gegevens
           </p>
@@ -6709,7 +6791,7 @@ const EntityForm = ({ entity, entities, onSave, onClose }) => {
     <Modal open onClose={onClose} size="lg">
       <div className="px-6 py-5 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
         <h2 className="font-display text-2xl">{form.id ? 'Bedrijf bewerken' : 'Nieuw bedrijf'}</h2>
-        <button onClick={onClose} className="p-1.5 rounded hover:bg-stone-100"><X size={16} /></button>
+        <button onClick={onClose} className="p-1.5 rounded hover:bg-[color:var(--surface-2)]"><X size={16} /></button>
       </div>
       <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto scrollable">
         <div>
@@ -6878,7 +6960,7 @@ const EntityForm = ({ entity, entities, onSave, onClose }) => {
 // ============================================================================
 // TAX REPORT VIEW (BTW kwartaal NL / ITBIS mensual DR)
 // ============================================================================
-const TaxReportView = ({ invoices, expenses, clients, settings, activeEntity }) => {
+const TaxReportView = ({ invoices, expenses, setExpenses, clients, settings, activeEntity }) => {
   const jurisdiction = activeEntity?.jurisdiction || settings.jurisdiction || 'NL';
   const jur = JURISDICTIONS[jurisdiction];
   const baseCurr = jur.baseCurrency;
@@ -6902,71 +6984,64 @@ const TaxReportView = ({ invoices, expenses, clients, settings, activeEntity }) 
   }, [year, period, jur.filingPeriod]);
 
   const data = useMemo(() => {
-    // Sales (invoices) — use paid invoices only for cash-basis, or sent for accrual
-    // For NL BTW we use issueDate (factuurdatum); only count non-draft
-    const periodInvoices = invoices.filter(i => {
-      if (i.status === 'draft') return false;
-      const d = new Date(i.issueDate);
-      return d >= periodRange.start && d < periodRange.end;
-    });
-
+    // Eén rekenkern (src/finance.js): factuurstelsel op factuurdatum, creditnota's negatief,
+    // kosten per BTW-behandeling (NL BTW / verlegd 4a / verlegd 4b / geen BTW).
+    const vat = buildVatReturn({ invoices, expenses, clients, start: periodRange.start, end: periodRange.end });
     const salesByRate = {};
     let salesTotal = 0;
-    let salesTaxOnSales = 0;
-    periodInvoices.forEach(inv => {
-      const totals = computeInvoice(inv.items);
+    vat.salesRows.forEach(({ totals }) => {
       salesTotal += totals.subtotal;
-      Object.entries(totals.btwByRate).forEach(([rate, amt]) => {
+      Object.entries(totals.netByRate).forEach(([rate, net]) => {
         if (!salesByRate[rate]) salesByRate[rate] = { net: 0, tax: 0 };
-        const rateNum = Number(rate);
-        inv.items.forEach(it => {
-          if (Number(it.btwRate) === rateNum) {
-            salesByRate[rate].net += Number(it.quantity || 0) * Number(it.price || 0);
-          }
-        });
-        salesByRate[rate].tax += amt;
-        salesTaxOnSales += amt;
+        salesByRate[rate].net += net;
+        salesByRate[rate].tax += totals.btwByRate[rate] || 0;
       });
     });
-
-    // Purchases (expenses) — processed only, in period
-    const periodExpenses = expenses.filter(e => {
-      if (e.status !== 'processed' || !e.date) return false;
-      const d = new Date(e.date);
-      return d >= periodRange.start && d < periodRange.end;
-    });
+    const salesTaxOnSales = vat.salesRows.reduce((s, r) => s + r.totals.btwTotal, 0);
 
     let purchasesTotal = 0;
-    let taxOnPurchases = 0;
     const byLedger = {};
-    periodExpenses.forEach(e => {
-      const total = Number(e.amount || 0);
-      const tax = Number(e.btwAmount || 0);
-      purchasesTotal += (total - tax);
-      taxOnPurchases += tax;
+    vat.purchaseRows.forEach(({ e, net, vat: tax }) => {
+      purchasesTotal += net;
       const ledgerCode = e.ledgerAccount || 'overig';
       if (!byLedger[ledgerCode]) {
         const acct = ledgerAccounts.find(a => a.code === ledgerCode);
         byLedger[ledgerCode] = { code: ledgerCode, name: acct?.name || 'Niet ingedeeld', group: acct?.group || '—', net: 0, tax: 0, total: 0, count: 0 };
       }
-      byLedger[ledgerCode].net += (total - tax);
+      byLedger[ledgerCode].net += net;
       byLedger[ledgerCode].tax += tax;
-      byLedger[ledgerCode].total += total;
+      byLedger[ledgerCode].total += Number(e.amount || 0);
       byLedger[ledgerCode].count += 1;
     });
 
     return {
-      periodInvoices,
-      periodExpenses,
+      vat,
+      periodInvoices: vat.salesRows.map(r => r.inv),
+      periodExpenses: vat.purchaseRows.map(r => r.e),
       salesByRate,
       salesTotal,
       salesTaxOnSales,
       purchasesTotal,
-      taxOnPurchases,
-      saldo: salesTaxOnSales - taxOnPurchases,
+      // Voor NL: verschuldigd = 1a..1c + verlegde BTW (4a/4b); voorbelasting = 5b incl. verlegd
+      owed: jur.code === 'NL' ? vat.owed : salesTaxOnSales,
+      taxOnPurchases: vat.deductible,
+      saldo: jur.code === 'NL' ? vat.saldo : salesTaxOnSales - vat.deductible,
       byLedger: Object.values(byLedger).sort((a, b) => b.total - a.total),
     };
-  }, [invoices, expenses, periodRange, ledgerAccounts]);
+  }, [invoices, expenses, clients, periodRange, ledgerAccounts, jur.code]);
+
+  const setTreatment = (expenseId, treatment) => {
+    if (!setExpenses) return;
+    setExpenses(prev => prev.map(e => {
+      if (e.id !== expenseId) return e;
+      if (treatment === 'standard') {
+        const rate = Number(e.btwRate) || jur.salesTax.standard;
+        const amt = Number(e.amount || 0);
+        return { ...e, vatTreatment: treatment, btwRate: rate, btwAmount: e.btwAmount > 0 ? e.btwAmount : +(amt - amt / (1 + rate / 100)).toFixed(2) };
+      }
+      return { ...e, vatTreatment: treatment, btwRate: 0, btwAmount: 0, vatEstimated: false };
+    }));
+  };
 
   const handleExportCSV = () => {
     const rows = [
@@ -6978,7 +7053,9 @@ const TaxReportView = ({ invoices, expenses, clients, settings, activeEntity }) 
       }),
       ...data.periodExpenses.map(e => {
         const acct = ledgerAccounts.find(a => a.code === e.ledgerAccount);
-        return ['Inkoop', e.date, '', e.vendor, e.ledgerAccount + ' ' + (acct?.name || ''), (Number(e.amount) - Number(e.btwAmount)).toFixed(2), Number(e.btwAmount).toFixed(2), Number(e.amount).toFixed(2), e.currency || baseCurr, Number(e.originalAmount || e.amount).toFixed(2)];
+        const vatT = expenseVatTreatment(e);
+        const vatAmt = vatT === 'standard' ? Number(e.btwAmount || 0) : expenseReverseVat(e);
+        return ['Inkoop' + (vatT.startsWith('reverse') ? ` (verlegd ${vatT === 'reverse_eu' ? '4b' : '4a'})` : vatT === 'none' ? ' (geen BTW)' : ''), e.date, '', e.vendor, e.ledgerAccount + ' ' + (acct?.name || ''), expenseNet(e).toFixed(2), vatAmt.toFixed(2), Number(e.amount).toFixed(2), e.originalCurrency || e.currency || baseCurr, Number(e.originalAmount || e.amount).toFixed(2)];
       }),
     ];
     const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
@@ -6997,7 +7074,7 @@ const TaxReportView = ({ invoices, expenses, clients, settings, activeEntity }) 
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="font-display text-4xl font-medium">Aangifte</h1>
+          <h1 className="page-title">Aangifte</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
             {activeEntity?.name && <><span style={{ color: 'var(--ink-2)' }} className="font-medium">{activeEntity.name}</span> · </>}
             {jur.flag} {jur.name} · {jur.salesTax.name}-{jur.filingPeriod === 'quarterly' ? 'kwartaal' : 'maand'}aangifte
@@ -7077,8 +7154,8 @@ const TaxReportView = ({ invoices, expenses, clients, settings, activeEntity }) 
         </Card>
         <Card className="p-5">
           <div className="text-[11px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>{jur.salesTax.name} verschuldigd</div>
-          <div className="font-display text-2xl mt-2 num" style={{ color: 'var(--accent)' }}>{fmtCurrency(data.salesTaxOnSales, baseCurr)}</div>
-          <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Over verkopen</div>
+          <div className="font-display text-2xl mt-2 num" style={{ color: 'var(--accent)' }}>{fmtCurrency(data.owed, baseCurr)}</div>
+          <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{jur.code === 'NL' && (data.vat.boxes['4a'].tax + data.vat.boxes['4b'].tax) > 0 ? `incl. ${fmtCurrency(data.vat.boxes['4a'].tax + data.vat.boxes['4b'].tax, baseCurr)} verlegd` : 'Over verkopen'}</div>
         </Card>
         <Card className="p-5">
           <div className="text-[11px] uppercase tracking-wider font-medium" style={{ color: 'var(--muted)' }}>Voorbelasting</div>
@@ -7102,7 +7179,7 @@ const TaxReportView = ({ invoices, expenses, clients, settings, activeEntity }) 
             </div>
           </div>
           <div className="text-right text-xs space-y-1" style={{ color: 'var(--ink-2)' }}>
-            <div>Verschuldigd: <span className="num font-medium">{fmtCurrency(data.salesTaxOnSales, baseCurr)}</span></div>
+            <div>Verschuldigd: <span className="num font-medium">{fmtCurrency(data.owed, baseCurr)}</span></div>
             <div>Voorbelasting: <span className="num font-medium">−{fmtCurrency(data.taxOnPurchases, baseCurr)}</span></div>
             <div className="pt-1 border-t" style={{ borderColor: 'rgba(0,0,0,0.1)' }}>
               <strong className="num">= {fmtCurrency(data.saldo, baseCurr)}</strong>
@@ -7124,39 +7201,50 @@ const TaxReportView = ({ invoices, expenses, clients, settings, activeEntity }) 
         <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
           {jur.code === 'NL' ? (
             <>
-              {jur.salesTax.rates.map(rate => {
-                const r = data.salesByRate[String(rate)] || { net: 0, tax: 0 };
-                const rubriekKey = rate === 21 ? '1a' : rate === 9 ? '1b' : '1c';
+              {[
+                { key: '1a', label: 'Leveringen/diensten belast met hoog tarief (21%)' },
+                { key: '1b', label: 'Leveringen/diensten belast met laag tarief (9%)' },
+                { key: '1c', label: 'Leveringen/diensten belast met overige tarieven' },
+                { key: '1e', label: 'Leveringen/diensten belast met 0% of niet bij u belast' },
+                { key: '3b', label: 'Leveringen/diensten naar landen binnen de EU (ICP)', noTax: true },
+                { key: '4a', label: 'Leveringen/diensten uit landen buiten de EU (verlegd)' },
+                { key: '4b', label: 'Leveringen/diensten uit landen binnen de EU (verlegd)' },
+              ].map(({ key, label, noTax }) => {
+                const r = data.vat.boxes[key];
+                const empty = !r.net && !r.tax;
                 return (
-                  <div key={rate} className="px-5 py-3 flex items-center justify-between text-sm">
-                    <div>
-                      <span className="font-mono font-medium mr-2">{rubriekKey}</span>
-                      <span>{jur.rubrieken[rubriekKey]}</span>
+                  <div key={key} className="px-5 py-3 flex items-center justify-between text-sm" style={{ opacity: empty ? 0.45 : 1 }}>
+                    <div className="min-w-0 pr-3">
+                      <span className="font-mono font-medium mr-2">{key}</span>
+                      <span>{label}</span>
                     </div>
-                    <div className="flex gap-6 text-right">
+                    <div className="flex gap-6 text-right flex-shrink-0">
                       <div>
-                        <div className="text-xs" style={{ color: 'var(--muted)' }}>Bedrag</div>
-                        <div className="num font-medium">{fmtCurrency(r.net, baseCurr)}</div>
+                        <div className="text-xs" style={{ color: 'var(--muted)' }}>Omzet/bedrag</div>
+                        <div className="num font-medium">{fmtCurrency(Math.round(r.net), baseCurr)}</div>
                       </div>
                       <div className="w-24">
                         <div className="text-xs" style={{ color: 'var(--muted)' }}>{jur.salesTax.name}</div>
-                        <div className="num font-medium">{fmtCurrency(r.tax, baseCurr)}</div>
+                        <div className="num font-medium">{noTax ? '—' : fmtCurrency(r.tax, baseCurr)}</div>
                       </div>
                     </div>
                   </div>
                 );
               })}
               <div className="px-5 py-3 flex items-center justify-between text-sm" style={{ background: 'var(--surface-2)' }}>
-                <div><span className="font-mono font-medium mr-2">5a</span> Verschuldigde BTW</div>
-                <div className="num font-medium w-24 text-right">{fmtCurrency(data.salesTaxOnSales, baseCurr)}</div>
+                <div><span className="font-mono font-medium mr-2">5a</span> Verschuldigde omzetbelasting (1a t/m 4b)</div>
+                <div className="num font-medium w-24 text-right">{fmtCurrency(data.owed, baseCurr)}</div>
               </div>
               <div className="px-5 py-3 flex items-center justify-between text-sm" style={{ background: 'var(--surface-2)' }}>
-                <div><span className="font-mono font-medium mr-2">5b</span> Voorbelasting</div>
+                <div><span className="font-mono font-medium mr-2">5b</span> Voorbelasting (incl. verlegde BTW)</div>
                 <div className="num font-medium w-24 text-right">{fmtCurrency(data.taxOnPurchases, baseCurr)}</div>
               </div>
               <div className="px-5 py-3 flex items-center justify-between text-sm font-semibold" style={{ background: 'var(--btn-primary)', color: '#fff' }}>
                 <div><span className="font-mono mr-2">5c</span> Saldo te betalen / terug</div>
                 <div className="num w-24 text-right">{fmtCurrency(data.saldo, baseCurr)}</div>
+              </div>
+              <div className="px-5 py-2.5 text-xs" style={{ color: 'var(--muted)' }}>
+                Belastingdienst rondt omzetbedragen af op hele euro's in jouw voordeel. Verlegde BTW (4a/4b) geef je aan én trek je af in 5b — netto € 0, maar wel verplicht in te vullen.
               </div>
             </>
           ) : (
@@ -7273,22 +7361,35 @@ const TaxReportView = ({ invoices, expenses, clients, settings, activeEntity }) 
             <div className="p-6 text-center text-sm" style={{ color: 'var(--muted)' }}>Geen inkopen</div>
           ) : (
             <div className="divide-y max-h-80 overflow-y-auto scrollable" style={{ borderColor: 'var(--border)' }}>
-              {data.periodExpenses.map(e => (
-                <div key={e.id} className="px-5 py-2.5 text-sm flex items-center justify-between">
+              {data.vat.purchaseRows.map(({ e, treatment, vat }) => {
+                const suggested = suggestVatTreatment({ vendor: e.vendor, description: e.notes, currency: e.originalCurrency || e.currency });
+                const mismatch = jur.code === 'NL' && !e.vatTreatment && suggested !== treatment;
+                return (
+                <div key={e.id} className="px-5 py-2.5 text-sm flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="text-xs font-medium truncate">{e.vendor}</div>
+                    <div className="text-xs font-medium truncate flex items-center gap-1.5">
+                      {e.vendor || 'Onbekend'}
+                      {e.source === 'bank' && <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'var(--surface-2)', color: 'var(--muted)' }}>BANK</span>}
+                      {mismatch && <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }} title={`Voorstel: ${VAT_TREATMENTS.find(v => v.id === suggested)?.label}`}>CHECK</span>}
+                    </div>
                     <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>
                       <span className="font-mono">{e.ledgerAccount || '—'}</span> · {fmtDate(e.date)}
                     </div>
                   </div>
-                  <div className="text-right">
+                  {jur.code === 'NL' && setExpenses && (
+                    <select value={treatment} onChange={ev => setTreatment(e.id, ev.target.value)}
+                      className="text-[11px] rounded border px-1.5 py-1"
+                      style={{ background: 'var(--surface)', borderColor: mismatch ? 'var(--warning)' : 'var(--border)', color: 'var(--ink-2)', maxWidth: '110px' }}>
+                      {VAT_TREATMENTS.map(v => <option key={v.id} value={v.id}>{v.short}</option>)}
+                    </select>
+                  )}
+                  <div className="text-right" style={{ minWidth: '84px' }}>
                     <div className="num text-xs font-medium">{fmtCurrency(e.amount, baseCurr)}</div>
-                    {e.currency && e.currency !== baseCurr && (
-                      <div className="num text-[10px]" style={{ color: 'var(--muted)' }}>{fmtCurrency(e.originalAmount, e.currency)}</div>
-                    )}
+                    <div className="num text-[10px]" style={{ color: 'var(--muted)' }}>{jur.salesTax.name}: {fmtCurrency(vat, baseCurr)}</div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </Card>
@@ -7848,7 +7949,7 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="font-display text-4xl font-medium">AI Adviseur</h1>
+        <h1 className="page-title">AI Adviseur</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
           {activeEntity.name} · {jur.flag} {jur.name} · {t('ai.subtitle')}
         </p>
@@ -8616,7 +8717,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="font-display text-4xl font-medium">{t('settings.title')}</h1>
+          <h1 className="page-title">{t('settings.title')}</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{t('settings.subtitle')}</p>
         </div>
         <Button onClick={save}>
@@ -8996,7 +9097,7 @@ const SettingsView = ({ settings, setSettings, activeEntity, entities, setEntiti
             <TemplateGallery
               entity={activeEntity}
               onUpdate={async (updatedEntity) => {
-                await setEntities(entities.map(e => e.id === updatedEntity.id ? updatedEntity : e));
+                await setEntities(prev => prev.map(e => e.id === updatedEntity.id ? updatedEntity : e));
               }}
               sampleInvoice={{
                 number: (activeEntity.invoicePrefix || '2026-') + '0042',
@@ -9621,6 +9722,17 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
   const [bankTransactions, setBankTransactions] = useCloudStorage('bank_transactions', []);
   const [purchaseInvoices, setPurchaseInvoices, purchaseInvoicesLoaded] = useCloudStorage('purchase_invoices', []);
   const [reminderModal, setReminderModal] = useState(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [invoiceIntent, setInvoiceIntent] = useState(null); // { type: 'open'|'new', id?, nonce }
+
+  // ⌘K / Ctrl+K opent het commandopalet
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPaletteOpen(o => !o); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const loaded = settingsLoaded && clientsLoaded && invoicesLoaded && expensesLoaded && entitiesLoaded && quotesLoaded && horizonDataLoaded && purchaseInvoicesLoaded;
   const openCount = expenses.filter(e => e.status === 'open').length;
@@ -9653,11 +9765,10 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
   };
 
   const confirmReminder = async (invoice, level) => {
-    const updated = invoices.map(i => i.id === invoice.id ? {
+    setInvoices(prev => prev.map(i => i.id === invoice.id ? {
       ...i,
       remindersSent: [...(i.remindersSent || []), { date: new Date().toISOString(), level }]
-    } : i);
-    await setInvoices(updated);
+    } : i));
     setReminderModal(null);
   };
 
@@ -9693,6 +9804,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
   const entityInvoices = invoices.filter(i => !i.entityId || i.entityId === activeEntityId);
   const entityExpenses = expenses.filter(e => !e.entityId || e.entityId === activeEntityId);
   const entityPurchaseInvoices = purchaseInvoices.filter(i => !i.entityId || i.entityId === activeEntityId);
+  const dataIssueCount = findDataIssues({ invoices, expenses, entries: boekEntries, transactions: bankTransactions, clients, purchaseInvoices }).filter(i => i.severity !== 'low').length;
 
   return (
     <div className="min-h-screen flex" style={{ background: 'var(--bg)', flexDirection: 'column' }} data-theme={theme}>
@@ -9711,7 +9823,9 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        onOpenSearch={() => setPaletteOpen(true)}
         openCount={entityExpenses.filter(e => e.status === 'open').length}
+        issueCount={dataIssueCount}
         activeEntity={activeEntity}
         entities={entities}
         onSwitchEntity={setActiveEntityId}
@@ -9725,10 +9839,10 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
       <main className="flex-1 min-w-0">
         <div className="max-w-6xl mx-auto p-5 md:p-8 pb-20 lg:pb-8 mobile-main-inner">
           {activeTab === 'dashboard' && (
-            <Dashboard invoices={entityInvoices} expenses={entityExpenses} clients={clients} settings={effectiveSettings} activeEntity={activeEntity} setActiveTab={setActiveTab} onSendReminder={handleSendReminder} />
+            <Dashboard invoices={entityInvoices} expenses={entityExpenses} clients={clients} settings={effectiveSettings} activeEntity={activeEntity} setActiveTab={setActiveTab} onSendReminder={handleSendReminder} dataIssueCount={dataIssueCount} />
           )}
           {activeTab === 'invoices' && (
-            <InvoicesView invoices={entityInvoices} setInvoices={setInvoices} allInvoices={invoices} clients={clients} setClients={setClients} settings={effectiveSettings} setSettings={setSettings} activeEntity={activeEntity} setEntities={setEntities} entities={entities} onSendReminder={handleSendReminder} />
+            <InvoicesView intent={invoiceIntent} invoices={entityInvoices} setInvoices={setInvoices} allInvoices={invoices} clients={clients} setClients={setClients} settings={effectiveSettings} setSettings={setSettings} activeEntity={activeEntity} setEntities={setEntities} entities={entities} onSendReminder={handleSendReminder} />
           )}
           {activeTab === 'clients' && (
             <ClientsView clients={clients} setClients={setClients} invoices={invoices} settings={effectiveSettings} />
@@ -9758,7 +9872,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
             <EntitiesView entities={entities} setEntities={setEntities} activeEntityId={activeEntityId} setActiveEntityId={setActiveEntityId} invoices={invoices} expenses={expenses} />
           )}
           {activeTab === 'tax' && (
-            <TaxReportView invoices={entityInvoices} expenses={entityExpenses} clients={clients} settings={effectiveSettings} activeEntity={activeEntity} />
+            <TaxReportView invoices={entityInvoices} expenses={entityExpenses} setExpenses={setExpenses} clients={clients} settings={effectiveSettings} activeEntity={activeEntity} />
           )}
           {activeTab === 'ai' && (
             <AIAdvisorView entities={entities} activeEntity={activeEntity} invoices={invoices} expenses={expenses} clients={clients} settings={effectiveSettings} />
@@ -9768,7 +9882,15 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
               quotes={quotes} setQuotes={setQuotes}
               clients={clients} settings={effectiveSettings} activeEntity={activeEntity}
               signToken={signToken}
-              onConvertToInvoice={(inv) => { setInvoices(prev => [inv, ...prev]); setActiveTab('invoices'); }}
+              onConvertToInvoice={(inv) => {
+                // Zelfde nummerreeks als gewone facturen (voorheen "FACT-…" buiten de reeks om)
+                const next = nextInvoiceNumberFor(activeEntity, invoices);
+                const newInv = { ...inv, id: generateId('inv'), number: next.number, invoiceNumber: next.number, entityId: activeEntity?.id, remindersSent: [], payments: [], createdAt: new Date().toISOString() };
+                setInvoices(prev => [...prev, newInv]);
+                setEntities(prev => prev.map(e => e.id === activeEntity?.id ? { ...e, nextInvoiceNumber: next.seq + 1, lastInvoiceYear: next.year } : e));
+                if (inv.fromQuoteId) setQuotes(prev => prev.map(q => q.id === inv.fromQuoteId ? { ...q, convertedToInvoiceId: newInv.id } : q));
+                setActiveTab('invoices');
+              }}
             />
           )}
           {activeTab === 'boekhouding' && (
@@ -9781,6 +9903,8 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
               setEntries={setBoekEntries}
               clients={clients}
               ledgerAccounts={getLedgerAccounts(activeEntity?.jurisdiction || effectiveSettings.jurisdiction || 'NL')}
+              transactions={bankTransactions.filter(t => !t.entityId || t.entityId === activeEntityId)}
+              purchaseInvoices={entityPurchaseInvoices}
             />
           )}
           {activeTab === 'bank' && (
@@ -9788,6 +9912,7 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
               transactions={bankTransactions}
               setTransactions={setBankTransactions}
               invoices={entityInvoices}
+              setInvoices={setInvoices}
               expenses={entityExpenses}
               allExpenses={expenses}
               setExpenses={setExpenses}
@@ -9823,6 +9948,9 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
               onSendReminder={handleSendReminder}
             />
           )}
+          {activeTab === 'controle' && (
+            <DataCheckView invoices={invoices} setInvoices={setInvoices} expenses={expenses} setExpenses={setExpenses} entries={boekEntries} setEntries={setBoekEntries} transactions={bankTransactions} setTransactions={setBankTransactions} clients={clients} purchaseInvoices={purchaseInvoices} setPurchaseInvoices={setPurchaseInvoices} />
+          )}
           {activeTab === 'links' && (
             <LinksView />
           )}
@@ -9832,6 +9960,40 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
         </div>
       </main>
 
+      <SyncIndicator />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        invoices={entityInvoices}
+        clients={clients}
+        expenses={entityExpenses}
+        actions={[
+          { id: 'new_invoice', label: 'Nieuwe factuur maken', icon: Plus, run: { type: 'newInvoice' } },
+          { id: 'new_receipt', label: 'Bon uploaden', icon: Camera, run: { type: 'nav', tab: 'expenses' } },
+          { id: 'bank_import', label: 'Bankafschrift importeren', icon: Landmark, run: { type: 'nav', tab: 'bank' } },
+          { id: 'vat', label: 'BTW-aangifte dit kwartaal', icon: FileBarChart, run: { type: 'nav', tab: 'tax' } },
+          { id: 'check', label: 'Data-controle uitvoeren', icon: ScanSearch, run: { type: 'nav', tab: 'controle' } },
+          { id: 'theme', label: theme === 'dark' ? 'Lichte weergave' : 'Donkere weergave', icon: theme === 'dark' ? Sun : Moon, run: { type: 'theme' } },
+        ]}
+        navItems={[
+          { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+          { id: 'invoices', label: 'Facturen', icon: FileText },
+          { id: 'quotes', label: 'Offertes', icon: FileCheck2 },
+          { id: 'clients', label: 'Klanten', icon: Users },
+          { id: 'expenses', label: 'Bonnen & kosten', icon: ReceiptIcon },
+          { id: 'inkoop', label: 'Inkoopfacturen', icon: ShoppingCart },
+          { id: 'bank', label: 'Bank', icon: Landmark },
+          { id: 'boekhouding', label: 'Boekhouding', icon: BookOpen },
+          { id: 'tax', label: 'Aangifte', icon: FileBarChart },
+          { id: 'settings', label: 'Instellingen', icon: SettingsIcon },
+        ]}
+        onRun={(r) => {
+          if (r.type === 'nav') setActiveTab(r.tab);
+          else if (r.type === 'theme') setTheme(t => t === 'dark' ? 'light' : 'dark');
+          else if (r.type === 'newInvoice') { setActiveTab('invoices'); setInvoiceIntent({ type: 'new', nonce: Date.now() }); }
+          else if (r.type === 'invoice') { setActiveTab('invoices'); setInvoiceIntent({ type: 'open', id: r.id, nonce: Date.now() }); }
+        }}
+      />
       {reminderModal && (
         <SendInvoiceModal
           invoice={reminderModal.invoice}

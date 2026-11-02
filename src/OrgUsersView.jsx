@@ -201,7 +201,7 @@ export default function OrgUsersView({ profile }) {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h1 style={{ fontSize: '22px', fontWeight: '700', color: 'var(--text)', margin: '0 0 4px', letterSpacing: '-0.02em' }}>Teambeheer</h1>
+          <h1 className="page-title" style={{ margin: '0 0 4px' }}>Teambeheer</h1>
           <p style={{ color: 'var(--text-3)', fontSize: '13px', margin: 0 }}>Medewerkers en accountants van uw organisatie</p>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
