@@ -7,6 +7,8 @@ import {
   BookOpen, Presentation, Film, Globe, Type,
   PenLine, CalendarDays, Layout, Settings2, Mail, MessageCircle
 } from 'lucide-react'
+import { computeInvoice, lineNet, todayISO } from './finance'
+import { Button, Modal, Segmented, Money } from './ui'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Local storage hook
@@ -56,19 +58,28 @@ const callAI = async (apiKey, system, userMsg) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const fmtEUR = n => '€\u00a0' + Number(n || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtDate = iso => iso ? new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
-const todayISO = () => new Date().toISOString().split('T')[0]
-const addDays = (iso, days) => { const d = new Date(iso); d.setDate(d.getDate() + Number(days)); return d.toISOString().split('T')[0] }
-const genId = () => `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`
-const genToken = () => Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10)
-const genEsignToken = () => 'esign_' + genToken()
-const computeQuote = (items = []) => {
-  let sub = 0, btw = 0
-  items.forEach(it => {
-    const n = Number(it.quantity || 0) * Number(it.price || 0)
-    sub += n; btw += n * (Number(it.btwRate || 0) / 100)
-  })
-  return { subtotal: sub, btwTotal: btw, total: sub + btw }
+// Lokale datumrekenkunde (geen UTC-verschuiving rond middernacht)
+const addDays = (iso, days) => {
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number)
+  const dt = new Date(y, m - 1, d + Number(days || 0))
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
 }
+const genId = () => `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`
+// Ondertekenlinks moeten onraadbaar zijn -> cryptografisch willekeurig
+const genToken = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '')
+  const a = new Uint8Array(16); crypto.getRandomValues(a)
+  return Array.from(a, b => b.toString(16).padStart(2, '0')).join('')
+}
+const genEsignToken = () => 'esign_' + genToken()
+// Zelfde rekenregels als facturen (incl. regelkortingen)
+const computeQuote = (items = []) => computeInvoice(items)
+const lineTotalIncl = it => { const { net } = lineNet(it); return net * (1 + Number(it.btwRate || 0) / 100) }
+
+// HTML-escape voor alles wat in de print-HTML wordt geinterpoleerd
+const esc = v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+const safeUrl = v => { const u = String(v || '').trim(); return /^https:/i.test(u) ? u : '' }
+const safeImg = v => { const u = String(v || '').trim(); return /^(https:|data:image\/)/i.test(u) ? u : '' }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -82,16 +93,16 @@ const STATUSES = {
 }
 
 const QUOTE_STYLES = [
-  { id: 'narratief',   label: 'Narratief',   icon: BookOpen,     desc: 'Uitgebreide toelichting per onderdeel', color: '#3b82f6' },
-  { id: 'compact',     label: 'Compact',     icon: Layout,       desc: 'Kort, zakelijk en overzichtelijk',      color: '#8b5cf6' },
-  { id: 'presentatie', label: 'Presentatie', icon: Presentation, desc: 'Met bedrijfsprofiel en verkooptekst',   color: '#06b6d4' },
+  { id: 'narratief',   label: 'Narratief',   icon: BookOpen,     desc: 'Uitgebreide toelichting per onderdeel', color: 'var(--info)',    soft: 'var(--info-soft)' },
+  { id: 'compact',     label: 'Compact',     icon: Layout,       desc: 'Kort, zakelijk en overzichtelijk',      color: 'var(--accent)',  soft: 'var(--accent-soft)' },
+  { id: 'presentatie', label: 'Presentatie', icon: Presentation, desc: 'Met bedrijfsprofiel en verkooptekst',   color: 'var(--success)', soft: 'var(--success-soft)' },
 ]
 
 const ESIGN_FIELDS = [
-  { id: 'handtekening', label: 'Handtekening', icon: PenLine,      color: 'var(--accent)', w: 200, h: 64 },
-  { id: 'naam',         label: 'Naam',         icon: Type,         color: '#3b82f6', w: 180, h: 36 },
-  { id: 'datum',        label: 'Datum',        icon: CalendarDays, color: '#10b981', w: 130, h: 36 },
-  { id: 'tekst',        label: 'Vrij tekst',   icon: FileText,     color: '#f59e0b', w: 200, h: 36 },
+  { id: 'handtekening', label: 'Handtekening', icon: PenLine,      color: 'var(--accent)',  soft: 'var(--accent-soft)',  w: 200, h: 64 },
+  { id: 'naam',         label: 'Naam',         icon: Type,         color: 'var(--info)',    soft: 'var(--info-soft)',    w: 180, h: 36 },
+  { id: 'datum',        label: 'Datum',        icon: CalendarDays, color: 'var(--success)', soft: 'var(--success-soft)', w: 130, h: 36 },
+  { id: 'tekst',        label: 'Vrij tekst',   icon: FileText,     color: 'var(--warning)', soft: 'var(--warning-soft)', w: 200, h: 36 },
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -100,7 +111,7 @@ const ESIGN_FIELDS = [
 const C = {
   card: { background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: 12, padding: 20 },
   inp: { background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: 8, color: 'var(--text)', padding: '9px 12px', fontSize: 13, width: '100%', outline: 'none', boxSizing: 'border-box' },
-  lbl: { display: 'block', color: 'var(--text-2)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 },
+  lbl: { display: 'block', color: 'var(--text-2)', fontSize: 12.5, fontWeight: 500, marginBottom: 6 },
   btn: (color, bg, border) => ({ display: 'flex', alignItems: 'center', gap: 6, background: bg || 'var(--surface-2)', border: `1px solid ${border || 'var(--border-2)'}`, borderRadius: 8, padding: '8px 14px', color: color || 'var(--text-2)', fontSize: 13, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }),
 }
 
@@ -112,21 +123,25 @@ const printQuotePDF = (quote, client, entity, companyTemplate) => {
   const fmtE = n => '€\u00a0' + Number(n || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2 })
   const fmtD = iso => iso ? new Date(iso).toLocaleDateString('nl-NL') : '—'
   const style = quote.quoteStyle || 'compact'
-  const accent = 'var(--accent)'
+  // Print-venster kent de app-CSS-variabelen niet -> vaste drukkleur
+  const accent = '#4f46e5'
+  const videoUrl = safeUrl(companyTemplate?.videoUrl)
+  const logo = safeImg(entity?.logo)
+  const sig = safeImg(quote.signatureData)
 
   const companySection = (style === 'presentatie' && companyTemplate?.about)
     ? `<div style="background:#f0f4ff;border-left:4px solid ${accent};border-radius:0 8px 8px 0;padding:18px 22px;margin-bottom:28px">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#64748b;font-weight:600;margin-bottom:10px">Over ons</div>
-        ${companyTemplate.about ? `<p style="margin:0 0 10px;color:#334155;font-size:13px;line-height:1.8">${companyTemplate.about}</p>` : ''}
-        ${companyTemplate.services ? `<p style="margin:0 0 8px;color:#475569;font-size:12px"><strong>Onze diensten:</strong> ${companyTemplate.services}</p>` : ''}
-        ${companyTemplate.approach ? `<p style="margin:0 0 8px;color:#475569;font-size:12px"><strong>Onze aanpak:</strong> ${companyTemplate.approach}</p>` : ''}
-        ${companyTemplate.videoUrl ? `<p style="margin:8px 0 0;font-size:11px;color:#6366f1">Video presentatie: <a href="${companyTemplate.videoUrl}" style="color:#6366f1">${companyTemplate.videoUrl}</a></p>` : ''}
+        ${companyTemplate.about ? `<p style="margin:0 0 10px;color:#334155;font-size:13px;line-height:1.8">${esc(companyTemplate.about)}</p>` : ''}
+        ${companyTemplate.services ? `<p style="margin:0 0 8px;color:#475569;font-size:12px"><strong>Onze diensten:</strong> ${esc(companyTemplate.services)}</p>` : ''}
+        ${companyTemplate.approach ? `<p style="margin:0 0 8px;color:#475569;font-size:12px"><strong>Onze aanpak:</strong> ${esc(companyTemplate.approach)}</p>` : ''}
+        ${videoUrl ? `<p style="margin:8px 0 0;font-size:11px;color:#6366f1">Video presentatie: <a href="${esc(videoUrl)}" style="color:#6366f1">${esc(videoUrl)}</a></p>` : ''}
        </div>` : ''
 
   const introSection = quote.intro
-    ? `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin-bottom:20px;color:#475569;font-size:13px;line-height:1.8">${quote.intro}</div>` : ''
+    ? `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin-bottom:20px;color:#475569;font-size:13px;line-height:1.8;white-space:pre-wrap">${esc(quote.intro)}</div>` : ''
 
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Offerte ${quote.number}</title>
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Offerte ${esc(quote.number)}</title>
   <style>
     body{font-family:'Helvetica Neue',Arial,sans-serif;color:#0f172a;padding:40px;max-width:760px;margin:0 auto;font-size:13px}
     .lbl{font-size:10px;text-transform:uppercase;letter-spacing:0.07em;color:#64748b;font-weight:600;margin-bottom:3px}
@@ -134,24 +149,24 @@ const printQuotePDF = (quote, client, entity, companyTemplate) => {
     th{text-align:left;padding:8px 12px;background:#f8fafc;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#64748b;border-bottom:2px solid #e2e8f0}
     td{padding:10px 12px;border-bottom:1px solid #f1f5f9;vertical-align:top}
     .num{font-family:monospace;text-align:right}
-    .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(99,102,241,0.1);color:${accent}}
+    .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;background:#eef2ff;color:${accent}}
     .footer{margin-top:40px;padding-top:16px;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:11px}
     @page{size:A4;margin:10mm}
   </style></head><body>
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px">
     <div>
-      ${entity?.logo ? `<img src="${entity.logo}" style="height:40px;margin-bottom:8px;display:block" />` : ''}
-      <div style="font-size:20px;font-weight:800;color:${accent};margin-bottom:4px">${entity?.name || 'DHS Finance'}</div>
-      ${entity?.address ? `<div style="color:#64748b;font-size:12px">${entity.address}</div>` : ''}
-      ${entity?.kvk ? `<div style="color:#94a3b8;font-size:11px">KvK: ${entity.kvk}</div>` : ''}
+      ${logo ? `<img src="${esc(logo)}" style="height:40px;margin-bottom:8px;display:block" />` : ''}
+      <div style="font-size:20px;font-weight:800;color:${accent};margin-bottom:4px">${esc(entity?.name || 'DHS Finance')}</div>
+      ${entity?.address ? `<div style="color:#64748b;font-size:12px">${esc(entity.address)}</div>` : ''}
+      ${entity?.kvk ? `<div style="color:#94a3b8;font-size:11px">KvK: ${esc(entity.kvk)}</div>` : ''}
     </div>
     <div style="text-align:right">
       <span class="badge">Offerte</span>
-      <div style="font-size:22px;font-weight:700;margin-top:6px">${quote.number}</div>
+      <div style="font-size:22px;font-weight:700;margin-top:6px">${esc(quote.number)}</div>
     </div>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:28px;padding-bottom:24px;border-bottom:1px solid #e2e8f0">
-    <div><div class="lbl">Klant</div><div style="font-weight:600">${client?.name || '—'}</div>${client?.address ? `<div style="color:#64748b;font-size:12px">${client.address}</div>` : ''}</div>
+    <div><div class="lbl">Klant</div><div style="font-weight:600">${esc(client?.name || '—')}</div>${client?.address ? `<div style="color:#64748b;font-size:12px">${esc(client.address)}</div>` : ''}</div>
     <div><div class="lbl">Datum</div><div>${fmtD(quote.date)}</div></div>
     <div><div class="lbl">Geldig tot</div><div>${fmtD(quote.validUntil)}</div></div>
   </div>
@@ -160,9 +175,7 @@ const printQuotePDF = (quote, client, entity, companyTemplate) => {
   <table>
     <thead><tr><th>Omschrijving</th><th style="text-align:center">Aantal</th><th style="text-align:right">Prijs</th><th style="text-align:center">BTW</th><th style="text-align:right">Totaal</th></tr></thead>
     <tbody>${quote.items.map(it => {
-      const net = Number(it.quantity || 0) * Number(it.price || 0)
-      const btw = net * (Number(it.btwRate || 0) / 100)
-      return `<tr><td style="${style === 'narratief' ? 'white-space:pre-wrap;' : ''}">${it.description || ''}</td><td style="text-align:center">${it.quantity}</td><td class="num">${fmtE(it.price)}</td><td style="text-align:center">${it.btwRate}%</td><td class="num">${fmtE(net + btw)}</td></tr>`
+      return `<tr><td style="${style === 'narratief' ? 'white-space:pre-wrap;' : ''}">${esc(it.description)}</td><td style="text-align:center">${esc(it.quantity)}</td><td class="num">${fmtE(it.price)}</td><td style="text-align:center">${esc(it.btwRate)}%</td><td class="num">${fmtE(lineTotalIncl(it))}</td></tr>`
     }).join('')}</tbody>
   </table>
   <div style="display:flex;justify-content:flex-end">
@@ -172,9 +185,9 @@ const printQuotePDF = (quote, client, entity, companyTemplate) => {
       <div style="display:flex;justify-content:space-between;padding:10px 0;font-weight:700;font-size:16px;border-top:2px solid #e2e8f0;color:${accent};margin-top:4px"><span>Totaal</span><span style="font-family:monospace">${fmtE(totals.total)}</span></div>
     </div>
   </div>
-  ${quote.notes ? `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;color:#475569;margin-top:16px"><strong style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:#94a3b8;display:block;margin-bottom:4px">Notities</strong>${quote.notes}</div>` : ''}
-  ${quote.signatureData ? `<div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-top:24px;background:#f8fafc"><div class="lbl" style="margin-bottom:8px">Digitale handtekening</div><img src="${quote.signatureData}" style="max-height:60px;display:block;margin-bottom:6px" /><div style="font-size:12px;color:#64748b">Ondertekend door ${quote.signerName || 'klant'} op ${fmtD(quote.signedAt)}</div></div>` : ''}
-  <div class="footer">Opgemaakt door ${entity?.name || 'DHS Finance'} · ${new Date().toLocaleDateString('nl-NL')}</div>
+  ${quote.notes ? `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;color:#475569;margin-top:16px"><strong style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:#94a3b8;display:block;margin-bottom:4px">Notities</strong><span style="white-space:pre-wrap">${esc(quote.notes)}</span></div>` : ''}
+  ${sig ? `<div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-top:24px;background:#f8fafc"><div class="lbl" style="margin-bottom:8px">Digitale handtekening</div><img src="${esc(sig)}" style="max-height:60px;display:block;margin-bottom:6px" /><div style="font-size:12px;color:#64748b">Ondertekend door ${esc(quote.signerName || 'klant')} op ${fmtD(quote.signedAt)}</div></div>` : ''}
+  <div class="footer">Opgemaakt door ${esc(entity?.name || 'DHS Finance')} · ${new Date().toLocaleDateString('nl-NL')}</div>
   </body></html>`
 
   const w = window.open('', '_blank', 'width=900,height=700')
@@ -246,8 +259,8 @@ const CompanyTemplateModal = ({ template, onSave, onClose }) => {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: 16, padding: 28, width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.4)' }}>
+    <Modal open onClose={onClose} size="md">
+      <div style={{ padding: 28 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Building2 size={18} style={{ color: 'var(--accent)' }} />
@@ -288,14 +301,11 @@ const CompanyTemplateModal = ({ template, onSave, onClose }) => {
         </label>
 
         <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={() => onSave(form)}
-            style={{ flex: 1, background: 'var(--accent)', border: 'none', borderRadius: 8, padding: '10px', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
-            Opslaan
-          </button>
-          <button onClick={onClose} style={{ ...C.btn(), padding: '10px 18px' }}>Annuleren</button>
+          <Button onClick={() => onSave(form)} className="flex-1">Opslaan</Button>
+          <Button variant="secondary" onClick={onClose}>Annuleren</Button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -340,8 +350,8 @@ Prices are in EUR (numbers only). BTW rates: 0, 9, or 21%. Estimate reasonable p
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end', padding: 16 }}>
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 480, maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.5)', marginTop: 0 }}>
+    <Modal open onClose={onClose} size="sm">
+      <div style={{ padding: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
           <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Sparkles size={16} color="#fff" />
@@ -359,7 +369,7 @@ Prices are in EUR (numbers only). BTW rates: 0, 9, or 21%. Estimate reasonable p
           <div style={{ display: 'flex', gap: 8 }}>
             {QUOTE_STYLES.map(s => (
               <button key={s.id} onClick={() => setStyle(s.id)}
-                style={{ flex: 1, padding: '10px 8px', borderRadius: 10, border: `2px solid ${style === s.id ? s.color : 'var(--border-2)'}`, background: style === s.id ? `${s.color}18` : 'var(--surface-2)', color: style === s.id ? s.color : 'var(--text-2)', fontSize: 11, fontWeight: 600, cursor: 'pointer', textAlign: 'center', lineHeight: 1.4, transition: 'all 0.15s' }}>
+                style={{ flex: 1, padding: '10px 8px', borderRadius: 10, border: `2px solid ${style === s.id ? s.color : 'var(--border-2)'}`, background: style === s.id ? s.soft : 'var(--surface-2)', color: style === s.id ? s.color : 'var(--text-2)', fontSize: 11, fontWeight: 600, cursor: 'pointer', textAlign: 'center', lineHeight: 1.4, transition: 'all 0.15s' }}>
                 <s.icon size={16} style={{ display: 'block', margin: '0 auto 4px' }} />
                 {s.label}
               </button>
@@ -385,16 +395,15 @@ Prices are in EUR (numbers only). BTW rates: 0, 9, or 21%. Estimate reasonable p
           </div>
         )}
 
-        <button onClick={handleGenerate} disabled={loading || !text.trim()}
-          style={{ width: '100%', background: loading ? 'var(--surface-2)' : 'var(--accent)', border: 'none', borderRadius: 10, padding: '12px', color: loading ? 'var(--text-3)' : '#fff', fontSize: 14, fontWeight: 600, cursor: (loading || !text.trim()) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        <Button size="lg" className="w-full" onClick={handleGenerate} disabled={loading || !text.trim()}>
           {loading ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Genereren…</> : <><Sparkles size={16} /> Genereer offerte</>}
-        </button>
+        </Button>
 
         <p style={{ marginTop: 12, fontSize: 11, color: 'var(--text-3)', textAlign: 'center' }}>
           Resultaat wordt ingeladen in de offerte-editor. Je kunt alles nog aanpassen.
         </p>
       </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -455,17 +464,14 @@ const QuoteEditor = ({ quote, clients, settings, activeEntity, companyTemplate, 
             {quote ? `Offerte ${form.number}` : 'Nieuwe offerte'}
           </h2>
         </div>
-        <button onClick={() => setShowAI(true)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--accent)', border: 'none', borderRadius: 9, padding: '9px 16px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', boxShadow: 'none' }}>
-          <Sparkles size={14} /> AI-assistent
-        </button>
+        <Button onClick={() => setShowAI(true)}><Sparkles size={14} /> AI-assistent</Button>
       </div>
 
       {/* Style picker */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
         {QUOTE_STYLES.map(s => (
           <button key={s.id} onClick={() => set('quoteStyle', s.id)}
-            style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 14px', borderRadius: 9, border: `2px solid ${form.quoteStyle === s.id ? s.color : 'var(--border-2)'}`, background: form.quoteStyle === s.id ? `${s.color}15` : 'var(--surface)', color: form.quoteStyle === s.id ? s.color : 'var(--text-2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
+            style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 14px', borderRadius: 9, border: `2px solid ${form.quoteStyle === s.id ? s.color : 'var(--border-2)'}`, background: form.quoteStyle === s.id ? s.soft : 'var(--surface)', color: form.quoteStyle === s.id ? s.color : 'var(--text-2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
             <s.icon size={14} /> {s.label}
           </button>
         ))}
@@ -475,7 +481,7 @@ const QuoteEditor = ({ quote, clients, settings, activeEntity, companyTemplate, 
         {/* Left col */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={C.card}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Details</h3>
+            <h3 style={{ margin: '0 0 16px', fontSize: 11, fontWeight: 700, color: 'var(--text-3)' }}>Details</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
                 <label style={C.lbl}>Nummer</label>
@@ -519,7 +525,7 @@ const QuoteEditor = ({ quote, clients, settings, activeEntity, companyTemplate, 
 
         {/* Right col — totals */}
         <div style={{ ...C.card, alignSelf: 'start' }}>
-          <h3 style={{ margin: '0 0 16px', fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Samenvatting</h3>
+          <h3 style={{ margin: '0 0 16px', fontSize: 11, fontWeight: 700, color: 'var(--text-3)' }}>Samenvatting</h3>
           {[['Subtotaal (excl. BTW)', fmtEUR(totals.subtotal)], ['BTW', fmtEUR(totals.btwTotal)]].map(([l, v]) => (
             <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
               <span style={{ color: 'var(--text-3)' }}>{l}</span>
@@ -532,7 +538,7 @@ const QuoteEditor = ({ quote, clients, settings, activeEntity, companyTemplate, 
           </div>
 
           {form.quoteStyle === 'presentatie' && companyTemplate?.about && (
-            <div style={{ marginTop: 16, padding: '10px 12px', background: 'var(--accent-soft)', borderRadius: 8, border: '1px solid rgba(99,102,241,0.2)', fontSize: 11, color: 'var(--accent)' }}>
+            <div style={{ marginTop: 16, padding: '10px 12px', background: 'var(--accent-soft)', borderRadius: 8, border: '1px solid var(--accent-soft)', fontSize: 11, color: 'var(--accent)' }}>
               <Building2 size={11} style={{ display: 'inline', marginRight: 4 }} />
               Bedrijfsprofiel wordt meegestuurd in PDF
             </div>
@@ -543,7 +549,7 @@ const QuoteEditor = ({ quote, clients, settings, activeEntity, companyTemplate, 
       {/* Line items */}
       <div style={{ ...C.card, marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <h3 style={{ margin: 0, fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Regelitems</h3>
+          <h3 style={{ margin: 0, fontSize: 11, fontWeight: 700, color: 'var(--text-3)' }}>Regelitems</h3>
           <button onClick={addItem}
             style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--accent-soft)', border: 'none', borderRadius: 6, padding: '5px 10px', color: 'var(--accent)', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
             <Plus size={13} /> Regel
@@ -551,7 +557,7 @@ const QuoteEditor = ({ quote, clients, settings, activeEntity, companyTemplate, 
         </div>
         <div className="hidden sm:grid" style={{ gridTemplateColumns: '3fr 70px 100px 70px 28px', gap: 8, marginBottom: 8, display: 'none' }}>
           {['Omschrijving', 'Aantal', 'Prijs (excl.)', 'BTW %', ''].map(h => (
-            <div key={h} style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</div>
+            <div key={h} style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700 }}>{h}</div>
           ))}
         </div>
         {form.items.map((item, idx) => (
@@ -573,11 +579,10 @@ const QuoteEditor = ({ quote, clients, settings, activeEntity, companyTemplate, 
       </div>
 
       <div style={{ display: 'flex', gap: 10 }}>
-        <button onClick={handleSave} disabled={saving}
-          style={{ flex: 1, background: 'var(--accent)', border: 'none', borderRadius: 9, padding: 12, color: '#fff', fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+        <Button size="lg" className="flex-1" onClick={handleSave} disabled={saving}>
           {saving ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Opslaan…</> : 'Offerte opslaan'}
-        </button>
-        <button onClick={onCancel} style={{ ...C.btn(), padding: '12px 18px', fontSize: 14 }}>Annuleren</button>
+        </Button>
+        <Button size="lg" variant="secondary" onClick={onCancel}>Annuleren</Button>
       </div>
     </div>
   )
@@ -602,17 +607,17 @@ const QuoteDetail = ({ quote, client, companyTemplate, activeEntity, onClose, on
           <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: 'var(--text)' }}>Offerte {quote.number}</h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>
             <StatusBadge status={quote.status} />
-            {qs && <span style={{ background: `${qs.color}15`, color: qs.color, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{qs.label}</span>}
+            {qs && <span style={{ background: qs.soft, color: qs.color, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10 }}>{qs.label}</span>}
             <span style={{ color: 'var(--text-3)', fontSize: 12 }}>{client?.name} · {fmtDate(quote.date)}</span>
           </div>
         </div>
-        <button onClick={() => printQuotePDF(quote, client, activeEntity, companyTemplate)} style={{ ...C.btn('var(--accent)', 'var(--accent-soft)', 'rgba(59,130,246,0.25)') }}>
+        <button onClick={() => printQuotePDF(quote, client, activeEntity, companyTemplate)} style={{ ...C.btn('var(--accent)', 'var(--accent-soft)', 'var(--accent-soft)') }}>
           <Printer size={14} /> PDF
         </button>
         <button onClick={() => onEdit(quote)} style={C.btn()}>
           <Edit3 size={14} /> Bewerken
         </button>
-        <button onClick={() => { if (confirm('Offerte verwijderen?')) onDelete(quote.id) }} style={C.btn('var(--danger)', 'var(--danger-soft)', 'rgba(239,68,68,0.2)')}>
+        <button onClick={() => { if (confirm('Offerte verwijderen?')) onDelete(quote.id) }} style={C.btn('var(--danger)', 'var(--danger-soft)', 'var(--danger-soft)')}>
           <Trash2 size={14} />
         </button>
       </div>
@@ -621,10 +626,10 @@ const QuoteDetail = ({ quote, client, companyTemplate, activeEntity, onClose, on
       <div style={{ ...C.card, display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
         <Link2 size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ color: 'var(--text-3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Deellink voor ondertekening</div>
+          <div style={{ color: 'var(--text-3)', fontSize: 10, fontWeight: 700, marginBottom: 4 }}>Deellink voor ondertekening</div>
           <code style={{ color: 'var(--text-3)', fontSize: 11, wordBreak: 'break-all' }}>{shareUrl}</code>
         </div>
-        <button onClick={copyLink} style={C.btn(copied ? 'var(--success)' : 'var(--accent)', copied ? 'var(--success-soft)' : 'var(--accent-soft)', copied ? 'rgba(16,185,129,0.3)' : 'rgba(99,102,241,0.2)')}>
+        <button onClick={copyLink} style={C.btn(copied ? 'var(--success)' : 'var(--accent)', copied ? 'var(--success-soft)' : 'var(--accent-soft)', copied ? 'var(--success-soft)' : 'var(--accent-soft)')}>
           {copied ? <><Check size={13} /> Gekopieerd</> : <><Copy size={13} /> Kopieer</>}
         </button>
       </div>
@@ -633,7 +638,7 @@ const QuoteDetail = ({ quote, client, companyTemplate, activeEntity, onClose, on
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
         {[['Klant', client?.name || '—'], ['Datum', fmtDate(quote.date)], ['Geldig tot', fmtDate(quote.validUntil)], ['Totaal', fmtEUR(totals.total)]].map(([l, v]) => (
           <div key={l} style={{ ...C.card, padding: '12px 16px' }}>
-            <div style={{ color: 'var(--text-3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{l}</div>
+            <div style={{ color: 'var(--text-3)', fontSize: 10, fontWeight: 700, marginBottom: 6 }}>{l}</div>
             <div style={{ color: 'var(--text)', fontSize: 14, fontWeight: 500, fontFamily: l === 'Totaal' ? 'monospace' : 'inherit' }}>{v}</div>
           </div>
         ))}
@@ -641,31 +646,27 @@ const QuoteDetail = ({ quote, client, companyTemplate, activeEntity, onClose, on
 
       {/* Items table */}
       <div style={{ ...C.card, marginBottom: 14 }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <table className="ledger">
           <thead>
             <tr>{['Omschrijving', 'Aantal', 'Prijs', 'BTW', 'Totaal'].map(h => (
-              <th key={h} style={{ textAlign: h === 'Omschrijving' ? 'left' : 'right', padding: '6px 10px', color: 'var(--text-3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', borderBottom: '1px solid var(--border-2)' }}>{h}</th>
+              <th key={h} className={h === 'Omschrijving' ? '' : 'r'}>{h}</th>
             ))}</tr>
           </thead>
           <tbody>
-            {quote.items.map((it, i) => {
-              const net = Number(it.quantity) * Number(it.price)
-              const btw = net * (Number(it.btwRate) / 100)
-              return (
-                <tr key={i}>
-                  <td style={{ padding: 10, color: 'var(--text)', fontSize: 13, borderBottom: '1px solid var(--border)', whiteSpace: 'pre-wrap' }}>{it.description}</td>
-                  <td style={{ padding: 10, textAlign: 'right', color: 'var(--text-2)', fontSize: 13, borderBottom: '1px solid var(--border)' }}>{it.quantity}</td>
-                  <td style={{ padding: 10, textAlign: 'right', color: 'var(--text-2)', fontSize: 13, borderBottom: '1px solid var(--border)', fontFamily: 'monospace' }}>{fmtEUR(it.price)}</td>
-                  <td style={{ padding: 10, textAlign: 'right', color: 'var(--text-2)', fontSize: 13, borderBottom: '1px solid var(--border)' }}>{it.btwRate}%</td>
-                  <td style={{ padding: 10, textAlign: 'right', color: 'var(--text)', fontSize: 13, borderBottom: '1px solid var(--border)', fontFamily: 'monospace' }}>{fmtEUR(net + btw)}</td>
-                </tr>
-              )
-            })}
+            {quote.items.map((it, i) => (
+              <tr key={i}>
+                <td style={{ whiteSpace: 'pre-wrap' }}>{it.description}</td>
+                <td className="r num" style={{ color: 'var(--text-2)' }}>{it.quantity}</td>
+                <td className="r" style={{ color: 'var(--text-2)' }}><Money value={it.price} /></td>
+                <td className="r num" style={{ color: 'var(--text-2)' }}>{it.btwRate}%</td>
+                <td className="r"><Money value={lineTotalIncl(it)} /></td>
+              </tr>
+            ))}
           </tbody>
         </table>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-2)' }}>
           <div style={{ minWidth: 200 }}>
-            {[['Subtotaal', fmtEUR(totals.subtotal)], ['BTW', fmtEUR(totals.btwTotal)]].map(([l, v]) => (
+            {[...(totals.totalDiscount > 0 ? [['Korting', <Money value={-totals.totalDiscount} />]] : []), ['Subtotaal', <Money value={totals.subtotal} />], ['BTW', <Money value={totals.btwTotal} />]].map(([l, v]) => (
               <div key={l} style={{ display: 'flex', justifyContent: 'space-between', gap: 24, marginBottom: 6, fontSize: 13 }}>
                 <span style={{ color: 'var(--text-3)' }}>{l}</span>
                 <span style={{ color: 'var(--text-2)', fontFamily: 'monospace' }}>{v}</span>
@@ -681,26 +682,26 @@ const QuoteDetail = ({ quote, client, companyTemplate, activeEntity, onClose, on
 
       {/* Status actions */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
-        {quote.status === 'draft' && <button onClick={() => onStatusChange(quote.id, 'sent')} style={C.btn('var(--accent)', 'var(--accent-soft)', 'rgba(59,130,246,0.25)')}><Send size={13} /> Markeer als verstuurd</button>}
+        {quote.status === 'draft' && <button onClick={() => onStatusChange(quote.id, 'sent')} style={C.btn('var(--accent)', 'var(--accent-soft)', 'var(--accent-soft)')}><Send size={13} /> Markeer als verstuurd</button>}
         {quote.status === 'sent' && <>
-          <button onClick={() => onStatusChange(quote.id, 'accepted')} style={C.btn('var(--success)', 'var(--success-soft)', 'rgba(16,185,129,0.25)')}><Check size={13} /> Geaccepteerd</button>
-          <button onClick={() => onStatusChange(quote.id, 'declined')} style={C.btn('var(--danger)', 'var(--danger-soft)', 'rgba(239,68,68,0.2)')}><X size={13} /> Afgewezen</button>
-          <button onClick={() => onStatusChange(quote.id, 'expired')} style={C.btn('var(--warning)', 'var(--warning-soft)', 'rgba(245,158,11,0.2)')}><Clock size={13} /> Verlopen</button>
+          <button onClick={() => onStatusChange(quote.id, 'accepted')} style={C.btn('var(--success)', 'var(--success-soft)', 'var(--success-soft)')}><Check size={13} /> Geaccepteerd</button>
+          <button onClick={() => onStatusChange(quote.id, 'declined')} style={C.btn('var(--danger)', 'var(--danger-soft)', 'var(--danger-soft)')}><X size={13} /> Afgewezen</button>
+          <button onClick={() => onStatusChange(quote.id, 'expired')} style={C.btn('var(--warning)', 'var(--warning-soft)', 'var(--warning-soft)')}><Clock size={13} /> Verlopen</button>
         </>}
-        {quote.status === 'accepted' && <button onClick={() => onConvertToInvoice(quote)} style={{ ...C.btn('#fff', 'var(--accent)', 'transparent'), boxShadow: '0 2px 8px rgba(99,102,241,0.3)' }}><ArrowRight size={13} /> Omzetten naar factuur</button>}
+        {quote.status === 'accepted' && <Button onClick={() => onConvertToInvoice(quote)}><ArrowRight size={13} /> Omzetten naar factuur</Button>}
         {quote.status !== 'draft' && <button onClick={() => onStatusChange(quote.id, 'draft')} style={C.btn()}>Terug naar concept</button>}
       </div>
 
       {quote.notes && (
         <div style={{ ...C.card, marginBottom: 10 }}>
-          <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Notities</div>
+          <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, marginBottom: 6 }}>Notities</div>
           <p style={{ margin: 0, color: 'var(--text-2)', fontSize: 13, lineHeight: 1.6 }}>{quote.notes}</p>
         </div>
       )}
 
       {quote.signatureData && (
-        <div style={{ background: 'var(--success-soft)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 10, padding: '14px 16px', marginBottom: 10 }}>
-          <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+        <div style={{ background: 'var(--success-soft)', border: '1px solid var(--success-soft)', borderRadius: 10, padding: '14px 16px', marginBottom: 10 }}>
+          <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
             <Pen size={11} style={{ color: 'var(--success)' }} /> Handtekening
           </div>
           <img src={quote.signatureData} alt="handtekening" style={{ maxHeight: 54, border: '1px solid #e2e8f0', borderRadius: 6, background: '#fff', padding: 4, display: 'block', marginBottom: 6 }} />
@@ -713,7 +714,7 @@ const QuoteDetail = ({ quote, client, companyTemplate, activeEntity, onClose, on
 
       {quote.history?.length > 0 && (
         <div style={{ ...C.card }}>
-          <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 5 }}>
             <History size={11} /> Geschiedenis
           </div>
           {[...quote.history].reverse().map((h, i) => (
@@ -767,12 +768,12 @@ const SignView = ({ token, quotes, clients, onSign }) => {
         <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 20 }}>
           <thead>
             <tr>{['Omschrijving', 'Prijs'].map(h => (
-              <th key={h} style={{ textAlign: h === 'Omschrijving' ? 'left' : 'right', padding: '8px 0', color: 'var(--text-3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border-2)' }}>{h}</th>
+              <th key={h} style={{ textAlign: h === 'Omschrijving' ? 'left' : 'right', padding: '8px 0', color: 'var(--text-3)', fontSize: 10, fontWeight: 700, borderBottom: '1px solid var(--border-2)' }}>{h}</th>
             ))}</tr>
           </thead>
           <tbody>
             {quote.items.map((it, i) => {
-              const total = Number(it.quantity) * Number(it.price) * (1 + Number(it.btwRate) / 100)
+              const total = lineTotalIncl(it)
               return (
                 <tr key={i}>
                   <td style={{ padding: '10px 0', color: 'var(--text)', fontSize: 13, borderBottom: '1px solid var(--border)', whiteSpace: 'pre-wrap' }}>
@@ -793,7 +794,7 @@ const SignView = ({ token, quotes, clients, onSign }) => {
         {quote.notes && <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 20, background: 'var(--surface-2)', padding: 12, borderRadius: 8 }}>{quote.notes}</p>}
 
         {already ? (
-          <div style={{ textAlign: 'center', padding: 20, background: quote.status === 'accepted' ? 'var(--success-soft)' : 'var(--danger-soft)', borderRadius: 10, border: `1px solid ${quote.status === 'accepted' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}` }}>
+          <div style={{ textAlign: 'center', padding: 20, background: quote.status === 'accepted' ? 'var(--success-soft)' : 'var(--danger-soft)', borderRadius: 10, border: `1px solid ${quote.status === 'accepted' ? 'var(--success-soft)' : 'var(--danger-soft)'}` }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: quote.status === 'accepted' ? 'var(--success)' : 'var(--danger)', marginBottom: 4 }}>
               {quote.status === 'accepted' ? '✓ Geaccepteerd' : '✗ Afgewezen'}
             </div>
@@ -816,7 +817,7 @@ const SignView = ({ token, quotes, clients, onSign }) => {
               <Pen size={15} /> Accepteren &amp; ondertekenen
             </button>
             <button onClick={() => onSign(quote.id, 'declined', null, signerName)}
-              style={{ flex: 1, background: 'var(--danger-soft)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: 12, color: 'var(--danger)', fontSize: 14, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              style={{ flex: 1, background: 'var(--danger-soft)', border: '1px solid var(--danger-soft)', borderRadius: 8, padding: 12, color: 'var(--danger)', fontSize: 14, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
               <X size={15} /> Afwijzen
             </button>
           </div>
@@ -877,10 +878,7 @@ const ESignEditor = ({ doc, onSave, onCancel }) => {
         <h2 style={{ margin: 0, flex: 1, fontSize: 22, fontWeight: 700, color: 'var(--text)' }}>
           {doc ? `E-Sign: ${doc.name}` : 'Nieuw E-Sign document'}
         </h2>
-        <button onClick={handleSave}
-          style={{ background: '#10b981', border: 'none', borderRadius: 9, padding: '10px 20px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-          Opslaan &amp; deellink genereren
-        </button>
+        <Button onClick={handleSave}>Opslaan &amp; deellink genereren</Button>
       </div>
 
       <div style={{ marginBottom: 16 }}>
@@ -892,11 +890,11 @@ const ESignEditor = ({ doc, onSave, onCancel }) => {
         <div
           onClick={() => fileInputRef.current?.click()}
           style={{ border: '2px dashed var(--border-2)', borderRadius: 14, padding: '48px 20px', textAlign: 'center', cursor: 'pointer', background: 'var(--surface)', transition: 'border-color 0.15s' }}
-          onMouseEnter={e => e.currentTarget.style.borderColor = '#10b981'}
+          onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--success)'}
           onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-2)'}
         >
-          <div style={{ width: 48, height: 48, borderRadius: 12, background: 'rgba(16,185,129,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
-            <Upload size={22} style={{ color: '#10b981' }} />
+          <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--success-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
+            <Upload size={22} style={{ color: 'var(--success)' }} />
           </div>
           <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>Sleep een bestand hierheen of klik om te uploaden</div>
           <div style={{ fontSize: 12, color: 'var(--text-3)' }}>PDF of afbeelding — max 5 MB</div>
@@ -907,11 +905,11 @@ const ESignEditor = ({ doc, onSave, onCancel }) => {
           {/* Field type picker sidebar */}
           <div>
             <div style={{ ...C.card, marginBottom: 12 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>Veld toevoegen</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', marginBottom: 12 }}>Veld toevoegen</div>
               <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 10, lineHeight: 1.5 }}>Kies een type en klik op het document om een veld te plaatsen.</div>
               {ESIGN_FIELDS.map(ft => (
                 <button key={ft.id} onClick={() => setSelectedType(ft.id)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '9px 12px', borderRadius: 8, border: `2px solid ${selectedType === ft.id ? ft.color : 'var(--border)'}`, background: selectedType === ft.id ? `${ft.color}12` : 'transparent', color: selectedType === ft.id ? ft.color : 'var(--text-2)', fontSize: 12, fontWeight: selectedType === ft.id ? 700 : 500, cursor: 'pointer', marginBottom: 6, textAlign: 'left', transition: 'all 0.12s' }}>
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '9px 12px', borderRadius: 8, border: `2px solid ${selectedType === ft.id ? ft.color : 'var(--border)'}`, background: selectedType === ft.id ? ft.soft : 'transparent', color: selectedType === ft.id ? ft.color : 'var(--text-2)', fontSize: 12, fontWeight: selectedType === ft.id ? 700 : 500, cursor: 'pointer', marginBottom: 6, textAlign: 'left', transition: 'all 0.12s' }}>
                   <ft.icon size={14} /> {ft.label}
                 </button>
               ))}
@@ -919,12 +917,12 @@ const ESignEditor = ({ doc, onSave, onCancel }) => {
 
             {fields.length > 0 && (
               <div style={C.card}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Geplaatste velden</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', marginBottom: 10 }}>Geplaatste velden</div>
                 {fields.map((f, i) => {
                   const ft = ESIGN_FIELDS.find(t => t.id === f.type)
                   return (
                     <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: ft?.color || '#888', flexShrink: 0 }} />
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: ft?.color || 'var(--border-3)', flexShrink: 0 }} />
                       <span style={{ flex: 1, fontSize: 11, color: 'var(--text-2)' }}>{f.label}</span>
                       <button onClick={() => removeField(f.id)} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 2, display: 'flex' }}><X size={11} /></button>
                     </div>
@@ -953,7 +951,7 @@ const ESignEditor = ({ doc, onSave, onCancel }) => {
                 const ft = ESIGN_FIELDS.find(t => t.id === f.type)
                 return (
                   <div key={f.id}
-                    style={{ position: 'absolute', left: `${f.x}%`, top: `${f.y}%`, transform: 'translate(-50%, -50%)', background: `${ft?.color}22`, border: `2px solid ${ft?.color || '#888'}`, borderRadius: 6, padding: '4px 10px', fontSize: 11, color: ft?.color, fontWeight: 700, pointerEvents: 'none', whiteSpace: 'nowrap', backdropFilter: 'blur(2px)' }}>
+                    style={{ position: 'absolute', left: `${f.x}%`, top: `${f.y}%`, transform: 'translate(-50%, -50%)', background: ft?.soft, border: `2px solid ${ft?.color || 'var(--border-3)'}`, borderRadius: 6, padding: '4px 10px', fontSize: 11, color: ft?.color, fontWeight: 700, pointerEvents: 'none', whiteSpace: 'nowrap', backdropFilter: 'blur(2px)' }}>
                     <ft.icon size={11} style={{ display: 'inline', marginRight: 4 }} />{f.label}
                   </div>
                 )
@@ -993,25 +991,25 @@ const ESignDetail = ({ doc, onClose, onEdit, onDelete }) => {
         <h2 style={{ margin: 0, flex: 1, fontSize: 22, fontWeight: 700, color: 'var(--text)' }}>{doc.name}</h2>
         <span style={{ background: st.bg, color: st.color, padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700 }}>{st.label}</span>
         <button onClick={() => onEdit(doc)} style={C.btn()}><Edit3 size={13} /> Bewerken</button>
-        <button onClick={() => { if (confirm('Document verwijderen?')) onDelete(doc.id) }} style={C.btn('var(--danger)', 'var(--danger-soft)', 'rgba(239,68,68,0.2)')}><Trash2 size={13} /></button>
+        <button onClick={() => { if (confirm('Document verwijderen?')) onDelete(doc.id) }} style={C.btn('var(--danger)', 'var(--danger-soft)', 'var(--danger-soft)')}><Trash2 size={13} /></button>
       </div>
 
       {/* Share link */}
       <div style={{ ...C.card, marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-          <FileSignature size={16} style={{ color: '#10b981', flexShrink: 0 }} />
-          <div style={{ color: 'var(--text-3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Deellink voor ondertekening</div>
+          <FileSignature size={16} style={{ color: 'var(--success)', flexShrink: 0 }} />
+          <div style={{ color: 'var(--text-3)', fontSize: 10, fontWeight: 700 }}>Deellink voor ondertekening</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
           <code style={{ flex: 1, color: 'var(--text-3)', fontSize: 11, wordBreak: 'break-all', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', display: 'block' }}>{shareUrl}</code>
-          <button onClick={copyLink} style={C.btn(copied ? 'var(--success)' : '#10b981', copied ? 'var(--success-soft)' : 'rgba(16,185,129,0.1)', copied ? 'rgba(16,185,129,0.3)' : 'rgba(16,185,129,0.25)')}>
+          <button onClick={copyLink} style={C.btn(copied ? 'var(--success)' : 'var(--success)', copied ? 'var(--success-soft)' : 'var(--success-soft)', copied ? 'var(--success-soft)' : 'var(--success-soft)')}>
             {copied ? <><Check size={13} /> Gekopieerd</> : <><Copy size={13} /> Kopieer</>}
           </button>
         </div>
 
         {/* Email share */}
         <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Verstuur per e-mail</div>
+          <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, marginBottom: 6 }}>Verstuur per e-mail</div>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
               type="email"
@@ -1034,7 +1032,7 @@ const ESignDetail = ({ doc, onClose, onEdit, onDelete }) => {
           href={`https://wa.me/?text=${whatsappText}`}
           target="_blank"
           rel="noopener noreferrer"
-          style={{ ...C.btn('#fff', '#25D366', '#1db954'), textDecoration: 'none', display: 'inline-flex' }}
+          style={{ ...C.btn('var(--success)', 'var(--success-soft)', 'transparent'), textDecoration: 'none', display: 'inline-flex' }}
         >
           <MessageCircle size={13} /> Deel via WhatsApp
         </a>
@@ -1044,7 +1042,7 @@ const ESignDetail = ({ doc, onClose, onEdit, onDelete }) => {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
         {[['Aangemaakt', fmtDate(doc.createdAt)], ['Velden', `${doc.fields?.length || 0} veld${doc.fields?.length !== 1 ? 'en' : ''}`], ['Type', doc.fileType === 'image' ? 'Afbeelding' : 'PDF']].map(([l, v]) => (
           <div key={l} style={{ ...C.card, padding: '12px 14px' }}>
-            <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{l}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, marginBottom: 4 }}>{l}</div>
             <div style={{ color: 'var(--text)', fontSize: 13, fontWeight: 500 }}>{v}</div>
           </div>
         ))}
@@ -1052,8 +1050,8 @@ const ESignDetail = ({ doc, onClose, onEdit, onDelete }) => {
 
       {/* Signed info */}
       {doc.status === 'signed' && (
-        <div style={{ background: 'var(--success-soft)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 10, padding: '16px 18px', marginBottom: 16 }}>
-          <div style={{ fontSize: 11, color: 'var(--success)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Ondertekend</div>
+        <div style={{ background: 'var(--success-soft)', border: '1px solid var(--success-soft)', borderRadius: 10, padding: '16px 18px', marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: 'var(--success)', fontWeight: 700, marginBottom: 10 }}>Ondertekend</div>
           {doc.signedFields && Object.entries(doc.signedFields).map(([fid, val]) => {
             const field = doc.fields?.find(f => f.id === fid)
             return (
@@ -1118,7 +1116,7 @@ const ESignSignView = ({ token, esignDocs, onSigned }) => {
   return (
     <div style={{ maxWidth: 660, margin: '0 auto', padding: '32px 20px' }}>
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg,#10b981,#059669)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px' }}>
+        <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--success)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px' }}>
           <FileSignature size={20} color="#fff" />
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-3)' }}>DHS Finance · E-Sign</div>
@@ -1139,7 +1137,7 @@ const ESignSignView = ({ token, esignDocs, onSigned }) => {
         {/* Fill fields */}
         {otherFields.length > 0 && (
           <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14 }}>Vul de velden in</div>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700, marginBottom: 14 }}>Vul de velden in</div>
             {otherFields.map(f => {
               const ft = ESIGN_FIELDS.find(t => t.id === f.type)
               return (
@@ -1161,7 +1159,7 @@ const ESignSignView = ({ token, esignDocs, onSigned }) => {
         {/* Signature */}
         {sigFields.length > 0 && (
           <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Handtekening</div>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700, marginBottom: 10 }}>Handtekening</div>
             {sigData
               ? <div style={{ textAlign: 'center' }}>
                   <img src={sigData} alt="handtekening" style={{ maxHeight: 80, background: '#fff', borderRadius: 8, padding: 8, border: '1px solid #e2e8f0', display: 'block', margin: '0 auto 10px' }} />
@@ -1178,7 +1176,7 @@ const ESignSignView = ({ token, esignDocs, onSigned }) => {
         )}
 
         <button onClick={handleSubmit} disabled={!allFilled}
-          style={{ width: '100%', background: allFilled ? '#10b981' : 'var(--surface-2)', border: 'none', borderRadius: 10, padding: 13, color: allFilled ? '#fff' : 'var(--text-3)', fontSize: 14, fontWeight: 700, cursor: allFilled ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          style={{ width: '100%', background: allFilled ? 'var(--success)' : 'var(--surface-2)', border: 'none', borderRadius: 10, padding: 13, color: allFilled ? '#fff' : 'var(--text-3)', fontSize: 14, fontWeight: 700, cursor: allFilled ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
           <Check size={16} /> Document ondertekenen &amp; bevestigen
         </button>
       </div>
@@ -1194,10 +1192,7 @@ const QuotesEmpty = ({ onNew }) => (
     <FileCheck2 size={40} style={{ margin: '0 auto 16px', display: 'block', color: 'var(--text-3)' }} />
     <h3 style={{ color: 'var(--text)', margin: '0 0 8px', fontSize: 16, fontWeight: 600 }}>Nog geen offertes</h3>
     <p style={{ color: 'var(--text-3)', fontSize: 13, margin: '0 0 20px' }}>Maak je eerste offerte aan en stuur hem op naar je klant.</p>
-    <button onClick={onNew}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--accent)', border: 'none', borderRadius: 8, padding: '10px 18px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-      <Plus size={15} /> Offerte aanmaken
-    </button>
+    <Button onClick={onNew}><Plus size={15} /> Offerte aanmaken</Button>
   </div>
 )
 
@@ -1206,10 +1201,7 @@ const ESignEmpty = ({ onNew }) => (
     <FileSignature size={40} style={{ margin: '0 auto 16px', display: 'block', color: 'var(--text-3)' }} />
     <h3 style={{ color: 'var(--text)', margin: '0 0 8px', fontSize: 16, fontWeight: 600 }}>Nog geen E-Sign documenten</h3>
     <p style={{ color: 'var(--text-3)', fontSize: 13, margin: '0 0 20px' }}>Upload een PDF of afbeelding, markeer de velden en stuur de deellink.</p>
-    <button onClick={onNew}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#10b981', border: 'none', borderRadius: 8, padding: '10px 18px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-      <Upload size={15} /> Document uploaden
-    </button>
+    <Button onClick={onNew}><Upload size={15} /> Document uploaden</Button>
   </div>
 )
 
@@ -1227,6 +1219,19 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
   const [esignDocs, setEsignDocs] = useLocalStorage('dhs_esign_docs', [])
   const [esignView, setEsignView] = useState('list') // list | new | edit | detail
   const [esignSelected, setEsignSelected] = useState(null)
+
+  // Hooks moeten vóór elke early return staan (vaste hook-volgorde)
+  const filtered = useMemo(() => {
+    let q = [...quotes].sort((a, b) => new Date(b.date) - new Date(a.date))
+    if (filter !== 'all') q = q.filter(x => x.status === filter)
+    if (search) {
+      const s = search.toLowerCase()
+      const cm = Object.fromEntries(clients.map(c => [c.id, c.name?.toLowerCase()]))
+      q = q.filter(x => x.number?.toLowerCase().includes(s) || cm[x.clientId]?.includes(s))
+    }
+    return q
+  }, [quotes, filter, search, clients])
+  const counts = Object.fromEntries(Object.keys(STATUSES).map(k => [k, quotes.filter(q => q.status === k).length]))
 
   // Detect E-Sign token (prefixed with 'esign_')
   const isEsignToken = signToken?.startsWith('esign_')
@@ -1259,18 +1264,6 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
     )
   }
 
-  // Hooks must be called before any early returns
-  const filtered = useMemo(() => {
-    let q = [...quotes].sort((a, b) => new Date(b.date) - new Date(a.date))
-    if (filter !== 'all') q = q.filter(x => x.status === filter)
-    if (search) {
-      const s = search.toLowerCase()
-      const cm = Object.fromEntries(clients.map(c => [c.id, c.name?.toLowerCase()]))
-      q = q.filter(x => x.number?.toLowerCase().includes(s) || cm[x.clientId]?.includes(s))
-    }
-    return q
-  }, [quotes, filter, search, clients])
-  const counts = Object.fromEntries(Object.keys(STATUSES).map(k => [k, quotes.filter(q => q.status === k).length]))
 
   // Quote CRUD
   const saveQuote = async q => {
@@ -1351,7 +1344,7 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
             style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '10px 16px', borderRadius: '8px 8px 0 0', border: 'none', background: tab === t.id ? 'var(--surface)' : 'transparent', color: tab === t.id ? 'var(--text)' : 'var(--text-3)', fontSize: 13, fontWeight: tab === t.id ? 700 : 500, cursor: 'pointer', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent', transition: 'all 0.15s', marginBottom: -1 }}>
             <t.icon size={15} /> {t.label}
             {t.id === 'quotes' && quotes.length > 0 && <span style={{ background: 'var(--accent-soft)', color: 'var(--accent)', fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 10 }}>{quotes.length}</span>}
-            {t.id === 'esign' && esignDocs.length > 0 && <span style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 10 }}>{esignDocs.length}</span>}
+            {t.id === 'esign' && esignDocs.length > 0 && <span style={{ background: 'var(--success-soft)', color: 'var(--success)', fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 10 }}>{esignDocs.length}</span>}
           </button>
         ))}
       </div>
@@ -1365,25 +1358,18 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
               <p style={{ color: 'var(--text-3)', fontSize: 13, margin: 0 }}>{quotes.length} offerte{quotes.length !== 1 ? 's' : ''} totaal</p>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setShowTemplate(true)}
-                style={{ ...C.btn(), gap: 7 }}>
-                <Building2 size={14} /> Bedrijfsprofiel
-              </button>
-              <button onClick={() => setView('new')}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--accent)', border: 'none', borderRadius: 8, padding: '10px 16px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-                <Plus size={15} /> Nieuwe offerte
-              </button>
+              <Button variant="secondary" onClick={() => setShowTemplate(true)}><Building2 size={14} /> Bedrijfsprofiel</Button>
+              <Button onClick={() => setView('new')}><Plus size={15} /> Nieuwe offerte</Button>
             </div>
           </div>
 
           {/* Filters */}
           <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap', alignItems: 'center' }}>
-            {[{ key: 'all', label: `Alles (${quotes.length})` }, ...Object.entries(STATUSES).map(([k, s]) => ({ key: k, label: `${s.label} (${counts[k] || 0})` }))].map(({ key, label }) => (
-              <button key={key} onClick={() => setFilter(key)}
-                style={{ padding: '6px 14px', borderRadius: 20, border: 'none', fontSize: 12, fontWeight: filter === key ? 700 : 500, cursor: 'pointer', background: filter === key ? 'var(--btn-primary)' : 'var(--surface-2)', color: filter === key ? '#fff' : 'var(--text-2)', transition: 'all 0.12s' }}>
-                {label}
-              </button>
-            ))}
+            <Segmented
+              value={filter}
+              onChange={setFilter}
+              options={[{ id: 'all', label: 'Alles', count: quotes.length }, ...Object.entries(STATUSES).map(([k, st]) => ({ id: k, label: st.label, count: counts[k] || 0 }))]}
+            />
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Zoek op nummer of klant…"
               style={{ ...C.inp, marginLeft: 'auto', width: 'auto', minWidth: 180 }} />
           </div>
@@ -1412,14 +1398,14 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
                           <span style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{q.number}</span>
                           <StatusBadge status={effStatus} />
-                          {qs && <span style={{ background: `${qs.color}15`, color: qs.color, fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 8 }}>{qs.label}</span>}
+                          {qs && <span style={{ background: qs.soft, color: qs.color, fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 8 }}>{qs.label}</span>}
                         </div>
                         <div style={{ color: 'var(--text-3)', fontSize: 12 }}>
                           {client?.name || '—'} · {fmtDate(q.date)} · geldig t/m {fmtDate(q.validUntil)}
                         </div>
                       </div>
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{fmtEUR(totals.total)}</div>
+                        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}><Money value={totals.total} /></div>
                         <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{q.items.length} regel{q.items.length !== 1 ? 's' : ''}</div>
                       </div>
                       <ChevronRight size={15} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
@@ -1439,10 +1425,7 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
               <h1 className="page-title" style={{ margin: '0 0 4px' }}>E-Sign documenten</h1>
               <p style={{ color: 'var(--text-3)', fontSize: 13, margin: 0 }}>Upload PDF of afbeelding, markeer velden en verstuur de deellink</p>
             </div>
-            <button onClick={() => setEsignView('new')}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#10b981', border: 'none', borderRadius: 8, padding: '10px 16px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-              <Upload size={15} /> Document uploaden
-            </button>
+            <Button onClick={() => setEsignView('new')}><Upload size={15} /> Document uploaden</Button>
           </div>
 
           {esignDocs.length === 0
@@ -1456,11 +1439,11 @@ export default function QuotesView({ quotes, setQuotes, clients, settings, activ
                     <div key={doc.id}
                       onClick={() => { setEsignSelected(doc); setEsignView('detail') }}
                       style={{ background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', transition: 'border-color 0.15s' }}
-                      onMouseEnter={e => e.currentTarget.style.borderColor = '#10b981'}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
                       onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-2)'}
                     >
-                      <div style={{ width: 40, height: 40, borderRadius: 9, background: 'rgba(16,185,129,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        <FileSignature size={18} style={{ color: '#10b981' }} />
+                      <div style={{ width: 40, height: 40, borderRadius: 9, background: 'var(--success-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <FileSignature size={18} style={{ color: 'var(--success)' }} />
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14, marginBottom: 3 }}>{doc.name}</div>

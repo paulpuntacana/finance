@@ -1,5 +1,7 @@
 import { useState, useRef } from 'react'
 import { Plus, Trash2, Upload, Download, Check, AlertCircle, FileText, Receipt, X } from 'lucide-react'
+import { computeInvoice } from './finance'
+import { Button, Segmented, Money } from './ui'
 
 const YEARS = Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - i)
 const BTW_RATES = [0, 9, 21]
@@ -29,6 +31,35 @@ const cell = {
 
 const fmtEUR = (n) => '€\u00a0' + Number(n || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+// Bedrag uit invoer/CSV: accepteert "1000.50", "1000,50", "1.000,50" en negatieve bedragen (creditnota's)
+const parseAmount = (v) => {
+  let t = String(v ?? '').trim().replace(/[€\s]/g, '')
+  if (!t) return NaN
+  if (t.includes(',') && t.includes('.')) t = t.lastIndexOf(',') > t.lastIndexOf('.') ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '')
+  else if (t.includes(',')) t = t.replace(',', '.')
+  return Number(t)
+}
+
+// Lokale datum + n dagen (geen UTC-verschuiving)
+const addDays = (iso, days) => {
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number)
+  const dt = new Date(y, m - 1, d + Number(days || 0))
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+}
+
+// Eén importregel als factuurregel → zelfde rekenregels als de rest van de app
+const rowItems = (row) => [{ description: 'Geïmporteerde factuur', quantity: 1, price: parseAmount(row.amountExcl) || 0, btwRate: Number(row.btwRate) || 0, discount: null }]
+
+// Hoogste bestaand IMP-volgnummer per jaar, zodat een nieuwe batch doornummert
+const nextImpCounters = (invoices = []) => {
+  const max = {}
+  invoices.forEach(inv => {
+    const m = /^IMP-(\d{4})-(\d+)$/.exec(String(inv.number || ''))
+    if (m) max[m[1]] = Math.max(max[m[1]] || 0, Number(m[2]))
+  })
+  return max
+}
+
 export default function ImportView({ setInvoices, setExpenses, clients, settings, activeEntity }) {
   const [tab, setTab] = useState('invoices')
   const [year, setYear] = useState(new Date().getFullYear())
@@ -56,11 +87,9 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
   const delExp = (id) => setExpRows(r => r.filter(row => row._id !== id))
 
   // ── Totals ───────────────────────────────────────────────────────────────
-  const invTotal = invRows.reduce((s, r) => {
-    const excl = Number(r.amountExcl) || 0
-    return s + excl + excl * (Number(r.btwRate) / 100)
-  }, 0)
-  const expTotal = expRows.reduce((s, r) => s + (Number(r.amountIncl) || 0), 0)
+  const invTotal = invRows.reduce((s, r) => s + computeInvoice(rowItems(r)).total, 0)
+  const invSubtotal = invRows.reduce((s, r) => s + computeInvoice(rowItems(r)).subtotal, 0)
+  const expTotal = expRows.reduce((s, r) => s + (parseAmount(r.amountIncl) || 0), 0)
 
   // ── Import invoices ──────────────────────────────────────────────────────
   const importInvoices = async () => {
@@ -68,34 +97,52 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
     const valid = invRows.filter((row, i) => {
       if (!row.client.trim()) { errs.push(`Rij ${i + 1}: klant is verplicht`); return false }
       if (!row.date) { errs.push(`Rij ${i + 1}: datum is verplicht`); return false }
-      const amt = Number(row.amountExcl)
-      if (!row.amountExcl || isNaN(amt) || amt <= 0) { errs.push(`Rij ${i + 1}: geldig bedrag is verplicht`); return false }
+      const amt = parseAmount(row.amountExcl)
+      // Negatief mag (creditnota), 0 niet
+      if (isNaN(amt) || amt === 0) { errs.push(`Rij ${i + 1}: geldig bedrag is verplicht (negatief = creditnota)`); return false }
       return true
     })
     if (errs.length) { setErrors(errs); return }
     setErrors([]); setBusy(true)
 
     const entityId = activeEntity?.id
-    const newInvoices = valid.map((row, i) => {
-      const excl = Number(row.amountExcl)
-      const rate = Number(row.btwRate)
-      const matchClient = clients.find(c => c.name?.toLowerCase() === row.client.trim().toLowerCase())
-      return {
-        id: genId('inv'), entityId,
-        number: row.number || `IMP-${row.date.slice(0, 4)}-${String(i + 1).padStart(3, '0')}`,
-        clientId: matchClient?.id || null,
-        clientNameOverride: matchClient ? null : row.client.trim(),
-        issueDate: row.date, dueDate: row.date,
-        status: row.status,
-        paidAt: row.status === 'paid' ? (row.paidAt || row.date) : null,
-        currency: row.currency || 'EUR',
-        items: [{ description: 'Geïmporteerde factuur', quantity: 1, price: excl, btwRate: rate, discount: null }],
-        notes: `Geïmporteerd uit archief (${row.date.slice(0, 4)})`,
-        reference: '', imported: true,
-      }
-    })
+    const paymentTerms = Number(settings?.invoice?.paymentTerms) || 14
+    // Nummers zonder eigen nummer krijgen IMP-JJJJ-NNN, doorlopend na het hoogste
+    // bestaande IMP-nummer. Dat gebeurt binnen de updater, zodat we de actuele lijst zien.
+    const buildInvoices = (existing) => {
+      const counters = nextImpCounters(existing)
+      return valid.map((row) => {
+        const isCredit = parseAmount(row.amountExcl) < 0
+        const yr = row.date.slice(0, 4)
+        let number = row.number
+        if (!number) {
+          counters[yr] = (counters[yr] || 0) + 1
+          number = `IMP-${yr}-${String(counters[yr]).padStart(3, '0')}`
+        }
+        const matchClient = clients.find(c => c.name?.toLowerCase() === row.client.trim().toLowerCase())
+        const items = rowItems(row)
+        return {
+          id: genId('inv'), entityId,
+          number,
+          clientId: matchClient?.id || null,
+          clientNameOverride: matchClient ? null : row.client.trim(),
+          issueDate: row.date, dueDate: addDays(row.date, paymentTerms),
+          status: isCredit ? 'credit_note' : row.status,
+          paidAt: !isCredit && row.status === 'paid' ? (row.paidAt || row.date) : null,
+          currency: row.currency || 'EUR',
+          items,
+          notes: `Geïmporteerd uit archief (${yr})${isCredit ? ' — creditnota' : ''}`,
+          reference: '', imported: true,
+        }
+      })
+    }
 
-    await setInvoices(prev => [...(prev || []), ...newInvoices])
+    let newInvoices = []
+    await setInvoices(prev => {
+      newInvoices = buildInvoices(prev || [])
+      return [...(prev || []), ...newInvoices]
+    })
+    if (!newInvoices.length) newInvoices = valid
     setBusy(false)
     setDone({ count: newInvoices.length, type: 'facturen' })
     setInvRows([blankInvoice(year)])
@@ -107,8 +154,9 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
     const valid = expRows.filter((row, i) => {
       if (!row.vendor.trim()) { errs.push(`Rij ${i + 1}: leverancier is verplicht`); return false }
       if (!row.date) { errs.push(`Rij ${i + 1}: datum is verplicht`); return false }
-      const amt = Number(row.amountIncl)
-      if (!row.amountIncl || isNaN(amt) || amt <= 0) { errs.push(`Rij ${i + 1}: geldig bedrag is verplicht`); return false }
+      const amt = parseAmount(row.amountIncl)
+      // Negatief mag (terugbetaling/creditnota leverancier), 0 niet
+      if (isNaN(amt) || amt === 0) { errs.push(`Rij ${i + 1}: geldig bedrag is verplicht`); return false }
       return true
     })
     if (errs.length) { setErrors(errs); return }
@@ -116,7 +164,7 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
 
     const entityId = activeEntity?.id
     const newExpenses = valid.map(row => {
-      const amtIncl = Number(row.amountIncl)
+      const amtIncl = parseAmount(row.amountIncl)
       const rate = Number(row.btwRate)
       const btwAmt = rate > 0 ? amtIncl - amtIncl / (1 + rate / 100) : 0
       return {
@@ -216,8 +264,8 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
   }
 
   const thStyle = {
-    padding: '10px 12px', textAlign: 'left', fontSize: '10px', fontWeight: '600',
-    color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', whiteSpace: 'nowrap',
+    padding: '10px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '500',
+    color: 'var(--text-3)', whiteSpace: 'nowrap',
   }
   const tdStyle = { padding: '7px 8px' }
 
@@ -234,33 +282,19 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
           </p>
         </div>
         {/* Year pills */}
-        <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-          {YEARS.map(y => (
-            <button key={y} onClick={() => changeYear(y)} style={{
-              padding: '5px 12px', borderRadius: '8px', fontSize: '12.5px', fontWeight: '600',
-              cursor: 'pointer', border: '1px solid',
-              borderColor: year === y ? 'var(--accent)' : 'var(--border-2)',
-              background: year === y ? 'var(--accent-soft)' : 'var(--surface)',
-              color: year === y ? 'var(--accent)' : 'var(--text-2)',
-              transition: 'all 0.12s',
-            }}>{y}</button>
-          ))}
-        </div>
+        <Segmented value={year} onChange={changeYear} options={YEARS.map(y => ({ id: y, label: String(y) }))} />
       </div>
 
       {/* ── Tab switcher ── */}
-      <div style={{ display: 'flex', gap: '3px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', padding: '3px', width: 'fit-content', marginBottom: '18px' }}>
-        {[['invoices', FileText, 'Facturen (omzet)'], ['expenses', Receipt, 'Kosten (bonnen)']].map(([t, Icon, label]) => (
-          <button key={t} onClick={() => { setTab(t); setDone(null); setErrors([]) }} style={{
-            display: 'flex', alignItems: 'center', gap: '7px', padding: '8px 16px',
-            borderRadius: '7px', fontSize: '13px', fontWeight: '600', border: 'none', cursor: 'pointer',
-            background: tab === t ? 'var(--accent-soft)' : 'transparent',
-            color: tab === t ? 'var(--accent)' : 'var(--text-3)',
-            transition: 'all 0.12s',
-          }}>
-            <Icon size={14} /> {label}
-          </button>
-        ))}
+      <div style={{ marginBottom: '18px' }}>
+        <Segmented
+          value={tab}
+          onChange={(t) => { setTab(t); setDone(null); setErrors([]) }}
+          options={[
+            { id: 'invoices', label: <><FileText size={14} /> Facturen (omzet)</> },
+            { id: 'expenses', label: <><Receipt size={14} /> Kosten (bonnen)</> },
+          ]}
+        />
       </div>
 
       {/* ── Banners ── */}
@@ -286,12 +320,8 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
       {/* ── Toolbar ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '14px' }}>
         <input ref={csvRef} type="file" accept=".csv,.xls,.xlsx,.txt" style={{ display: 'none' }} onChange={handleCSV} />
-        <button onClick={() => csvRef.current?.click()} style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '7px 13px', background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: '8px', fontSize: '12.5px', fontWeight: '500', color: 'var(--text-2)', cursor: 'pointer' }}>
-          <Upload size={13} /> CSV importeren
-        </button>
-        <button onClick={downloadTemplate} style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '7px 13px', background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: '8px', fontSize: '12.5px', fontWeight: '500', color: 'var(--text-2)', cursor: 'pointer' }}>
-          <Download size={13} /> Template downloaden
-        </button>
+        <Button size="sm" variant="secondary" onClick={() => csvRef.current?.click()}><Upload size={13} /> CSV importeren</Button>
+        <Button size="sm" variant="secondary" onClick={downloadTemplate}><Download size={13} /> Template downloaden</Button>
         <div style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--text-3)', fontWeight: '500' }}>
           {tab === 'invoices'
             ? `${invRows.length} rij${invRows.length !== 1 ? 'en' : ''} · totaal ${fmtEUR(invTotal)}`
@@ -313,8 +343,8 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
               </thead>
               <tbody>
                 {invRows.map((row, idx) => {
-                  const excl = Number(row.amountExcl) || 0
-                  const incl = excl + excl * (Number(row.btwRate) / 100)
+                  const excl = parseAmount(row.amountExcl) || 0
+                  const incl = computeInvoice(rowItems(row)).total
                   return (
                     <tr key={row._id} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td style={{ ...tdStyle, width: '130px' }}>
@@ -338,15 +368,15 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
                       <td style={{ ...tdStyle, width: '155px' }}>
                         <div style={{ position: 'relative' }}>
                           <input
-                            style={{ ...cell, fontFamily: 'monospace', paddingRight: excl > 0 ? '8px' : undefined }}
-                            type="number" step="0.01" min="0"
+                            className="num" style={cell}
+                            type="text" inputMode="decimal"
                             value={row.amountExcl}
                             onChange={e => updInv(row._id, 'amountExcl', e.target.value)}
                             placeholder="1000.00"
                           />
-                          {excl > 0 && (
-                            <div style={{ fontSize: '9.5px', color: 'var(--text-3)', marginTop: '2px', fontFamily: 'monospace' }}>
-                              incl. {fmtEUR(incl)}
+                          {excl !== 0 && (
+                            <div className="num" style={{ fontSize: '11px', color: excl < 0 ? 'var(--danger)' : 'var(--text-3)', marginTop: '2px' }}>
+                              {excl < 0 ? 'Creditnota · ' : ''}incl. {fmtEUR(incl)}
                             </div>
                           )}
                         </div>
@@ -387,12 +417,10 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
             </table>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', borderTop: '1px solid var(--border)', background: 'var(--surface-2)' }}>
-            <button onClick={() => setInvRows(r => [...r, blankInvoice(year)])} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: '12.5px', fontWeight: '600', padding: '3px 6px', borderRadius: '6px' }}>
-              <Plus size={13} /> Rij toevoegen
-            </button>
+            <Button size="sm" variant="ghost" onClick={() => setInvRows(r => [...r, blankInvoice(year)])}><Plus size={13} /> Rij toevoegen</Button>
             <div style={{ display: 'flex', gap: '20px', fontSize: '12px', color: 'var(--text-3)' }}>
-              <span>Excl. BTW: <strong style={{ color: 'var(--text-2)', fontFamily: 'monospace' }}>{fmtEUR(invRows.reduce((s, r) => s + (Number(r.amountExcl) || 0), 0))}</strong></span>
-              <span>Incl. BTW: <strong style={{ color: 'var(--text)', fontFamily: 'monospace' }}>{fmtEUR(invTotal)}</strong></span>
+              <span>Excl. BTW: <strong style={{ color: 'var(--text-2)' }}><Money value={invSubtotal} /></strong></span>
+              <span>Incl. BTW: <strong style={{ color: 'var(--text)' }}><Money value={invTotal} /></strong></span>
             </div>
           </div>
         </div>
@@ -412,7 +440,7 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
               </thead>
               <tbody>
                 {expRows.map(row => {
-                  const amtIncl = Number(row.amountIncl) || 0
+                  const amtIncl = parseAmount(row.amountIncl) || 0
                   const rate = Number(row.btwRate)
                   const btwAmt = rate > 0 ? amtIncl - amtIncl / (1 + rate / 100) : 0
                   return (
@@ -430,14 +458,14 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
                       </td>
                       <td style={{ ...tdStyle, width: '155px' }}>
                         <input
-                          style={{ ...cell, fontFamily: 'monospace' }}
-                          type="number" step="0.01" min="0"
+                          className="num" style={cell}
+                          type="text" inputMode="decimal"
                           value={row.amountIncl}
                           onChange={e => updExp(row._id, 'amountIncl', e.target.value)}
                           placeholder="60.50"
                         />
-                        {amtIncl > 0 && (
-                          <div style={{ fontSize: '9.5px', color: 'var(--text-3)', marginTop: '2px', fontFamily: 'monospace' }}>
+                        {amtIncl !== 0 && (
+                          <div className="num" style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '2px' }}>
                             BTW: {fmtEUR(btwAmt)} · excl: {fmtEUR(amtIncl - btwAmt)}
                           </div>
                         )}
@@ -467,11 +495,9 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
             </table>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', borderTop: '1px solid var(--border)', background: 'var(--surface-2)' }}>
-            <button onClick={() => setExpRows(r => [...r, blankExpense(year)])} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: '12.5px', fontWeight: '600', padding: '3px 6px', borderRadius: '6px' }}>
-              <Plus size={13} /> Rij toevoegen
-            </button>
+            <Button size="sm" variant="ghost" onClick={() => setExpRows(r => [...r, blankExpense(year)])}><Plus size={13} /> Rij toevoegen</Button>
             <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>
-              Totaal incl. BTW: <strong style={{ color: 'var(--text)', fontFamily: 'monospace' }}>{fmtEUR(expTotal)}</strong>
+              Totaal incl. BTW: <strong style={{ color: 'var(--text)' }}><Money value={expTotal} /></strong>
             </div>
           </div>
         </div>
@@ -479,15 +505,10 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
 
       {/* ── Import button ── */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: '32px' }}>
-        <button
+        <Button
+          size="lg"
           onClick={tab === 'invoices' ? importInvoices : importExpenses}
-          disabled={busy}
-          style={{
-            display: 'flex', alignItems: 'center', gap: '8px',
-            padding: '10px 22px', borderRadius: '9px', fontSize: '13.5px', fontWeight: '600',
-            background: 'var(--accent)', color: '#fff', border: 'none', cursor: busy ? 'not-allowed' : 'pointer',
-            opacity: busy ? 0.7 : 1, boxShadow: '0 2px 10px rgba(59,130,246,0.28)',
-          }}>
+          disabled={busy}>
           <Check size={15} />
           {busy
             ? 'Importeren…'
@@ -495,7 +516,7 @@ export default function ImportView({ setInvoices, setExpenses, clients, settings
               ? `${invRows.length} factuur${invRows.length !== 1 ? 'en' : ''} importeren`
               : `${expRows.length} kost${expRows.length !== 1 ? 'en' : ''} importeren`
           }
-        </button>
+        </Button>
       </div>
     </div>
   )

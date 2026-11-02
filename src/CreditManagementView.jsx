@@ -5,6 +5,8 @@ import {
   ChevronRight, Brain, RefreshCw, Send, Building2,
   CheckCircle2, TrendingDown, FileText, Gavel, Info, Loader2, TriangleAlert
 } from 'lucide-react'
+import { computeInvoice, invoiceOpenAmount, isRevenueInvoice, todayISO } from './finance'
+import { Button, Modal, Card, Segmented, Money } from './ui'
 
 // ── Utility copies ────────────────────────────────────────────────────────────
 const fmtEUR = (n) => '€\u00a0' + Number(n || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -16,19 +18,12 @@ const fmtDate = (iso) => {
 }
 const daysBetween = (a, b) => Math.floor((new Date(b) - new Date(a)) / 86400000)
 
-const computeTotal = (items = []) => {
-  let total = 0
-  items.forEach(it => {
-    const base = Number(it.quantity || 0) * Number(it.price || 0)
-    let disc = 0
-    if (it.discount && Number(it.discount.value) > 0) {
-      disc = it.discount.type === 'percent' ? base * (Number(it.discount.value) / 100) : Number(it.discount.value)
-    }
-    const net = Math.max(0, base - disc)
-    total += net * (1 + Number(it.btwRate || 0) / 100)
-  })
-  return total
-}
+// Factuurtotaal via finance.js (creditnota's blijven negatief, kortingen kloppen)
+const computeTotal = (items = []) => computeInvoice(items).total
+
+// Openstaand = verstuurd/deels betaald/te laat, met nog een openstaand bedrag
+const OPEN_STATUSES = ['open', 'sent', 'partial', 'overdue']
+const isOpenInvoice = (i) => isRevenueInvoice(i) && OPEN_STATUSES.includes(i.status) && invoiceOpenAmount(i) > 0.005
 
 const callClaude = async ({ system, prompt, apiKey, maxTokens = 2000 }) => {
   const resolvedKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ANTHROPIC_API_KEY) || apiKey || null
@@ -42,7 +37,7 @@ const callClaude = async ({ system, prompt, apiKey, maxTokens = 2000 }) => {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-5-20250929',
       max_tokens: maxTokens,
       system,
       messages: [{ role: 'user', content: prompt }],
@@ -61,7 +56,7 @@ function computeClientRisk(client, invoices, settings) {
   const cm = settings?.creditManagement || {}
   const threshold = Number(cm.latePaymentThreshold || 3)
   const highValue = Number(cm.highValueThreshold || 5000)
-  const today = new Date()
+  const today = todayISO()
 
   const clientInvoices = invoices.filter(i => i.clientId === client.id)
 
@@ -80,17 +75,15 @@ function computeClientRisk(client, invoices, settings) {
 
   // Momenteel vervallen (open/verstuurd na vervaldatum)
   const overdueInvoices = clientInvoices.filter(i => {
-    if (!['open', 'sent'].includes(i.status)) return false
-    return i.dueDate && new Date(i.dueDate) < today
+    if (!isOpenInvoice(i)) return false
+    return i.dueDate && String(i.dueDate).slice(0, 10) < today
   })
 
-  const totalOverdue = overdueInvoices.reduce((sum, i) => sum + computeTotal(i.items || []), 0)
+  // Alleen het nog openstaande deel telt (deelbetalingen eraf)
+  const totalOverdue = overdueInvoices.reduce((sum, i) => sum + invoiceOpenAmount(i), 0)
 
   // Openstaande hoge facturen (niet per se vervallen)
-  const highValueOpenInvoices = clientInvoices.filter(i => {
-    if (!['open', 'sent'].includes(i.status)) return false
-    return computeTotal(i.items || []) >= highValue
-  })
+  const highValueOpenInvoices = clientInvoices.filter(i => isOpenInvoice(i) && invoiceOpenAmount(i) >= highValue)
 
   // Risiconiveau bepalen
   let riskLevel = 'low'
@@ -126,18 +119,13 @@ const inp = {
   fontSize: '13px', width: '100%', outline: 'none', boxSizing: 'border-box',
 }
 
-const Card = ({ children, style = {}, className = '' }) => (
-  <div className={className} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', ...style }}>
-    {children}
-  </div>
-)
 
 // ── Risico badge ──────────────────────────────────────────────────────────────
 const RISK_COLORS = {
-  low:      { color: 'var(--success)',  bg: 'var(--success-soft)',  dot: '#10b981' },
-  medium:   { color: 'var(--warning)',  bg: 'var(--warning-soft)',  dot: '#f59e0b' },
-  high:     { color: '#f97316',         bg: 'rgba(249,115,22,0.12)', dot: '#f97316' },
-  critical: { color: 'var(--danger)',   bg: 'var(--danger-soft)',   dot: '#ef4444' },
+  low:      { color: 'var(--success)', bg: 'var(--success-soft)', dot: 'var(--success)' },
+  medium:   { color: 'var(--warning)', bg: 'var(--warning-soft)', dot: 'var(--warning)' },
+  high:     { color: 'var(--warning)', bg: 'var(--warning-soft)', dot: 'var(--danger)' },
+  critical: { color: 'var(--danger)',  bg: 'var(--danger-soft)',  dot: 'var(--danger)' },
 }
 
 const RiskBadge = ({ level, label }) => {
@@ -159,9 +147,9 @@ function CaseModal({ client, risk, settings, entity, onClose }) {
   const [aiSummary, setAiSummary] = useState('')
 
   const invoiceList = risk.overdueInvoices.map(i => {
-    const total = computeTotal(i.items || [])
-    const daysOverdue = daysBetween(i.dueDate, new Date().toISOString().split('T')[0])
-    return `  - Factuur ${i.number || i.id}: ${fmtEUR(total)} — vervaldatum ${fmtDate(i.dueDate)} (${daysOverdue} dagen te laat)`
+    const total = invoiceOpenAmount(i)
+    const daysOverdue = daysBetween(i.dueDate, todayISO())
+    return `  - Factuur ${i.number || i.id}: ${fmtEUR(total)} open — vervaldatum ${fmtDate(i.dueDate)} (${daysOverdue} dagen te laat)`
   }).join('\n')
 
   const lateList = risk.latePayments.slice(-5).map(i => {
@@ -237,8 +225,8 @@ Noem dat we eerder herinneringen hebben gestuurd. Verzoek de deurwaarder actie t
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: '16px', padding: '28px', width: '100%', maxWidth: '640px', maxHeight: '85vh', overflow: 'auto', boxShadow: '0 24px 80px rgba(0,0,0,0.5)' }} className="scrollable">
+    <Modal open onClose={onClose} size="md">
+      <div style={{ padding: '28px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
@@ -264,7 +252,7 @@ Noem dat we eerder herinneringen hebben gestuurd. Verzoek de deurwaarder actie t
 
         {/* Dossier text */}
         <div style={{ marginBottom: '14px' }}>
-          <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: '6px' }}>Dossier inhoud</label>
+          <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '500', color: 'var(--text-2)', marginBottom: '6px' }}>Dossier inhoud</label>
           <pre style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px', padding: '14px', fontSize: '11px', color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, lineHeight: 1.6 }}>
             {dossierText}
           </pre>
@@ -273,7 +261,7 @@ Noem dat we eerder herinneringen hebben gestuurd. Verzoek de deurwaarder actie t
         {/* AI cover letter */}
         <div style={{ marginBottom: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <label style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)' }}>AI begeleidingsbrief</label>
+            <label style={{ fontSize: '12.5px', fontWeight: '500', color: 'var(--text-2)' }}>AI begeleidingsbrief</label>
             <button
               onClick={generateAiCoverLetter}
               disabled={loading}
@@ -295,9 +283,9 @@ Noem dat we eerder herinneringen hebben gestuurd. Verzoek de deurwaarder actie t
         </div>
 
         <div style={{ display: 'flex', gap: '10px' }}>
-          <button onClick={copy} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', background: 'var(--danger)', border: 'none', borderRadius: '8px', padding: '10px', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}>
+          <Button className="flex-1" onClick={copy}>
             {copied ? <><Check size={13} /> Gekopieerd!</> : <><Copy size={13} /> Kopieer dossier</>}
-          </button>
+          </Button>
           {dc.email && (
             <a
               href={`mailto:${dc.email}?subject=Incasso dossier ${client.name}&body=${encodeURIComponent(dossierText)}`}
@@ -306,10 +294,10 @@ Noem dat we eerder herinneringen hebben gestuurd. Verzoek de deurwaarder actie t
               <Mail size={13} /> E-mail deurwaarder
             </a>
           )}
-          <button onClick={onClose} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px 14px', color: 'var(--text-2)', fontSize: '13px', cursor: 'pointer' }}>Sluiten</button>
+          <Button variant="secondary" onClick={onClose}>Sluiten</Button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -332,9 +320,9 @@ function AICreditModal({ client, risk, settings, entity, onClose }) {
     setResult('')
 
     const invoiceSummary = risk.overdueInvoices.map(i => {
-      const total = computeTotal(i.items || [])
-      const daysLate = daysBetween(i.dueDate, new Date().toISOString().split('T')[0])
-      return `Factuur ${i.number}: ${fmtEUR(total)}, ${daysLate} dagen te laat`
+      const total = invoiceOpenAmount(i)
+      const daysLate = daysBetween(i.dueDate, todayISO())
+      return `Factuur ${i.number}: ${fmtEUR(total)} open, ${daysLate} dagen te laat`
     }).join('; ')
 
     const hasGraydon = Boolean(cm.graydonApiKey)
@@ -376,8 +364,8 @@ Geef een complete creditanalyse met score, advies en concrete aanbevelingen voor
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: '16px', padding: '28px', width: '100%', maxWidth: '600px', maxHeight: '85vh', overflow: 'auto', boxShadow: '0 24px 80px rgba(0,0,0,0.5)' }} className="scrollable">
+    <Modal open onClose={onClose} size="md">
+      <div style={{ padding: '28px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
@@ -417,12 +405,7 @@ Geef een complete creditanalyse met score, advies en concrete aanbevelingen voor
             <p style={{ fontSize: '13px', color: 'var(--text-3)', margin: '0 0 18px' }}>
               Claude analyseert het betalingsgedrag van {client.name} en geeft een credit score, risicobeoordeling en advies.
             </p>
-            <button
-              onClick={analyze}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', background: 'var(--accent)', border: 'none', borderRadius: '9px', padding: '11px 20px', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}
-            >
-              <Brain size={14} /> Start analyse
-            </button>
+            <Button onClick={analyze}><Brain size={14} /> Start analyse</Button>
           </div>
         )}
 
@@ -439,15 +422,13 @@ Geef een complete creditanalyse met score, advies en concrete aanbevelingen voor
               {result}
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={analyze} style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'var(--accent-soft)', border: '1px solid var(--border-2)', borderRadius: '7px', padding: '8px 12px', color: 'var(--accent)', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}>
-                <RefreshCw size={12} /> Opnieuw
-              </button>
-              <button onClick={onClose} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '7px', padding: '8px 14px', color: 'var(--text-2)', fontSize: '12px', cursor: 'pointer' }}>Sluiten</button>
+              <Button size="sm" variant="secondary" onClick={analyze}><RefreshCw size={12} /> Opnieuw</Button>
+              <Button size="sm" variant="ghost" onClick={onClose}>Sluiten</Button>
             </div>
           </div>
         )}
       </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -485,7 +466,7 @@ function ClientRiskRow({ client, risk, settings, entity, onSendReminder, invoice
           <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: 'var(--text-3)', flexWrap: 'wrap' }}>
             {risk.overdueInvoices.length > 0 && (
               <span style={{ color: 'var(--danger)', fontWeight: '600' }}>
-                {risk.overdueInvoices.length}× achterstallig · {fmtEUR(risk.totalOverdue)}
+                {risk.overdueInvoices.length}× achterstallig · <Money value={risk.totalOverdue} />
               </span>
             )}
             {risk.lateCount > 0 && (
@@ -511,26 +492,17 @@ function ClientRiskRow({ client, risk, settings, entity, onSendReminder, invoice
         {/* Acties */}
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', flexShrink: 0 }}>
           {risk.overdueInvoices.length > 0 && onSendReminder && (
-            <button
-              onClick={() => onSendReminder(risk.overdueInvoices[0], 0)}
-              style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '7px', padding: '6px 10px', color: 'var(--text-2)', fontSize: '11px', cursor: 'pointer', fontWeight: '600' }}
-            >
-              <Send size={11} /> Herinnering
-            </button>
+            <Button size="sm" variant="secondary" onClick={() => onSendReminder(risk.overdueInvoices[0], 0)}>
+              <Send size={12} /> Herinnering
+            </Button>
           )}
-          <button
-            onClick={() => setShowAI(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'var(--accent-soft)', border: '1px solid var(--border-2)', borderRadius: '7px', padding: '6px 10px', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer', fontWeight: '600' }}
-          >
-            <Brain size={11} /> Analyseer
-          </button>
+          <Button size="sm" variant="secondary" onClick={() => setShowAI(true)}>
+            <Brain size={12} /> Analyseer
+          </Button>
           {(risk.caseRecommended || risk.overdueInvoices.length > 0) && (
-            <button
-              onClick={() => setShowCase(true)}
-              style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'var(--danger-soft)', border: '1px solid var(--danger)', borderRadius: '7px', padding: '6px 10px', color: 'var(--danger)', fontSize: '11px', cursor: 'pointer', fontWeight: '600' }}
-            >
-              <Gavel size={11} /> Dossier
-            </button>
+            <Button size="sm" variant="danger" onClick={() => setShowCase(true)}>
+              <Gavel size={12} /> Dossier
+            </Button>
           )}
         </div>
       </div>
@@ -596,9 +568,9 @@ export default function CreditManagementView({ clients, invoices, settings, enti
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px' }}>
         {[
           { label: 'Kritisch', value: stats.critical, color: 'var(--danger)', bg: 'var(--danger-soft)', icon: AlertTriangle },
-          { label: 'Hoog risico', value: stats.high, color: '#f97316', bg: 'rgba(249,115,22,0.12)', icon: FileWarning },
+          { label: 'Hoog risico', value: stats.high, color: 'var(--warning)', bg: 'var(--warning-soft)', icon: FileWarning },
           { label: 'Verhoogd', value: stats.medium, color: 'var(--warning)', bg: 'var(--warning-soft)', icon: Clock },
-          { label: 'Totaal achterstallig', value: fmtEUR(stats.totalOverdue), color: 'var(--danger)', bg: 'var(--danger-soft)', icon: Euro },
+          { label: 'Totaal achterstallig', value: <Money value={stats.totalOverdue} />, color: 'var(--danger)', bg: 'var(--danger-soft)', icon: Euro },
           { label: 'Bel aanbevolen', value: stats.phoneRecommended, color: 'var(--warning)', bg: 'var(--warning-soft)', icon: Phone },
           { label: 'Dossier aanbevolen', value: stats.caseRecommended, color: 'var(--danger)', bg: 'var(--danger-soft)', icon: Gavel },
         ].map((s, i) => {
@@ -606,12 +578,12 @@ export default function CreditManagementView({ clients, invoices, settings, enti
           return (
             <Card key={i} style={{ padding: '14px 16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ fontSize: '10px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-3)' }}>{s.label}</span>
+                <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-3)' }}>{s.label}</span>
                 <div style={{ width: '28px', height: '28px', borderRadius: '7px', background: s.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <Icon size={13} style={{ color: s.color }} />
                 </div>
               </div>
-              <div style={{ fontSize: '22px', fontWeight: '700', color: s.color, fontFamily: 'JetBrains Mono, monospace', letterSpacing: '-0.03em', lineHeight: 1 }}>{s.value}</div>
+              <div style={{ fontSize: '22px', fontWeight: '700', color: s.color, letterSpacing: '-0.02em', lineHeight: 1 }} className="num">{s.value}</div>
             </Card>
           )
         })}
@@ -633,22 +605,18 @@ export default function CreditManagementView({ clients, invoices, settings, enti
       </div>
 
       {/* Filter tabs */}
-      <Card style={{ padding: '8px' }}>
-        <div style={{ display: 'flex', gap: '2px', flexWrap: 'wrap' }}>
-          {[
-            { id: 'all', label: `Alle (${clientsWithRisk.length})` },
-            { id: 'critical', label: `Kritisch (${stats.critical})` },
-            { id: 'high', label: `Hoog (${stats.high})` },
-            { id: 'medium', label: `Verhoogd (${stats.medium})` },
-          ].map(f => (
-            <button key={f.id} onClick={() => setFilter(f.id)}
-              style={{ padding: '6px 14px', borderRadius: '7px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: filter === f.id ? '600' : '500',
-                background: filter === f.id ? 'var(--btn-primary)' : 'transparent', color: filter === f.id ? '#fff' : 'var(--text-3)' }}>
-              {f.label}
-            </button>
-          ))}
-        </div>
-      </Card>
+      <div>
+        <Segmented
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { id: 'all', label: 'Alle', count: clientsWithRisk.length },
+            { id: 'critical', label: 'Kritisch', count: stats.critical },
+            { id: 'high', label: 'Hoog', count: stats.high },
+            { id: 'medium', label: 'Verhoogd', count: stats.medium },
+          ]}
+        />
+      </div>
 
       {/* Client list */}
       <Card>
@@ -665,7 +633,7 @@ export default function CreditManagementView({ clients, invoices, settings, enti
         ) : (
           <div>
             <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border)', display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px' }}>
-              <span style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)' }}>
+              <span style={{ fontSize: '12.5px', fontWeight: '500', color: 'var(--text-2)' }}>
                 {filtered.length} klant{filtered.length !== 1 ? 'en' : ''}
               </span>
               <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>Gesorteerd op risico</span>
