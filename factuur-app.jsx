@@ -29,6 +29,7 @@ import { findDataIssues } from './src/finance';
 import { VizStyles, KpiTile, YearChart, CostDonut, VatPot, AgingBar, TopClients } from './src/DashboardCharts';
 import ImportView from './src/ImportView';
 import PurchaseInvoicesView from './src/PurchaseInvoicesView';
+import { useReceiptOrgId, storageAvailable, isDataUrl, uploadReceipt, receiptUrl, downloadReceiptDataUrl, removeReceipts } from './src/receipts';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, Area, AreaChart } from 'recharts';
 
 // ============================================================================
@@ -241,31 +242,48 @@ const computeInvoiceStatus = (invoice) => {
 const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onload = (e) => resolve(e.target.result);
-  reader.onerror = reject;
+  reader.onerror = () => reject(new Error('Bestand kon niet worden gelezen'));
   reader.readAsDataURL(file);
 });
 
-const resizeImage = async (file, maxWidth = 1400, quality = 0.78) => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const scale = Math.min(1, maxWidth / img.width);
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        const isPng = file.type === 'image/png';
-        resolve(isPng ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', quality));
-      };
-      img.onerror = reject;
-      img.src = e.target.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+const UNREADABLE_IMAGE_MSG = "Dit fotoformaat kan de browser niet lezen — kies 'Meest compatibel' in je camera-instellingen of upload een JPG/PDF";
+
+// Laadt een File/Blob of data-URL als <img>; HEIC e.d. faalt hier in de meeste browsers
+const loadImage = (src) => new Promise((resolve, reject) => {
+  const url = typeof src === 'string' ? src : URL.createObjectURL(src);
+  const done = () => { if (url !== src) URL.revokeObjectURL(url); };
+  const img = new Image();
+  img.onload = () => { done(); img.naturalWidth ? resolve(img) : reject(new Error(UNREADABLE_IMAGE_MSG)); };
+  img.onerror = () => { done(); reject(new Error(UNREADABLE_IMAGE_MSG)); };
+  img.src = url;
+});
+
+const drawScaled = (img, maxEdge) => {
+  const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas;
+};
+
+// Verkleint een foto: lange zijde max `maxEdge`, altijd JPEG — behalve als het beeld echt
+// transparant is (logo's), want JPEG maakt transparantie zwart.
+const resizeImage = async (file, maxEdge = 2000, quality = 0.85) => {
+  const img = await loadImage(file);
+  const canvas = drawScaled(img, maxEdge);
+  if (/image\/(png|webp|gif)/.test(file.type || '')) {
+    try {
+      const px = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+      for (let i = 3; i < px.length; i += 4) if (px[i] < 250) return canvas.toDataURL('image/png');
+    } catch { /* geen pixeltoegang: gewoon JPEG */ }
+  }
+  return canvas.toDataURL('image/jpeg', quality);
+};
+
+// Klein JPEG-voorbeeld (±10 KB) voor de lijst; de volledige bon staat in Storage
+const makeThumb = async (src, maxEdge = 240) => {
+  try { return drawScaled(await loadImage(src), maxEdge).toDataURL('image/jpeg', 0.7); } catch { return null; }
 };
 
 // ============================================================================
@@ -1484,12 +1502,18 @@ const callAI = async ({ system, prompt, messages, apiKey, openaiApiKey, maxToken
 const callClaude = ({ system, prompt, apiKey, maxTokens = 2000 }) =>
   callAI({ system, prompt, apiKey, maxTokens });
 
-// Vision API — scant bon/factuur foto en retourneert gestructureerde data
-const callClaudeVision = async ({ imageDataUrl, apiKey, openaiApiKey, jurisdiction = 'NL' }) => {
+// Vision API — scant bon/factuur (foto of PDF) en retourneert gestructureerde data
+const callClaudeVision = async ({ imageDataUrl, apiKey, openaiApiKey, jurisdiction = 'NL', ledgerAccounts = [] }) => {
   const resolvedKey = resolveApiKey(apiKey, openaiApiKey);
-  if (!resolvedKey) throw new Error('Geen AI API key ingesteld. Vul een Anthropic of OpenAI key in via Instellingen → AI.');
+  if (!resolvedKey) throw new Error('Geen AI-sleutel gevonden. Stel je AI-sleutel in via Instellingen → AI (wordt dan op al je apparaten gebruikt).');
+  if (!imageDataUrl || !imageDataUrl.startsWith('data:')) throw new Error('Geen bon gevonden om te scannen.');
   const base64 = imageDataUrl.split(',')[1];
   const mediaType = imageDataUrl.split(';')[0].split(':')[1] || 'image/jpeg';
+  const isPdf = mediaType === 'application/pdf';
+  const provider = detectProvider(resolvedKey);
+  if (isPdf && provider === 'openai') {
+    throw new Error('PDF scannen kan alleen met een Anthropic-sleutel (sk-ant-…). Voeg die toe via Instellingen → AI, of upload een foto/JPG van de bon.');
+  }
   const taxRates = jurisdiction === 'NL' ? '0, 9 or 21' : jurisdiction === 'EE' ? '0, 9 or 22' : '0, 16 or 18';
   const taxName = jurisdiction === 'NL' ? 'BTW/VAT' : jurisdiction === 'EE' ? 'KM/VAT' : 'ITBIS';
   const deductibilityContext = jurisdiction === 'NL'
@@ -1499,17 +1523,22 @@ const callClaudeVision = async ({ imageDataUrl, apiKey, openaiApiKey, jurisdicti
     : jurisdiction === 'EE'
     ? `Estonia OÜ deductibility rules: Business expenses fully deductible. Mixed personal/business expenses need documentation. Meals deductible with business purpose. Travel fully deductible. Home office deductible with proper documentation. No clothing rule — if for business use, deductible.`
     : `General: business expenses necessary for generating revenue are deductible.`;
+  // Grootboekrekeningen meesturen zodat de AI er één kiest die in de app bestaat
+  const ledgerList = ledgerAccounts.map(a => `${a.code} ${a.name}`).join('\n');
 
-  const prompt = `You are an expert receipt/invoice data extractor AND tax advisor for ${jurisdiction}. Analyze this receipt or invoice image carefully.
+  const prompt = `You are an expert receipt/invoice data extractor AND tax advisor for ${jurisdiction}. Analyze this receipt or invoice ${isPdf ? 'document' : 'image'} carefully.
 
 Return ONLY a valid JSON object with exactly these fields (no markdown, no explanation):
 {
   "vendor": "company or store name as printed",
+  "vendor_country": "ISO 3166 alpha-2 country of the vendor, or empty string",
   "date": "YYYY-MM-DD format, or empty string if unclear",
   "total_incl_tax": 0.00,
   "tax_amount": 0.00,
   "tax_rate": 0,
+  "vat_country": "ISO 3166 alpha-2 country whose VAT is charged on this receipt, or empty string if no VAT is charged",
   "currency": "ISO 4217 code",
+  "ledger_code": "code from the ledger list below",
   "deductible": true,
   "deductible_pct": 100,
   "deductible_risk": "safe",
@@ -1519,9 +1548,12 @@ Return ONLY a valid JSON object with exactly these fields (no markdown, no expla
 
 Rules:
 - "total_incl_tax": final amount INCLUDING tax. If only excl shown, add the tax.
-- "tax_amount": tax/VAT/${taxName} amount. If not shown, calculate from rate.
-- "tax_rate": choose closest from ${taxRates}. If no tax, use 0.
+- "tax_amount": the tax/VAT/${taxName} amount exactly as printed. If only a rate is shown, calculate it. If NO tax is charged (e.g. reverse charge, "VAT 0%", US/non-EU invoice without VAT), use 0 — never invent tax.
+- "tax_rate": choose closest from ${taxRates}. If no tax is charged, use 0.
+- "vat_country": e.g. "NL" for Dutch BTW, "DE" for German MwSt, "IE" for Irish VAT. Empty string when tax_amount is 0.
 - "currency": detect from symbol (€=EUR, $=USD, £=GBP, RD$=DOP, ¥=JPY). Default EUR only if truly unclear.
+- "ledger_code": pick the single best matching code from this list (only codes from the list):
+${ledgerList || '(no list — use empty string)'}
 - All amounts as decimals with period (not comma). Unreadable values: 0 or empty string.
 - "deductible": true/false for freelancer/ZZP in ${jurisdiction}.
 - "deductible_pct": percentage deductible (100, 80, 75, 50, 30, 0).
@@ -1531,23 +1563,30 @@ Rules:
 
 ${deductibilityContext}`;
 
-  const provider = detectProvider(resolvedKey);
-  let text = '';
+  // Leesbare foutmelding uit de API-respons halen
+  const apiError = async (response, label) => {
+    const errText = await response.text().catch(() => '');
+    let msg = errText.slice(0, 300);
+    try { msg = JSON.parse(errText)?.error?.message || msg; } catch { /* geen JSON */ }
+    if (response.status === 401) msg = 'AI-sleutel ongeldig of verlopen — controleer hem via Instellingen → AI.';
+    return new Error(`${label} (${response.status}): ${msg}`);
+  };
 
+  let text = '';
   if (provider === 'openai') {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${resolvedKey}` },
       body: JSON.stringify({
         model: 'gpt-4o-mini',
-        max_tokens: 500,
+        max_tokens: 1024,
         messages: [{ role: 'user', content: [
           { type: 'image_url', image_url: { url: imageDataUrl } },
           { type: 'text', text: prompt },
         ]}],
       }),
     });
-    if (!response.ok) throw new Error(`OpenAI API error ${response.status}`);
+    if (!response.ok) throw await apiError(response, 'OpenAI-fout');
     const data = await response.json();
     text = data.choices?.[0]?.message?.content || '';
   } else {
@@ -1561,27 +1600,26 @@ ${deductibilityContext}`;
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 500,
+        max_tokens: 1024,
         messages: [{
           role: 'user',
           content: [
-            { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+            isPdf
+              ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+              : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
             { type: 'text', text: prompt },
           ],
         }],
       }),
     });
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`API error ${response.status}: ${errText.slice(0, 200)}`);
-    }
+    if (!response.ok) throw await apiError(response, 'Anthropic-fout');
     const data = await response.json();
     text = data.content?.find(b => b.type === 'text')?.text || '';
   }
 
-  // Robust JSON extraction — find the outermost {...} block
-  const match = text.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}/s) || text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('Geen JSON gevonden in AI-respons. Probeer een scherpere foto.');
+  // Robuuste JSON-extractie: buitenste {...}-blok
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('Geen gegevens gevonden in de AI-respons. Probeer een scherpere foto.');
   try {
     return JSON.parse(match[0]);
   } catch {
@@ -4263,76 +4301,294 @@ const SendInvoiceModal = ({ invoice, client, settings, onSend, onClose, mode = '
 };
 
 // ============================================================================
+// BONNEN — gedeelde helpers voor upload, AI-scan en BTW-berekening
+// ============================================================================
+const parseAmount = (v) => {
+  const n = Number(String(v ?? '').replace(/\s/g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+};
+
+// Jurisdictie van de actieve entiteit (lijst én modal gebruiken dezelfde bron)
+const expenseJur = (activeEntity, settings) => {
+  const code = activeEntity?.jurisdiction || settings.jurisdiction || 'NL';
+  const jur = JURISDICTIONS[code] || JURISDICTIONS.NL;
+  const baseCurr = activeEntity ? jur.baseCurrency : (settings.baseCurrency || 'EUR');
+  return { jurCode: jur.code, jur, baseCurr };
+};
+
+// Bedrag in basisvaluta + BTW. Een gescande of handmatig ingevulde BTW (btwManual) blijft staan;
+// bij verlegd/geen BTW is er per definitie niets aftrekbaars in het bedrag.
+const recalcExpense = (next) => {
+  const amount = +(parseAmount(next.originalAmount) * (parseAmount(next.exchangeRate) || 1)).toFixed(2);
+  if (next.vatTreatment && next.vatTreatment !== 'standard') return { ...next, amount, btwAmount: 0, btwRate: 0, btwManual: false };
+  if (next.btwManual) return { ...next, amount };
+  const rate = Number(next.btwRate || 0);
+  return { ...next, amount, btwAmount: +(amount - amount / (1 + rate / 100)).toFixed(2) };
+};
+
+const receiptIsPdf = (e) => e.receiptType
+  ? e.receiptType === 'application/pdf'
+  : !e.image && (e.attachmentType === 'application/pdf' || String(e.attachment || '').startsWith('data:application/pdf') || /\.pdf$/i.test(e.attachmentName || ''));
+const receiptThumb = (e) => e.thumb || (isDataUrl(e.image) ? e.image : null);
+const hasReceipt = (e) => !!(e.receiptPath || e.image || e.attachment || e.attachmentPath || e.thumb || e.receiptStripped?.length);
+
+// Volledige bon als data-URL voor de scan: net gemaakt (lokaal) → oude base64 → Storage
+const receiptDataUrl = async (e, local) => {
+  if (local) return local;
+  if (isDataUrl(e.image)) return e.image;
+  if (e.receiptPath) return downloadReceiptDataUrl(e.receiptPath);
+  if (isDataUrl(e.attachment)) return e.attachment;
+  if (e.attachmentPath) return downloadReceiptDataUrl(e.attachmentPath);
+  if (e.receiptStripped?.length) throw new Error('De bon wordt nog geladen — probeer het over een paar seconden opnieuw.');
+  throw new Error('Geen bon gevonden om te scannen.');
+};
+
+const SCAN_KEYS = ['vendor', 'date', 'currency', 'originalAmount', 'exchangeRate', 'btwRate', 'btwAmount', 'btwManual', 'vatTreatment', 'ledgerAccount', 'category', 'amount', 'scanInfo'];
+
+// Scant een bon en geeft alleen de velden terug die de scan invult (de rest van de
+// kostenpost kan intussen veranderd zijn, bv. doordat de upload klaar is).
+const scanExpense = async ({ dataUrl, settings, jurCode, baseCurr, current, onRates }) => {
+  const ledgerAccounts = getLedgerAccounts(jurCode);
+  const r = await callClaudeVision({ imageDataUrl: dataUrl, apiKey: settings.apiKey, openaiApiKey: settings.openaiApiKey, jurisdiction: jurCode, ledgerAccounts });
+  const totalIncl = Number(r.total_incl_tax) || 0;
+  const btwAmt = Math.max(0, Number(r.tax_amount) || 0);
+  const btwRate = Math.max(0, Number(r.tax_rate) || 0);
+  const currency = String(r.currency || current.currency || baseCurr).toUpperCase().slice(0, 3);
+  const vendor = r.vendor || current.vendor || '';
+  const vatCountry = String(r.vat_country || '').toUpperCase();
+
+  // BTW-soort: NL BTW op een euro-bon = standaard; anders het leveranciers-/valutavoorstel,
+  // en "standaard" zonder gevonden BTW wordt "geen BTW" (buitenlandse BTW is niet aftrekbaar).
+  let vatTreatment = current.vatTreatment || 'standard';
+  if (jurCode === 'NL') {
+    const hasNlVat = currency === 'EUR' && btwAmt > 0 && (!vatCountry || vatCountry === 'NL');
+    vatTreatment = hasNlVat ? 'standard' : suggestVatTreatment({ vendor, currency });
+    if (vatTreatment === 'standard' && !hasNlVat) vatTreatment = 'none';
+  }
+
+  const aiLedger = ledgerAccounts.find(a => a.code === String(r.ledger_code || '').trim());
+  const rule = suggestLedgerAccount(vendor, jurCode);
+  const fields = {
+    vendor,
+    date: /^\d{4}-\d{2}-\d{2}$/.test(r.date || '') ? r.date : current.date,
+    currency,
+    originalAmount: totalIncl || current.originalAmount,
+    exchangeRate: currency === baseCurr ? 1 : (current.currency === currency && parseAmount(current.exchangeRate) !== 1 ? current.exchangeRate : 1),
+    btwRate,
+    // BTW van de bon overnemen (ook 0%); bij vreemde valuta rekent recalc via de koers
+    ...(currency === baseCurr ? { btwAmount: btwAmt, btwManual: true } : { btwManual: false }),
+    vatTreatment,
+    ledgerAccount: aiLedger?.code || current.ledgerAccount || rule?.code || '',
+    category: current.category || rule?.category || '',
+    scanInfo: {
+      vendor: r.vendor, date: r.date, totalIncl, btwAmt, btwRate, currency,
+      deductible: r.deductible, deductiblePct: r.deductible_pct, deductibleRisk: r.deductible_risk,
+      deductibleNote: r.deductible_note, deductibleDescription: r.deductible_description,
+      at: new Date().toISOString(),
+    },
+  };
+  if (currency !== baseCurr) {
+    try {
+      const rates = await fetchExchangeRates(baseCurr);
+      const conv = convertCurrency(1, currency, baseCurr, rates);
+      if (conv) { fields.exchangeRate = conv.rate; onRates?.(rates); }
+    } catch { /* koers ophalen mislukt — gebruiker kan in de modal verversen */ }
+  }
+  const merged = recalcExpense({ ...current, ...fields });
+  return Object.fromEntries(SCAN_KEYS.map(k => [k, merged[k]]));
+};
+
+// ============================================================================
 // EXPENSES VIEW
 // ============================================================================
 const ExpensesView = ({ expenses, setExpenses, allExpenses, settings, setSettings, activeEntity }) => {
-  const [processing, setProcessing] = useState(null);
+  const orgId = useReceiptOrgId();
+  const [processing, setProcessing] = useState(null); // { id, autoScan }
   const [filter, setFilter] = useState('all');
   const [uploading, setUploading] = useState(false);
+  const [captureError, setCaptureError] = useState(null);
+  const [scanQueue, setScanQueue] = useState([]); // ids die op de achtergrond gescand worden
+  const [scanState, setScanState] = useState({}); // id → 'queued' | 'scanning' | 'done' | foutmelding
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  // Net gemaakte bonnen (data-URL) in geheugen: scan en preview hoeven niet op de upload te wachten
+  const localData = useRef(new Map());
+  const all = allExpenses || expenses;
+  const allRef = useRef(all);
+  allRef.current = all;
+  const processingRef = useRef(null);
+  processingRef.current = processing;
 
   const filtered = expenses
     .filter(e => filter === 'all' || e.status === filter)
     .sort((a, b) => new Date(b.capturedAt) - new Date(a.capturedAt));
 
   const openCount = expenses.filter(e => e.status === 'open').length;
-  const totalCosts = expenses.filter(e => e.status === 'processed').reduce((s, e) => s + Number(e.amount || 0), 0);
-  const totalBtw = expenses.filter(e => e.status === 'processed').reduce((s, e) => s + Number(e.btwAmount || 0), 0);
-  const baseCurr = activeEntity ? JURISDICTIONS[activeEntity.jurisdiction || 'NL'].baseCurrency : (settings.baseCurrency || 'EUR');
-  const defaultBtw = activeEntity ? JURISDICTIONS[activeEntity.jurisdiction || 'NL'].salesTax.standard : 21;
+  const { jurCode, jur, baseCurr } = expenseJur(activeEntity, settings);
+  const defaultBtw = jur.salesTax.standard;
+  const hasAiKey = !!resolveApiKey(settings.apiKey, settings.openaiApiKey);
 
-  const handleCapture = async (file, source = 'upload') => {
-    if (!file) return;
-    setUploading(true);
+  const patchExpense = (id, patch) => setExpenses(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e));
+
+  // Upload naar Storage op de achtergrond; lukt dat niet (offline, migratie v8 nog niet
+  // gedraaid) dan blijft de bon als base64 in de kostenpost, zoals vroeger.
+  const storeReceipt = async (id, dataUrl, type, name) => {
     try {
-      const isPdf = file.type === 'application/pdf';
-      const dataUrl = isPdf ? await readFileAsDataUrl(file) : await resizeImage(file);
-      const newExpense = {
-        id: generateId('exp'),
-        entityId: activeEntity?.id,
-        image: isPdf ? null : dataUrl,
-        attachment: isPdf ? dataUrl : null,
-        attachmentName: isPdf ? file.name : null,
-        capturedAt: new Date().toISOString(),
-        status: 'open',
-        source,
-        vendor: '',
-        date: '',
-        currency: baseCurr,
-        originalAmount: 0,
-        exchangeRate: 1,
-        amount: 0,
-        btwAmount: 0,
-        btwRate: defaultBtw,
-        category: '',
-        ledgerAccount: '',
-        notes: '',
-      };
-      const all = allExpenses || expenses;
-      setExpenses(prev => [newExpense, ...prev]);
-    } catch (e) {
-      alert('Foto kon niet worden verwerkt: ' + e.message);
-    } finally {
-      setUploading(false);
+      if (!storageAvailable(orgId)) throw new Error('Storage niet beschikbaar');
+      const path = await uploadReceipt(orgId, id, dataUrl, type);
+      patchExpense(id, { receiptPath: path, receiptType: type });
+    } catch (err) {
+      console.warn('Bon-upload mislukt, bewaard in kostenpost:', err.message);
+      patchExpense(id, type === 'application/pdf' ? { attachment: dataUrl, attachmentName: name || 'bon.pdf' } : { image: dataUrl });
     }
   };
+
+  const prepareFile = async (file, source) => {
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+    const dataUrl = isPdf ? await readFileAsDataUrl(file) : await resizeImage(file);
+    const type = isPdf ? 'application/pdf' : dataUrl.slice(5, dataUrl.indexOf(';')) || 'image/jpeg';
+    const id = generateId('exp');
+    localData.current.set(id, dataUrl);
+    const newExpense = {
+      id,
+      entityId: activeEntity?.id,
+      thumb: isPdf ? null : await makeThumb(dataUrl),
+      receiptType: type,
+      receiptName: file.name || null,
+      capturedAt: new Date().toISOString(),
+      status: 'open',
+      source,
+      vendor: '',
+      date: '',
+      currency: baseCurr,
+      originalAmount: 0,
+      exchangeRate: 1,
+      amount: 0,
+      btwAmount: 0,
+      btwRate: defaultBtw,
+      category: '',
+      ledgerAccount: '',
+      notes: '',
+    };
+    setExpenses(prev => [newExpense, ...prev]);
+    storeReceipt(id, dataUrl, type, file.name);
+    return id;
+  };
+
+  // Eén bon → meteen de modal open en scannen (één tik op mobiel). Meerdere → wachtrij op de achtergrond.
+  const handleFiles = async (fileList, source = 'upload') => {
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (!files.length) return;
+    setUploading(true);
+    setCaptureError(null);
+    const ids = [];
+    const errors = [];
+    for (const f of files) {
+      try { ids.push(await prepareFile(f, source)); }
+      catch (err) { errors.push(files.length > 1 ? `${f.name || 'Foto'}: ${err.message}` : err.message); }
+    }
+    setUploading(false);
+    if (errors.length) setCaptureError(errors.join(' · '));
+    if (ids.length === 1) setProcessing({ id: ids[0], autoScan: hasAiKey });
+    else if (ids.length > 1 && hasAiKey) {
+      setScanState(s => ({ ...s, ...Object.fromEntries(ids.map(id => [id, 'queued'])) }));
+      setScanQueue(q => [...q, ...ids]);
+    }
+  };
+
+  // Achtergrond-scan: één tegelijk, resultaat als voorinvulling op de (nog open) bon
+  const scanBusy = useRef(false);
+  useEffect(() => {
+    if (scanBusy.current || scanQueue.length === 0) return;
+    const id = scanQueue[0];
+    scanBusy.current = true;
+    (async () => {
+      const e = allRef.current.find(x => x.id === id);
+      try {
+        // Staat de bon al open in de modal, dan scant de gebruiker daar zelf
+        if (e && e.status === 'open' && processingRef.current?.id !== id) {
+          setScanState(s => ({ ...s, [id]: 'scanning' }));
+          const dataUrl = await receiptDataUrl(e, localData.current.get(id));
+          const delta = await scanExpense({ dataUrl, settings, jurCode, baseCurr, current: e, onRates: handleUpdateRates });
+          setExpenses(prev => prev.map(x => x.id === id && x.status === 'open' ? { ...x, ...delta } : x));
+          setScanState(s => ({ ...s, [id]: 'done' }));
+        } else {
+          setScanState(s => { const n = { ...s }; delete n[id]; return n; });
+        }
+      } catch (err) {
+        setScanState(s => ({ ...s, [id]: err.message || 'Scan mislukt' }));
+      } finally {
+        scanBusy.current = false;
+        setScanQueue(q => q.filter(x => x !== id));
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanQueue]);
+
+  // Oude bonnen (base64 in de kostenpost) eenmalig naar Storage verhuizen: kleinere sync en
+  // geen localStorage-overloop meer. Stopt bij de eerste fout (bv. migratie v8 nog niet gedraaid).
+  const migrateRef = useRef({ running: false, failed: false, tried: new Set() });
+  useEffect(() => {
+    const m = migrateRef.current;
+    if (m.running || m.failed || !storageAvailable(orgId)) return;
+    const todo = all.filter(e => !m.tried.has(e.id) && !localData.current.has(e.id) &&
+      ((isDataUrl(e.image) && !e.receiptPath) || (isDataUrl(e.attachment) && !e.attachmentPath)));
+    if (!todo.length) return;
+    m.running = true;
+    (async () => {
+      for (const e of todo) {
+        m.tried.add(e.id);
+        try {
+          const patch = {};
+          const drop = [];
+          if (isDataUrl(e.image) && !e.receiptPath) {
+            const type = e.image.slice(5, e.image.indexOf(';')) || 'image/jpeg';
+            patch.receiptPath = await uploadReceipt(orgId, e.id, e.image, type);
+            patch.receiptType = type;
+            patch.thumb = e.thumb || await makeThumb(e.image);
+            drop.push('image');
+          }
+          if (isDataUrl(e.attachment) && !e.attachmentPath) {
+            const type = e.attachment.slice(5, e.attachment.indexOf(';')) || 'application/octet-stream';
+            patch.attachmentPath = await uploadReceipt(orgId, e.id, e.attachment, type, 'bijlage');
+            patch.attachmentType = type;
+            drop.push('attachment');
+          }
+          setExpenses(prev => prev.map(x => {
+            if (x.id !== e.id) return x;
+            const next = { ...x, ...patch };
+            // Alleen weghalen als het nog dezelfde base64 is (niet intussen vervangen)
+            drop.forEach(f => { if (x[f] === e[f]) delete next[f]; });
+            return next;
+          }));
+        } catch (err) {
+          console.warn('Bonnen verhuizen naar Storage gestopt:', err.message);
+          m.failed = true;
+          break;
+        }
+      }
+      m.running = false;
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId, all]);
 
   const handleUpdateRates = async (rates) => {
     if (setSettings) await setSettings({ ...settings, exchangeRates: rates });
   };
 
-  const handleProcess = (expense) => {
-    const all = allExpenses || expenses;
-    setExpenses(prev => prev.map(e => e.id === expense.id ? { ...e, ...expense, status: 'processed' } : e));
+  const handleProcess = (out) => {
+    const id = processing?.id;
+    setExpenses(prev => prev.map(e => e.id === id ? { ...e, ...out, status: 'processed' } : e));
     setProcessing(null);
   };
 
   const handleDelete = (id) => {
     if (window.confirm('Bon verwijderen?')) {
-      const all = allExpenses || expenses;
-      setExpenses(prev => prev.filter(e => e.id !== id));
+      const e = all.find(x => x.id === id);
+      setExpenses(prev => prev.filter(x => x.id !== id));
       setProcessing(null);
+      localData.current.delete(id);
+      if (e) removeReceipts([e.receiptPath, e.attachmentPath]);
     }
   };
 
@@ -4354,21 +4610,23 @@ const ExpensesView = ({ expenses, setExpenses, allExpenses, settings, setSetting
   const yearVat = yearRows.filter(e => expenseVatTreatment(e) === 'standard').reduce((s, e) => s + Number(e.btwAmount || 0), 0);
   const yearReverse = yearRows.reduce((s, e) => s + expenseReverseVat(e), 0);
   const tableTotals = processedRows.reduce((a, e) => ({ net: a.net + expenseNet(e), vat: a.vat + (expenseVatTreatment(e) === 'standard' ? Number(e.btwAmount || 0) : 0), total: a.total + Number(e.amount || 0) }), { net: 0, vat: 0, total: 0 });
-  const onDropFiles = async (files) => { for (const f of Array.from(files || [])) await handleCapture(f, 'upload'); };
   const vatChip = (e) => {
     const tr = expenseVatTreatment(e);
     const label = VAT_TREATMENTS.find(v => v.id === tr)?.short || tr;
     const tone = tr === 'standard' ? ['var(--success-soft)', 'var(--success)'] : tr === 'none' ? ['var(--surface-3)', 'var(--text-3)'] : ['var(--accent-soft)', 'var(--accent)'];
     return <span className="inline-flex h-[22px] items-center px-2 rounded-full text-[11.5px] font-medium whitespace-nowrap" style={{ background: tone[0], color: tone[1] }}>{label}</span>;
   };
+  const queuedCount = Object.values(scanState).filter(s => s === 'queued' || s === 'scanning').length;
+  const processingExpense = processing ? all.find(e => e.id === processing.id) : null;
 
   return (
     <div className="space-y-5 pb-24 lg:pb-0"
       onDragOver={e => { e.preventDefault(); setDragOver(true); }}
       onDragLeave={e => { if (e.currentTarget === e.target) setDragOver(false); }}
-      onDrop={e => { e.preventDefault(); setDragOver(false); onDropFiles(e.dataTransfer.files); }}>
-      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleCapture(e.target.files?.[0], 'camera')} />
-      <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => { onDropFiles(e.target.files); e.target.value = ''; }} />
+      onDrop={e => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files, 'upload'); }}>
+      {/* Waarde na elke keuze leegmaken, anders werkt dezelfde foto/het volgende kiekje niet opnieuw */}
+      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const files = Array.from(e.target.files || []); e.target.value = ''; handleFiles(files, 'camera'); }} />
+      <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => { const files = Array.from(e.target.files || []); e.target.value = ''; handleFiles(files, 'upload'); }} />
 
       <PageHeader
         title="Bonnen en kosten"
@@ -4378,6 +4636,20 @@ const ExpensesView = ({ expenses, setExpenses, allExpenses, settings, setSetting
           <Button onClick={() => fileInputRef.current?.click()} disabled={uploading}><Upload size={14} /> {uploading ? 'Bezig…' : 'Bonnen uploaden'}</Button>
         </>}
       />
+
+      {captureError && (
+        <div className="px-3 py-2.5 rounded-[10px] text-[13px] flex items-start gap-2" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <span className="flex-1">{captureError}</span>
+          <button onClick={() => setCaptureError(null)} aria-label="Sluiten" style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0 }}><X size={14} /></button>
+        </div>
+      )}
+      {queuedCount > 0 && (
+        <div className="px-3 py-2.5 rounded-[10px] text-[13px] flex items-center gap-2" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+          <Wand2 size={14} className="animate-spin shrink-0" />
+          <span>AI leest {queuedCount} {queuedCount === 1 ? 'bon' : 'bonnen'} uit — je kunt gewoon doorwerken.</span>
+        </div>
+      )}
 
       {/* Samenvatting dit jaar */}
       <div className="grid grid-cols-2 md:grid-cols-4 rounded-[14px] overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--border)', gap: 1 }}>
@@ -4400,18 +4672,28 @@ const ExpensesView = ({ expenses, setExpenses, allExpenses, settings, setSetting
         <div>
           <div className="text-[13px] font-semibold mb-2" style={{ color: 'var(--text)' }}>Te verwerken</div>
           <div className="flex gap-3 overflow-x-auto scrollable pb-1">
-            {openOnes.map(e => (
-              <button key={e.id} onClick={() => setProcessing(e)} className="flex-shrink-0 w-36 text-left rounded-[12px] overflow-hidden transition-[border-color]"
-                style={{ border: '1px solid var(--border-2)', background: 'var(--surface)', cursor: 'pointer' }}>
-                <div className="h-24 flex items-center justify-center" style={{ background: 'var(--surface-2)' }}>
-                  {e.image ? <img src={e.image} alt="" className="w-full h-full object-cover" /> : e.attachment ? <Paperclip size={20} style={{ color: 'var(--text-3)' }} /> : <ImageIcon size={20} style={{ color: 'var(--text-3)' }} />}
-                </div>
-                <div className="px-2.5 py-2">
-                  <div className="text-[12.5px] font-medium" style={{ color: 'var(--warning)' }}>Verwerken</div>
-                  <div className="text-[11.5px] num" style={{ color: 'var(--text-3)' }}>{fmtDate(e.capturedAt)}</div>
-                </div>
-              </button>
-            ))}
+            {openOnes.map(e => {
+              const st = scanState[e.id];
+              const thumb = receiptThumb(e);
+              const label = st === 'queued' ? 'In wachtrij' : st === 'scanning' ? 'AI leest…' : st && st !== 'done' ? 'Scan mislukt' : e.vendor || 'Verwerken';
+              return (
+                <button key={e.id} onClick={() => setProcessing({ id: e.id, autoScan: false })} title={st && !['queued', 'scanning', 'done'].includes(st) ? st : undefined}
+                  className="flex-shrink-0 w-36 text-left rounded-[12px] overflow-hidden transition-[border-color]"
+                  style={{ border: '1px solid var(--border-2)', background: 'var(--surface)', cursor: 'pointer' }}>
+                  <div className="h-24 flex items-center justify-center" style={{ background: 'var(--surface-2)' }}>
+                    {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover" />
+                      : receiptIsPdf(e) ? <FileText size={20} style={{ color: 'var(--text-3)' }} />
+                      : hasReceipt(e) ? <Paperclip size={20} style={{ color: 'var(--text-3)' }} /> : <ImageIcon size={20} style={{ color: 'var(--text-3)' }} />}
+                  </div>
+                  <div className="px-2.5 py-2">
+                    <div className="text-[12.5px] font-medium truncate" style={{ color: st && !['queued', 'scanning', 'done'].includes(st) ? 'var(--danger)' : e.vendor ? 'var(--text)' : 'var(--warning)' }}>{label}</div>
+                    <div className="text-[11.5px] num truncate" style={{ color: 'var(--text-3)' }}>
+                      {Number(e.amount) > 0 ? <Money value={e.amount} currency={baseCurr} /> : fmtDate(e.capturedAt)}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -4428,9 +4710,9 @@ const ExpensesView = ({ expenses, setExpenses, allExpenses, settings, setSetting
           { id: 'all', label: 'Alle BTW-soorten' },
           ...VAT_TREATMENTS.map(v => ({ id: v.id, label: v.short, count: expenses.filter(e => e.status === 'processed' && expenseVatTreatment(e) === v.id).length })).filter(o => o.count > 0),
         ]} />
-        <div className="relative ml-auto">
+        <div className="relative ml-auto w-full sm:w-auto">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-3)' }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Zoek leverancier, categorie of bedrag" className="h-9 pl-8 pr-3 text-[13px] rounded-[9px] border w-[260px]" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Zoek leverancier, categorie of bedrag" className="h-9 pl-8 pr-3 text-[13px] rounded-[9px] border w-full sm:w-[260px]" />
         </div>
       </div>
 
@@ -4455,29 +4737,32 @@ const ExpensesView = ({ expenses, setExpenses, allExpenses, settings, setSetting
                 </tr>
               </thead>
               <tbody>
-                {processedRows.map(e => (
-                  <tr key={e.id} onClick={() => setProcessing(e)} style={{ cursor: 'pointer' }}>
-                    <td><span className="num text-[12.5px]" style={{ color: 'var(--text-2)' }}>{fmtDate(e.date)}</span></td>
-                    <td className="max-w-0" style={{ width: '45%' }}>
-                      <div className="flex items-center gap-2 min-w-0">
-                        {e.image ? <img src={e.image} alt="" className="w-7 h-7 rounded-[6px] object-cover flex-shrink-0" />
-                          : <span className="w-7 h-7 rounded-[6px] flex items-center justify-center flex-shrink-0" style={{ background: 'var(--surface-2)' }} title={e.source === 'bank' ? 'Uit bankafschrift' : e.attachment ? 'PDF' : 'Geen bijlage'}>
-                              {e.source === 'bank' ? <Landmark size={13} style={{ color: 'var(--text-3)' }} /> : <Paperclip size={13} style={{ color: 'var(--text-3)' }} />}
-                            </span>}
-                        <div className="min-w-0">
-                          <div className="truncate" style={{ color: 'var(--text)' }}>{e.vendor || 'Onbekende leverancier'}</div>
-                          <div className="truncate text-[11.5px]" style={{ color: 'var(--text-3)' }}>{[e.category, e.ledgerAccount].filter(Boolean).join(' · ') || 'Geen categorie'}</div>
+                {processedRows.map(e => {
+                  const thumb = receiptThumb(e);
+                  return (
+                    <tr key={e.id} onClick={() => setProcessing({ id: e.id, autoScan: false })} style={{ cursor: 'pointer' }}>
+                      <td><span className="num text-[12.5px]" style={{ color: 'var(--text-2)' }}>{fmtDate(e.date)}</span></td>
+                      <td className="max-w-0" style={{ width: '45%' }}>
+                        <div className="flex items-center gap-2 min-w-0">
+                          {thumb ? <img src={thumb} alt="" loading="lazy" className="w-7 h-7 rounded-[6px] object-cover flex-shrink-0" />
+                            : <span className="w-7 h-7 rounded-[6px] flex items-center justify-center flex-shrink-0" style={{ background: 'var(--surface-2)' }} title={e.source === 'bank' ? 'Uit bankafschrift' : receiptIsPdf(e) ? 'PDF' : hasReceipt(e) ? 'Bijlage' : 'Geen bijlage'}>
+                                {e.source === 'bank' ? <Landmark size={13} style={{ color: 'var(--text-3)' }} /> : receiptIsPdf(e) ? <FileText size={13} style={{ color: 'var(--text-3)' }} /> : <Paperclip size={13} style={{ color: 'var(--text-3)' }} />}
+                              </span>}
+                          <div className="min-w-0">
+                            <div className="truncate" style={{ color: 'var(--text)' }}>{e.vendor || 'Onbekende leverancier'}</div>
+                            <div className="truncate text-[11.5px]" style={{ color: 'var(--text-3)' }}>{[e.category, e.ledgerAccount].filter(Boolean).join(' · ') || 'Geen categorie'}</div>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td>{vatChip(e)}</td>
-                    <td className="r"><Money value={expenseNet(e)} /></td>
-                    <td className="r hidden md:table-cell" style={{ color: 'var(--text-2)' }}>
-                      {expenseVatTreatment(e) === 'standard' ? <Money value={e.btwAmount} /> : expenseReverseVat(e) ? <span title="Verlegd: aangegeven én afgetrokken" style={{ color: 'var(--text-3)' }}><Money value={expenseReverseVat(e)} /></span> : <span style={{ color: 'var(--text-3)' }}>—</span>}
-                    </td>
-                    <td className="r font-medium"><Money value={e.amount} /></td>
-                  </tr>
-                ))}
+                      </td>
+                      <td>{vatChip(e)}</td>
+                      <td className="r"><Money value={expenseNet(e)} /></td>
+                      <td className="r hidden md:table-cell" style={{ color: 'var(--text-2)' }}>
+                        {expenseVatTreatment(e) === 'standard' ? <Money value={e.btwAmount} /> : expenseReverseVat(e) ? <span title="Verlegd: aangegeven én afgetrokken" style={{ color: 'var(--text-3)' }}><Money value={expenseReverseVat(e)} /></span> : <span style={{ color: 'var(--text-3)' }}>—</span>}
+                      </td>
+                      <td className="r font-medium"><Money value={e.amount} /></td>
+                    </tr>
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr>
@@ -4492,26 +4777,36 @@ const ExpensesView = ({ expenses, setExpenses, allExpenses, settings, setSetting
         </Card>
       )}
 
-      {processing && (
+      {processingExpense && (
         <ExpenseProcessModal
-          expense={processing}
+          key={processingExpense.id}
+          expense={processingExpense}
           settings={settings}
+          activeEntity={activeEntity}
+          localDataUrl={localData.current.get(processingExpense.id)}
+          autoScan={processing.autoScan}
           onSave={handleProcess}
           onDelete={handleDelete}
           onClose={() => setProcessing(null)}
           onUpdateRates={handleUpdateRates}
+          onScanned={(delta) => setExpenses(prev => prev.map(x => x.id === processingExpense.id && x.status === 'open' ? { ...x, ...delta } : x))}
         />
       )}
     </div>
   );
 };
 
-const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onUpdateRates }) => {
-  const jur = JURISDICTIONS[settings.jurisdiction || 'NL'];
-  const baseCurr = settings.baseCurrency || 'EUR';
-  const ledgerAccounts = getLedgerAccounts(settings.jurisdiction || 'NL');
+// Bon-velden komen uit de actuele kostenpost (upload kan intussen klaar zijn), niet uit het formulier
+const RECEIPT_KEYS = ['image', 'attachment', 'attachmentName', 'attachmentPath', 'attachmentType', 'receiptPath', 'receiptType', 'receiptName', 'thumb', 'receiptStripped'];
+const RECALC_KEYS = ['originalAmount', 'currency', 'exchangeRate', 'btwRate'];
 
-  const [form, setForm] = useState({
+const ExpenseProcessModal = ({ expense, settings, activeEntity, localDataUrl, autoScan, onSave, onDelete, onClose, onUpdateRates, onScanned }) => {
+  const orgId = useReceiptOrgId();
+  const { jurCode, jur, baseCurr } = expenseJur(activeEntity, settings);
+  const ledgerAccounts = getLedgerAccounts(jurCode);
+  const hasAiKey = !!resolveApiKey(settings.apiKey, settings.openaiApiKey);
+
+  const [form, setForm] = useState(() => ({
     vendor: '', date: todayISO(),
     currency: baseCurr,
     originalAmount: 0,
@@ -4525,63 +4820,53 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
     vatTreatment: expense.vatTreatment || (jur.code === 'NL'
       ? (Number(expense.btwAmount) > 0 ? 'standard' : suggestVatTreatment({ vendor: expense.vendor, currency: expense.currency }))
       : 'standard'),
-  });
+  }));
   const vatSuggestion = jur.code === 'NL' ? suggestVatTreatment({ vendor: form.vendor, currency: form.currency }) : 'standard';
 
   const [fetchingRate, setFetchingRate] = useState(false);
   const [rateError, setRateError] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState(null);
-  const [scanResult, setScanResult] = useState(null); // for showing what was found
+  const [scanResult, setScanResult] = useState(expense.scanInfo || null); // wat de AI vond
   const attachInputRef = useRef(null);
   const [attachUploading, setAttachUploading] = useState(false);
+  const [attachTouched, setAttachTouched] = useState(false);
+  // Op mobiel klapt de bon in tot een klein voorbeeld, zodat het formulier direct in beeld is
+  const [previewOpen, setPreviewOpen] = useState(() => typeof window === 'undefined' || window.matchMedia('(min-width: 768px)').matches);
+
+  const isPdf = receiptIsPdf(expense);
+  const [previewSrc, setPreviewSrc] = useState(null);
+  useEffect(() => {
+    let off = false;
+    if (isPdf) { setPreviewSrc(null); return undefined; }
+    if (localDataUrl) { setPreviewSrc(localDataUrl); return undefined; }
+    if (isDataUrl(expense.image)) { setPreviewSrc(expense.image); return undefined; }
+    setPreviewSrc(expense.thumb || null);
+    if (expense.receiptPath) receiptUrl(expense.receiptPath).then(u => { if (!off && u) setPreviewSrc(u); }).catch(() => {});
+    return () => { off = true; };
+  }, [expense.receiptPath, expense.image, expense.thumb, localDataUrl, isPdf]);
+
+  // Opent een bestand uit Storage in een nieuw tabblad (venster eerst openen i.v.m. popup-blokkers op iOS)
+  const openStored = async (path) => {
+    const w = window.open('', '_blank');
+    try {
+      const url = await receiptUrl(path);
+      if (w) w.location.href = url; else window.location.href = url;
+    } catch (e) {
+      w?.close();
+      setScanError(e.message);
+    }
+  };
 
   const handleAIScan = async () => {
-    if (!expense.image) return;
     setScanning(true);
     setScanError(null);
-    setScanResult(null);
     try {
-      const apiKey = resolveApiKey(settings.apiKey, settings.openaiApiKey);
-      const result = await callClaudeVision({ imageDataUrl: expense.image, apiKey, jurisdiction: settings.jurisdiction || 'NL' });
-
-      // Use total_incl_tax as originalAmount — recalc formula expects the INCLUSIVE amount
-      const totalIncl = Number(result.total_incl_tax) || 0;
-      const btwAmt = Number(result.tax_amount) || 0;
-      const btwRate = Number(result.tax_rate) || 0;
-      const detectedCurrency = (result.currency || baseCurr).toUpperCase();
-
-      setScanResult({ vendor: result.vendor, date: result.date, totalIncl, btwAmt, btwRate, currency: detectedCurrency, deductible: result.deductible, deductiblePct: result.deductible_pct, deductibleRisk: result.deductible_risk, deductibleNote: result.deductible_note, deductibleDescription: result.deductible_description });
-
-      setForm(f => {
-        const next = {
-          ...f,
-          vendor: result.vendor || f.vendor,
-          date: result.date || f.date,
-          currency: detectedCurrency,
-          originalAmount: totalIncl,
-          btwRate: btwRate || f.btwRate,
-          // Override btwAmount only if AI returned it — recalc will recompute if 0
-          ...(btwAmt > 0 ? { btwAmount: btwAmt } : {}),
-          // Reset exchange rate to 1 so auto-fetch fires correctly
-          exchangeRate: detectedCurrency !== baseCurr ? 1 : f.exchangeRate,
-        };
-        return recalc(next);
-      });
-
-      // If foreign currency detected: explicitly fetch live rate after state settles
-      if (detectedCurrency !== baseCurr) {
-        setTimeout(async () => {
-          try {
-            const rates = await fetchExchangeRates(baseCurr);
-            const conv = convertCurrency(1, detectedCurrency, baseCurr, rates);
-            if (conv) {
-              setForm(f => recalc({ ...f, exchangeRate: conv.rate }));
-              if (onUpdateRates) onUpdateRates(rates);
-            }
-          } catch { /* exchange rate fetch failed silently — user can manually refresh */ }
-        }, 50);
-      }
+      const dataUrl = await receiptDataUrl(expense, localDataUrl);
+      const delta = await scanExpense({ dataUrl, settings, jurCode, baseCurr, current: form, onRates: onUpdateRates });
+      setForm(f => ({ ...f, ...delta }));
+      setScanResult(delta.scanInfo);
+      onScanned?.(delta);
     } catch (e) {
       setScanError(e.message);
     } finally {
@@ -4589,10 +4874,17 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
     }
   };
 
+  // Net gefotografeerde bon: meteen scannen (ref voorkomt dubbele scan in StrictMode)
+  const autoScanned = useRef(false);
+  useEffect(() => {
+    if (autoScan && hasAiKey && !autoScanned.current) { autoScanned.current = true; handleAIScan(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Auto-suggest ledger account on vendor change (only if user hasn't picked one yet)
   const suggestion = useMemo(
-    () => suggestLedgerAccount(form.vendor, settings.jurisdiction || 'NL'),
-    [form.vendor, settings.jurisdiction]
+    () => suggestLedgerAccount(form.vendor, jurCode),
+    [form.vendor, jurCode]
   );
 
   useEffect(() => {
@@ -4605,19 +4897,15 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
     }
   }, [suggestion?.code]);
 
-  const recalc = (next) => {
-    const orig = Number(next.originalAmount || 0);
-    const rate = Number(next.exchangeRate || 1);
-    const amtBase = +(orig * rate).toFixed(2);
-    // Verlegde BTW / geen BTW: er staat geen NL BTW op de factuur, dus niets aftrekbaars in het bedrag
-    if (next.vatTreatment && next.vatTreatment !== 'standard') return { ...next, amount: amtBase, btwAmount: 0 };
-    const btwRate = Number(next.btwRate || 0);
-    const btw = +(amtBase - (amtBase / (1 + btwRate / 100))).toFixed(2);
-    return { ...next, amount: amtBase, btwAmount: btw };
-  };
-
   const update = (key, val) => {
-    setForm(f => recalc({ ...f, [key]: val }));
+    setForm(f => {
+      const next = { ...f, [key]: val };
+      // Bedrag/tarief gewijzigd → BTW opnieuw berekenen; BTW-bedrag zelf ingevuld → laten staan
+      if (RECALC_KEYS.includes(key)) next.btwManual = false;
+      if (key === 'btwAmount') next.btwManual = true;
+      if (key === 'vatTreatment' && val === 'standard' && !Number(f.btwRate)) next.btwRate = jur.salesTax.standard;
+      return recalcExpense(next);
+    });
   };
 
   const handleFetchRate = async () => {
@@ -4628,7 +4916,7 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
       const rates = await fetchExchangeRates(baseCurr);
       const conv = convertCurrency(1, form.currency, baseCurr, rates);
       if (conv) {
-        setForm(f => recalc({ ...f, exchangeRate: conv.rate }));
+        setForm(f => recalcExpense({ ...f, exchangeRate: conv.rate }));
         if (onUpdateRates) onUpdateRates(rates);
       } else {
         setRateError('Valuta niet ondersteund');
@@ -4642,267 +4930,367 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
 
   // Auto-fetch on first open if non-base currency and no rate yet
   useEffect(() => {
-    if (form.currency !== baseCurr && (!form.exchangeRate || form.exchangeRate === 1) && !expense.exchangeRate) {
+    if (form.currency !== baseCurr && (!form.exchangeRate || Number(form.exchangeRate) === 1) && !expense.exchangeRate) {
       handleFetchRate();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.currency]);
 
-  const isValid = form.vendor && form.date && form.originalAmount > 0 && form.ledgerAccount;
+  const handleAttach = async (f) => {
+    if (!f) return;
+    setAttachUploading(true);
+    try {
+      const type = f.type || (/\.pdf$/i.test(f.name || '') ? 'application/pdf' : 'application/octet-stream');
+      let patch;
+      try {
+        if (!storageAvailable(orgId)) throw new Error('Storage niet beschikbaar');
+        patch = { attachmentPath: await uploadReceipt(orgId, expense.id, f, type, 'bijlage'), attachment: null };
+      } catch {
+        patch = { attachment: await readFileAsDataUrl(f), attachmentPath: null };
+      }
+      setForm(prev => ({ ...prev, ...patch, attachmentType: type, attachmentName: f.name }));
+      setAttachTouched(true);
+    } catch (e) {
+      setScanError(e.message);
+    } finally {
+      setAttachUploading(false);
+    }
+  };
+
+  const handleSave = () => {
+    if (!isValid) return;
+    const out = { ...form, originalAmount: parseAmount(form.originalAmount), exchangeRate: parseAmount(form.exchangeRate) || 1, btwAmount: parseAmount(form.btwAmount) };
+    RECEIPT_KEYS.forEach(k => delete out[k]);
+    if (attachTouched) {
+      ['attachment', 'attachmentName', 'attachmentPath', 'attachmentType'].forEach(k => { out[k] = form[k] ?? null; });
+      // Bewust gewijzigd: de server-trigger mag de oude bijlage niet terugzetten
+      if (expense.receiptStripped) out.receiptStripped = expense.receiptStripped.filter(f => f !== 'attachment');
+    }
+    onSave(out);
+  };
+
+  const isValid = form.vendor && form.date && parseAmount(form.originalAmount) > 0 && form.ledgerAccount;
   const selectedAccount = ledgerAccounts.find(a => a.code === form.ledgerAccount);
+  const rateOptions = [...new Set([...jur.salesTax.rates, Number(form.btwRate) || 0])].sort((a, b) => a - b);
+  const amountInputStyle = { borderColor: 'var(--border-2)', background: 'var(--surface)', color: 'var(--text)' };
+  const pdfLocal = localDataUrl || (isDataUrl(expense.attachment) ? expense.attachment : null);
+
+  const preview = isPdf ? (
+    <div className="flex flex-col items-center gap-3 py-6 text-center">
+      <FileText size={34} style={{ color: 'var(--text-3)' }} />
+      <div className="text-[13px] truncate max-w-full" style={{ color: 'var(--text-2)' }}>{expense.receiptName || expense.attachmentName || 'PDF-bon'}</div>
+      {expense.receiptPath || expense.attachmentPath ? (
+        <Button size="sm" variant="secondary" onClick={() => openStored(expense.receiptPath || expense.attachmentPath)}><Eye size={13} /> PDF openen</Button>
+      ) : pdfLocal ? (
+        <a href={pdfLocal} download={expense.receiptName || expense.attachmentName || 'bon.pdf'} className="text-[13px] font-medium" style={{ color: 'var(--accent)' }}>PDF downloaden</a>
+      ) : null}
+    </div>
+  ) : previewSrc ? (
+    <img src={previewSrc} alt="Bon" className="max-w-full max-h-[45vh] md:max-h-[60vh] rounded-[8px] shadow-md mx-auto" />
+  ) : (
+    <div className="text-[13px] py-6 text-center" style={{ color: 'var(--text-3)' }}>
+      {expense.receiptStripped?.length ? 'Bon wordt geladen…' : 'Geen afbeelding'}
+    </div>
+  );
 
   return (
     <Modal open onClose={onClose} size="lg">
-      <div className="px-6 py-5 border-b flex items-center justify-between gap-3" style={{ borderColor: 'var(--border)' }}>
-        <div>
-          <h2 className="font-display text-2xl">Bon verwerken</h2>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-            Vastgelegd op {fmtDate(expense.capturedAt)} · {jur.flag} {jur.name}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {expense.image && (
-            <Button size="sm" variant="secondary" onClick={handleAIScan} disabled={scanning}>
-              <Wand2 size={13} className={scanning ? 'animate-spin' : ''} />
-              {scanning ? 'Scannen...' : 'Scan met AI'}
-            </Button>
-          )}
-          <button onClick={onClose} className="p-1.5 rounded hover:bg-[color:var(--surface-2)]"><X size={16} /></button>
-        </div>
-      </div>
-      {scanResult && !scanError && (
-        <div className="mx-6 mt-3 space-y-1.5 animate-in">
-          <div className="px-3 py-2 rounded-md text-xs flex items-start gap-2" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
-            <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
-            <span>
-              <strong>AI gevonden:</strong> {scanResult.vendor || '?'} · {scanResult.date || '?'} ·{' '}
-              {fmtCurrency(scanResult.totalIncl, scanResult.currency)}
-              {scanResult.btwAmt > 0 && ` (incl. ${scanResult.currency === 'EUR' ? 'BTW' : 'belasting'} ${fmtCurrency(scanResult.btwAmt, scanResult.currency)})`}
-              {scanResult.currency !== baseCurr && <span className="ml-1 opacity-80">→ wisselkoers ophalen...</span>}
-            </span>
+      {/* iOS zoomt in op velden < 16px: op mobiel alle velden in deze modal op 16px */}
+      <style>{'@media (max-width: 767px) { .exp-modal input, .exp-modal select, .exp-modal textarea { font-size: 16px !important; } }'}</style>
+      <div className="exp-modal flex flex-col max-h-[calc(100dvh-6rem)]">
+        <div className="px-4 md:px-6 py-4 border-b flex items-center justify-between gap-3" style={{ borderColor: 'var(--border)' }}>
+          <div className="min-w-0">
+            <h2 className="text-[18px] md:text-[20px] font-semibold" style={{ color: 'var(--text)' }}>Bon verwerken</h2>
+            <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--text-3)' }}>
+              Vastgelegd op {fmtDate(expense.capturedAt)} · {jur.flag} {jur.name}
+            </p>
           </div>
-          {scanResult.deductibleNote && (
-            <div className="space-y-1">
-              <div className="px-3 py-2 rounded-md text-xs flex items-start gap-2" style={{
-                background: scanResult.deductibleRisk === 'safe' ? 'var(--success-soft)' : scanResult.deductibleRisk === 'no' ? 'var(--surface-3)' : 'var(--warning-soft)',
-                color: scanResult.deductibleRisk === 'safe' ? 'var(--success)' : scanResult.deductibleRisk === 'no' ? 'var(--muted)' : 'var(--warning)',
-              }}>
-                <span className="shrink-0">{scanResult.deductibleRisk === 'safe' ? '✅' : scanResult.deductibleRisk === 'no' ? '❌' : '⚠️'}</span>
-                <span>
-                  <strong>Aftrekbaar{scanResult.deductiblePct && scanResult.deductiblePct < 100 ? ` (${scanResult.deductiblePct}%)` : ''}:</strong> {scanResult.deductibleNote}
-                </span>
+          <div className="flex items-center gap-2 shrink-0">
+            {hasReceipt(expense) && (
+              <Button size="sm" variant="secondary" onClick={handleAIScan} disabled={scanning}>
+                <Wand2 size={13} className={scanning ? 'animate-spin' : ''} />
+                {scanning ? 'Scannen…' : scanResult ? 'Opnieuw scannen' : 'Scan met AI'}
+              </Button>
+            )}
+            <button onClick={onClose} aria-label="Sluiten" className="p-1.5 rounded hover:bg-[color:var(--surface-2)]"><X size={16} /></button>
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto scrollable">
+          <div className="grid grid-cols-1 md:grid-cols-2">
+            <div className="md:p-4" style={{ background: 'var(--surface-2)' }}>
+              {/* Mobiel: inklapbaar voorbeeld */}
+              <button type="button" onClick={() => setPreviewOpen(o => !o)} className="md:hidden w-full flex items-center gap-3 px-4 py-2.5 text-left"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)' }}>
+                {previewSrc && !isPdf ? <img src={previewSrc} alt="" className="w-10 h-10 rounded-[6px] object-cover" />
+                  : <span className="w-10 h-10 rounded-[6px] flex items-center justify-center" style={{ background: 'var(--surface-3)' }}>{isPdf ? <FileText size={16} /> : <ImageIcon size={16} />}</span>}
+                <span className="flex-1 text-[13px] font-medium">{previewOpen ? 'Bon verbergen' : 'Bon bekijken'}</span>
+                <ChevronDown size={16} style={{ transform: previewOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
+              </button>
+              <div className={`${previewOpen ? 'block' : 'hidden'} md:block px-4 pb-4 md:p-0 md:sticky md:top-0`}>
+                {preview}
+                {!isPdf && expense.receiptPath && (
+                  <div className="text-center mt-2">
+                    <button type="button" onClick={() => openStored(expense.receiptPath)} className="text-[12.5px] font-medium hover:underline" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)' }}>
+                      Volledige bon openen
+                    </button>
+                  </div>
+                )}
               </div>
-              {scanResult.deductibleDescription && (
-                <div className="px-3 py-2 rounded-md text-xs flex items-start gap-2" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                  <span className="shrink-0">📝</span>
-                  <span style={{ color: 'var(--ink-2)' }}>
-                    <strong>Omschrijf als:</strong> <span className="font-mono" style={{ color: 'var(--ink)' }}>{scanResult.deductibleDescription}</span>
-                  </span>
+            </div>
+
+            <div className="p-4 md:p-6 space-y-4">
+              {!hasAiKey && hasReceipt(expense) && (
+                <div className="px-3 py-2 rounded-md text-xs flex items-start gap-2" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
+                  <Key size={13} className="mt-0.5 shrink-0" />
+                  <span>Bonnen automatisch laten uitlezen? Stel je AI-sleutel in via Instellingen → AI (wordt dan op al je apparaten gebruikt).</span>
+                </div>
+              )}
+              {scanning && (
+                <div className="px-3 py-2 rounded-md text-xs flex items-center gap-2" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                  <Wand2 size={13} className="animate-spin shrink-0" />
+                  <span>AI leest de bon uit…</span>
+                </div>
+              )}
+              {scanResult && !scanError && !scanning && (
+                <div className="space-y-1.5 animate-in">
+                  <div className="px-3 py-2 rounded-md text-xs flex items-start gap-2" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
+                    <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
+                    <span>
+                      <strong>AI gevonden:</strong> {scanResult.vendor || '?'} · {scanResult.date || '?'} ·{' '}
+                      {fmtCurrency(scanResult.totalIncl, scanResult.currency)}
+                      {scanResult.btwAmt > 0 ? ` (incl. ${scanResult.currency === 'EUR' ? 'BTW' : 'belasting'} ${fmtCurrency(scanResult.btwAmt, scanResult.currency)})` : ' · geen BTW op de bon'}
+                      . Controleer en klik op verwerken.
+                    </span>
+                  </div>
+                  {scanResult.deductibleNote && (
+                    <div className="px-3 py-2 rounded-md text-xs" style={{
+                      background: scanResult.deductibleRisk === 'safe' ? 'var(--success-soft)' : scanResult.deductibleRisk === 'no' ? 'var(--surface-3)' : 'var(--warning-soft)',
+                      color: scanResult.deductibleRisk === 'safe' ? 'var(--success)' : scanResult.deductibleRisk === 'no' ? 'var(--text-3)' : 'var(--warning)',
+                    }}>
+                      <strong>Aftrekbaar{scanResult.deductiblePct && scanResult.deductiblePct < 100 ? ` (${scanResult.deductiblePct}%)` : ''}:</strong> {scanResult.deductibleNote}
+                    </div>
+                  )}
+                  {scanResult.deductibleDescription && (
+                    <div className="px-3 py-2 rounded-md text-xs flex items-start gap-2" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-2)' }}>
+                      <span className="flex-1"><strong>Omschrijf als:</strong> {scanResult.deductibleDescription}</span>
+                      {!form.notes && (
+                        <button type="button" onClick={() => update('notes', scanResult.deductibleDescription)} className="font-medium shrink-0 hover:underline" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0 }}>Overnemen</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              {scanError && (
+                <div className="px-3 py-2 rounded-md text-xs flex items-start gap-2" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>
+                  <AlertCircle size={13} className="mt-0.5 shrink-0" />
+                  <span className="break-words min-w-0">{scanError}</span>
+                </div>
+              )}
+
+              <Input
+                label="Leverancier *"
+                value={form.vendor}
+                onChange={e => update('vendor', e.target.value)}
+                placeholder="Bijv. Anthropic, Make.com, Vercel..."
+              />
+
+              {suggestion && (
+                <div className="rounded-md p-3 text-xs flex items-start gap-2 animate-in" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                  <Sparkles size={14} className="mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <div><strong>Suggestie:</strong> grootboek <span className="font-mono">{suggestion.code}</span> {suggestion.note && <span>· {suggestion.note}</span>}</div>
+                    <div className="opacity-75 mt-0.5">Match op "{suggestion.matched}" · je kunt het hieronder aanpassen</div>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Datum bon *" type="date" value={form.date} onChange={e => update('date', e.target.value)} />
+                <Select label="Categorie" value={form.category} onChange={e => update('category', e.target.value)}>
+                  <option value="">Kies...</option>
+                  {(settings.categories || []).map(c => <option key={c} value={c}>{c}</option>)}
+                </Select>
+              </div>
+
+              <Select label={`Grootboekrekening * (${jur.code})`} value={form.ledgerAccount} onChange={e => update('ledgerAccount', e.target.value)}>
+                <option value="">Kies rekening...</option>
+                {ledgerAccounts.map(a => (
+                  <option key={a.code} value={a.code}>{a.code} — {a.name}</option>
+                ))}
+              </Select>
+              {selectedAccount && (
+                <div className="rounded-md p-3 text-xs space-y-1" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                  <div className="font-medium flex items-center gap-1.5" style={{ color: 'var(--text-2)' }}>
+                    <BookOpen size={11} /> Journaalpost
+                  </div>
+                  <div className="font-mono break-words" style={{ color: 'var(--text)' }}>
+                    Debet &nbsp;: {selectedAccount.code} {selectedAccount.name}
+                  </div>
+                  <div className="font-mono" style={{ color: 'var(--text)' }}>
+                    Credit: 1100 Bank / Creditcard
+                  </div>
+                  <div style={{ color: 'var(--text-3)' }}>{selectedAccount.group} · {jur.salesTax.name} voorbelasting apart verwerken</div>
+                </div>
+              )}
+
+              {/* Valuta + bedrag (tekstveld met decimaal-toetsenbord: komma én punt werken) */}
+              <div className="space-y-1.5">
+                <label className="block text-[12.5px] font-medium" style={{ color: 'var(--text-2)' }}>Bedrag op bon *</label>
+                <div className="grid grid-cols-5 gap-2">
+                  <input
+                    type="text" inputMode="decimal" autoComplete="off"
+                    value={form.originalAmount === 0 ? '' : form.originalAmount}
+                    onChange={e => update('originalAmount', e.target.value)}
+                    className="col-span-3 h-9 px-3 text-[13.5px] rounded-[9px] border num"
+                    style={amountInputStyle}
+                    placeholder="0,00"
+                  />
+                  <select
+                    value={form.currency}
+                    onChange={e => update('currency', e.target.value)}
+                    className="col-span-2 h-9 px-2 text-[13.5px] rounded-[9px] border cursor-pointer"
+                    style={amountInputStyle}
+                  >
+                    {SUPPORTED_CURRENCIES.map(c => (
+                      <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {form.currency !== baseCurr && (
+                <div className="p-3 rounded-md space-y-2" style={{ background: 'var(--info-soft)' }}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-medium" style={{ color: 'var(--info)' }}>Wisselkoers</div>
+                    <button
+                      onClick={handleFetchRate}
+                      disabled={fetchingRate}
+                      className="text-xs font-medium flex items-center gap-1 px-2 py-1 rounded disabled:opacity-50"
+                      style={{ color: 'var(--info)', background: 'none', border: 'none', cursor: 'pointer' }}
+                    >
+                      <RefreshCw size={11} className={fetchingRate ? 'animate-spin' : ''} />
+                      {fetchingRate ? 'Ophalen...' : 'Huidige koers'}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="num shrink-0">1 {form.currency}</span>
+                    <ArrowRight size={12} style={{ color: 'var(--text-3)' }} className="shrink-0" />
+                    <input
+                      type="text" inputMode="decimal" autoComplete="off"
+                      value={form.exchangeRate}
+                      onChange={e => update('exchangeRate', e.target.value)}
+                      className="flex-1 min-w-0 h-8 px-2 text-[13.5px] rounded-[8px] border num"
+                      style={amountInputStyle}
+                    />
+                    <span className="num shrink-0">{baseCurr}</span>
+                  </div>
+                  {rateError && <div className="text-xs" style={{ color: 'var(--danger)' }}>{rateError}</div>}
+                  <div className="text-xs flex justify-between pt-1 border-t" style={{ borderColor: 'rgba(30,64,175,0.15)', color: 'var(--info)' }}>
+                    <span>{fmtCurrency(parseAmount(form.originalAmount), form.currency)}</span>
+                    <span className="num font-semibold">≈ {fmtCurrency(form.amount, baseCurr)}</span>
+                  </div>
+                </div>
+              )}
+
+              {jur.code === 'NL' && (
+                <div className="space-y-1">
+                  <Select label="BTW-behandeling" value={form.vatTreatment} onChange={e => update('vatTreatment', e.target.value)}>
+                    {VAT_TREATMENTS.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
+                  </Select>
+                  {vatSuggestion !== form.vatTreatment && (
+                    <button type="button" onClick={() => update('vatTreatment', vatSuggestion)} className="text-xs hover:underline text-left" style={{ color: 'var(--warning)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                      Voorstel voor {form.vendor || 'deze leverancier'}: {VAT_TREATMENTS.find(v => v.id === vatSuggestion)?.label} — toepassen
+                    </button>
+                  )}
+                </div>
+              )}
+              {form.vatTreatment === 'standard' ? (
+                <div className="space-y-1">
+                  <div className="grid grid-cols-2 gap-3">
+                    <Select label={`${jur.salesTax.name} %`} value={Number(form.btwRate) || 0} onChange={e => update('btwRate', Number(e.target.value))}>
+                      {rateOptions.map(r => <option key={r} value={r}>{r}%</option>)}
+                    </Select>
+                    <div>
+                      <label className="block text-[12.5px] font-medium mb-1.5" style={{ color: 'var(--text-2)' }}>{jur.salesTax.name}-bedrag ({baseCurr})</label>
+                      <input
+                        type="text" inputMode="decimal" autoComplete="off"
+                        value={form.btwAmount}
+                        onChange={e => update('btwAmount', e.target.value)}
+                        className="w-full h-9 px-3 text-[13.5px] rounded-[9px] border num"
+                        style={amountInputStyle}
+                      />
+                    </div>
+                  </div>
+                  {form.btwManual && (
+                    <div className="text-xs" style={{ color: 'var(--text-3)' }}>
+                      {scanResult ? 'Overgenomen van de bon' : 'Zelf ingevuld'} ·{' '}
+                      <button type="button" onClick={() => update('btwRate', Number(form.btwRate) || 0)} className="hover:underline" style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--accent)' }}>berekenen uit tarief</button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-xs p-2 rounded" style={{ background: 'var(--surface-2)', color: 'var(--text-3)' }}>
+                  {form.vatTreatment === 'none' ? 'Geen BTW — telt alleen als kosten.' : `Verlegd: ${fmtCurrency(+(Number(form.amount) * 0.21).toFixed(2), baseCurr)} in rubriek ${form.vatTreatment === 'reverse_eu' ? '4b' : '4a'} én aftrekbaar in 5b.`}
+                </div>
+              )}
+
+              <div className="p-3 rounded-md text-sm space-y-1" style={{ background: 'var(--surface-2)' }}>
+                <div className="flex justify-between text-xs" style={{ color: 'var(--text-3)' }}>
+                  <span>Excl. {jur.salesTax.name}</span>
+                  <span className="num">{fmtCurrency(Number(form.amount) - parseAmount(form.btwAmount), baseCurr)}</span>
+                </div>
+                <div className="flex justify-between text-xs" style={{ color: 'var(--text-3)' }}>
+                  <span>{jur.salesTax.name}</span>
+                  <span className="num" style={{ color: 'var(--success)' }}>{fmtCurrency(parseAmount(form.btwAmount), baseCurr)}</span>
+                </div>
+                <div className="flex justify-between text-base font-semibold pt-1" style={{ color: 'var(--text)' }}>
+                  <span>Totaal (in {baseCurr})</span>
+                  <span className="num">{fmtCurrency(form.amount, baseCurr)}</span>
+                </div>
+              </div>
+
+              <Textarea label="Notitie" rows={2} value={form.notes} onChange={e => update('notes', e.target.value)} placeholder="Optioneel..." />
+
+              {/* Bijlage */}
+              <div>
+                <label className="block text-[12.5px] font-medium mb-1.5" style={{ color: 'var(--text-2)' }}>Bijlage (PDF of bestand)</label>
+                <input ref={attachInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; handleAttach(f); }} />
+                {form.attachment || form.attachmentPath ? (
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-md text-sm" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                    <Paperclip size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                    <span className="flex-1 truncate text-xs" style={{ color: 'var(--text)' }}>{form.attachmentName || 'Bijlage'}</span>
+                    {form.attachmentPath
+                      ? <button type="button" onClick={() => openStored(form.attachmentPath)} aria-label="Bijlage openen" className="flex" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 0 }}><Download size={13} /></button>
+                      : <a href={form.attachment} download={form.attachmentName || 'bijlage'} className="flex" style={{ color: 'var(--text-3)' }}><Download size={13} /></a>}
+                    <button onClick={() => { setForm(f => ({ ...f, attachment: null, attachmentName: null, attachmentPath: null, attachmentType: null })); setAttachTouched(true); }} aria-label="Bijlage verwijderen" className="flex" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 0 }}><X size={13} /></button>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="secondary" onClick={() => attachInputRef.current?.click()} disabled={attachUploading}>
+                    <Paperclip size={13} /> {attachUploading ? 'Uploaden...' : 'Bestand toevoegen'}
+                  </Button>
+                )}
+              </div>
+
+              {form.source && form.source !== 'manual' && (
+                <div className="text-xs flex items-center gap-1.5" style={{ color: 'var(--text-3)' }}>
+                  <Inbox size={11} />
+                  <span>Bron: {form.source === 'email' ? 'Gmail (auto)' : form.source === 'camera' ? 'Camera' : form.source === 'bank' ? 'Bank' : 'Upload'}</span>
                 </div>
               )}
             </div>
-          )}
+          </div>
         </div>
-      )}
-      {scanError && (
-        <div className="mx-6 mt-3 px-3 py-2 rounded-md text-xs flex items-start gap-2" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>
-          <AlertCircle size={13} className="mt-0.5 shrink-0" />
-          <span>{scanError}</span>
-        </div>
-      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 max-h-[78vh] overflow-y-auto scrollable">
-        <div className="bg-stone-100 p-4 flex items-center justify-center">
-          {expense.image ? (
-            <img src={expense.image} alt="bon" className="max-w-full max-h-[60vh] rounded shadow-md" />
-          ) : (
-            <div className="text-sm" style={{ color: 'var(--muted)' }}>Geen afbeelding</div>
-          )}
-        </div>
-        <div className="p-6 space-y-4">
-          <Input
-            label="Leverancier *"
-            value={form.vendor}
-            onChange={e => update('vendor', e.target.value)}
-            placeholder="Bijv. Anthropic, Make.com, Vercel..."
-          />
-
-          {suggestion && (
-            <div className="rounded-md p-3 text-xs flex items-start gap-2 animate-in" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
-              <Sparkles size={14} className="mt-0.5 shrink-0" />
-              <div className="flex-1">
-                <div><strong>Suggestie:</strong> grootboek <span className="font-mono">{suggestion.code}</span> {suggestion.note && <span>· {suggestion.note}</span>}</div>
-                <div className="opacity-75 mt-0.5">Match op "{suggestion.matched}" · automatisch ingevuld, je kunt het hieronder aanpassen</div>
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <Input label="Datum bon *" type="date" value={form.date} onChange={e => update('date', e.target.value)} />
-            <Select label="Categorie" value={form.category} onChange={e => update('category', e.target.value)}>
-              <option value="">Kies...</option>
-              {settings.categories.map(c => <option key={c} value={c}>{c}</option>)}
-            </Select>
+        {/* Vaste voettekst: knoppen altijd bereikbaar, lopen door op smalle schermen */}
+        <div className="px-4 md:px-6 pt-3 border-t flex flex-wrap items-center justify-between gap-2" style={{ borderColor: 'var(--border)', paddingBottom: 'calc(12px + env(safe-area-inset-bottom))' }}>
+          <Button variant="danger" size="sm" onClick={() => onDelete(expense.id)}><Trash2 size={14} /> Verwijderen</Button>
+          <div className="flex flex-wrap gap-2 flex-1 justify-end">
+            <Button variant="secondary" onClick={onClose}>Annuleren</Button>
+            <Button onClick={handleSave} disabled={!isValid || scanning} className="flex-1 sm:flex-none">
+              <Check size={14} /> Verwerken en boeken
+            </Button>
           </div>
-
-          <Select label={`Grootboekrekening * (${jur.code})`} value={form.ledgerAccount} onChange={e => update('ledgerAccount', e.target.value)}>
-            <option value="">Kies rekening...</option>
-            {ledgerAccounts.map(a => (
-              <option key={a.code} value={a.code}>{a.code} — {a.name}</option>
-            ))}
-          </Select>
-          {selectedAccount && (
-            <div className="rounded-md p-3 text-xs space-y-1" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-              <div className="font-medium flex items-center gap-1.5" style={{ color: 'var(--ink-2)' }}>
-                <BookOpen size={11} /> Journaalpost
-              </div>
-              <div className="font-mono" style={{ color: 'var(--ink)' }}>
-                Debet &nbsp;: {selectedAccount.code} {selectedAccount.name}
-              </div>
-              <div className="font-mono" style={{ color: 'var(--ink)' }}>
-                Credit: 1100 Bank / Creditcard
-              </div>
-              <div style={{ color: 'var(--muted)' }}>{selectedAccount.group} · {jur.salesTax.name} voorbelasting apart verwerken</div>
-            </div>
-          )}
-
-          {/* Currency + amount */}
-          <div className="space-y-2">
-            <label className="block text-xs font-medium" style={{ color: 'var(--ink-2)' }}>Bedrag op bon *</label>
-            <div className="grid grid-cols-5 gap-2">
-              <input
-                type="number" step="0.01"
-                value={form.originalAmount}
-                onChange={e => update('originalAmount', e.target.value)}
-                className="col-span-3 px-3 py-2.5 text-sm bg-white rounded-md border num"
-                style={{ borderColor: 'var(--border-strong)' }}
-                placeholder="0,00"
-              />
-              <select
-                value={form.currency}
-                onChange={e => update('currency', e.target.value)}
-                className="col-span-2 px-2 py-2.5 text-sm bg-white rounded-md border cursor-pointer"
-                style={{ borderColor: 'var(--border-strong)' }}
-              >
-                {SUPPORTED_CURRENCIES.map(c => (
-                  <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {form.currency !== baseCurr && (
-            <div className="p-3 rounded-md space-y-2" style={{ background: 'var(--info-soft)' }}>
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-xs font-medium" style={{ color: 'var(--info)' }}>Wisselkoers</div>
-                <button
-                  onClick={handleFetchRate}
-                  disabled={fetchingRate}
-                  className="text-xs font-medium flex items-center gap-1 px-2 py-1 rounded hover:bg-white/50 disabled:opacity-50"
-                  style={{ color: 'var(--info)' }}
-                >
-                  <RefreshCw size={11} className={fetchingRate ? 'animate-spin' : ''} />
-                  {fetchingRate ? 'Ophalen...' : 'Huidige koers'}
-                </button>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <span className="num">1 {form.currency}</span>
-                <ArrowRight size={12} style={{ color: 'var(--muted)' }} />
-                <input
-                  type="number" step="0.000001"
-                  value={form.exchangeRate}
-                  onChange={e => update('exchangeRate', e.target.value)}
-                  className="flex-1 px-2 py-1 text-sm bg-white rounded border num"
-                  style={{ borderColor: 'var(--border)' }}
-                />
-                <span className="num">{baseCurr}</span>
-              </div>
-              {rateError && <div className="text-xs" style={{ color: 'var(--danger)' }}>{rateError}</div>}
-              <div className="text-xs flex justify-between pt-1 border-t" style={{ borderColor: 'rgba(30,64,175,0.15)', color: 'var(--info)' }}>
-                <span>{fmtCurrency(form.originalAmount, form.currency)}</span>
-                <span className="num font-semibold">≈ {fmtCurrency(form.amount, baseCurr)}</span>
-              </div>
-            </div>
-          )}
-
-          {jur.code === 'NL' && (
-            <div className="space-y-1">
-              <Select label="BTW-behandeling" value={form.vatTreatment} onChange={e => update('vatTreatment', e.target.value)}>
-                {VAT_TREATMENTS.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
-              </Select>
-              {vatSuggestion !== form.vatTreatment && (
-                <button type="button" onClick={() => update('vatTreatment', vatSuggestion)} className="text-xs hover:underline" style={{ color: 'var(--warning)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
-                  Voorstel voor {form.vendor || 'deze leverancier'}: {VAT_TREATMENTS.find(v => v.id === vatSuggestion)?.label} — toepassen
-                </button>
-              )}
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-3">
-            {form.vatTreatment === 'standard' ? (
-              <Select label={`${jur.salesTax.name} %`} value={form.btwRate} onChange={e => update('btwRate', Number(e.target.value))}>
-                {jur.salesTax.rates.map(r => <option key={r} value={r}>{r}%</option>)}
-              </Select>
-            ) : (
-              <div className="text-xs p-2 rounded" style={{ background: 'var(--surface-2)', color: 'var(--muted)' }}>
-                {form.vatTreatment === 'none' ? 'Geen BTW — telt alleen als kosten.' : `Verlegd: ${fmtCurrency(+(Number(form.amount) * 0.21).toFixed(2), baseCurr)} in rubriek ${form.vatTreatment === 'reverse_eu' ? '4b' : '4a'} én aftrekbaar in 5b.`}
-              </div>
-            )}
-            <div className="flex items-end">
-              <div className="text-xs" style={{ color: 'var(--muted)' }}>
-                <div>Excl: <span className="num" style={{ color: 'var(--ink)' }}>{fmtCurrency(Number(form.amount) - Number(form.btwAmount), baseCurr)}</span></div>
-                <div>{jur.salesTax.name}: <span className="num" style={{ color: 'var(--success)' }}>{fmtCurrency(form.btwAmount, baseCurr)}</span></div>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-3 rounded-md text-sm space-y-1" style={{ background: 'var(--surface-2)' }}>
-            <div className="flex justify-between font-display text-base">
-              <span>Totaal (in {baseCurr})</span>
-              <span className="num font-medium">{fmtCurrency(form.amount, baseCurr)}</span>
-            </div>
-          </div>
-
-          <Textarea label="Notitie" rows={2} value={form.notes} onChange={e => update('notes', e.target.value)} placeholder="Optioneel..." />
-
-          {/* Bijlage */}
-          <div>
-            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--ink-2)' }}>Bijlage (PDF / bestand)</label>
-            <input ref={attachInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={async (e) => {
-              const f = e.target.files?.[0]; if (!f) return;
-              setAttachUploading(true);
-              try { const url = await readFileAsDataUrl(f); setForm(prev => ({ ...prev, attachment: url, attachmentName: f.name })); }
-              finally { setAttachUploading(false); }
-            }} />
-            {form.attachment ? (
-              <div className="flex items-center gap-2 px-3 py-2.5 rounded-md text-sm" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                <Paperclip size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-                <span className="flex-1 truncate text-xs" style={{ color: 'var(--ink)' }}>{form.attachmentName || 'Bijlage'}</span>
-                <a href={form.attachment} download={form.attachmentName || 'bijlage'} className="flex" style={{ color: 'var(--muted)' }}><Download size={13} /></a>
-                <button onClick={() => setForm(f => ({ ...f, attachment: null, attachmentName: null }))} className="flex" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 0 }}><X size={13} /></button>
-              </div>
-            ) : (
-              <Button size="sm" variant="secondary" onClick={() => attachInputRef.current?.click()} disabled={attachUploading}>
-                <Paperclip size={13} /> {attachUploading ? 'Uploaden...' : 'Bestand toevoegen'}
-              </Button>
-            )}
-          </div>
-
-          {form.source && form.source !== 'manual' && (
-            <div className="text-xs flex items-center gap-1.5" style={{ color: 'var(--muted)' }}>
-              <Inbox size={11} />
-              <span>Bron: {form.source === 'email' ? 'Gmail (auto)' : form.source === 'camera' ? 'Camera' : 'Upload'}</span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="px-6 py-4 border-t flex justify-between gap-2" style={{ borderColor: 'var(--border)' }}>
-        <Button variant="danger" size="sm" onClick={() => onDelete(expense.id)}><Trash2 size={14} /> Verwijderen</Button>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={onClose}>Annuleren</Button>
-          <Button onClick={() => isValid && onSave(form)} disabled={!isValid}>
-            <Check size={14} /> Verwerken & boeken
-          </Button>
         </div>
       </div>
     </Modal>
