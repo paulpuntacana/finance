@@ -14,6 +14,7 @@ import {
 import { useAuth, useCloudStorage, useSyncStatus } from './src/AuthProvider';
 import { computeInvoice, lineNet, todayISO, isRevenueInvoice, invoiceDate, invoiceOpenAmount, expenseNet, expenseVatTreatment, expenseReverseVat, buildVatReturn, buildProfitLoss, monthlySeries, suggestVatTreatment, VAT_TREATMENTS, yearOf } from './src/finance';
 import { supabase } from './src/supabase';
+import { roundMoney, invoiceEurRate, deriveInvoiceVatTreatment, isZeroRatedTreatment } from './src/finance';
 import { useLang } from './src/LangContext';
 import OrgUsersView from './src/OrgUsersView';
 import QuotesView from './src/QuotesView';
@@ -1279,6 +1280,12 @@ const INVOICE_TRANSLATIONS = {
     companyDetails: 'Bedrijfsgegevens', regNumber: (jur) => jur === 'NL' ? 'KvK' : 'RNC',
     signature: 'Handtekening', scanQr: 'Scan met uw bank-app\nom direct te betalen',
     tradingNameOf: (a, b) => `${a} is een handelsnaam van ${b}.`, attn: 'T.a.v.',
+    creditNote: 'Creditnota', creditNoteNumber: 'Creditnotanummer',
+    creditNoteFor: (nr, date) => `Creditnota voor factuur ${nr}${date ? ` d.d. ${date}` : ''}`,
+    deliveryDate: 'Leverdatum', period: 'Periode',
+    reverseCharge: 'BTW verlegd — art. 196 BTW-richtlijn / VAT reverse charged',
+    outsideEu: 'Niet belast in Nederland (dienst buiten de EU)',
+    clientVatId: 'BTW-id afnemer', vatInEur: (tax) => `${tax} in EUR`, exchangeRate: 'Koers',
   },
   en: {
     invoice: 'Invoice', invoiceTo: 'Invoice to', invoiceDetails: 'Invoice details',
@@ -1294,6 +1301,12 @@ const INVOICE_TRANSLATIONS = {
     companyDetails: 'Company details', regNumber: (jur) => jur === 'DR' ? 'RNC' : 'Chamber of Commerce',
     signature: 'Signature', scanQr: 'Scan with your banking app\nto pay directly',
     tradingNameOf: (a, b) => `${a} is a trading name of ${b}.`, attn: 'Attn:',
+    creditNote: 'Credit note', creditNoteNumber: 'Credit note number',
+    creditNoteFor: (nr, date) => `Credit note for invoice ${nr}${date ? ` dated ${date}` : ''}`,
+    deliveryDate: 'Delivery date', period: 'Period',
+    reverseCharge: 'VAT reverse charged — Art. 196 VAT Directive 2006/112/EC',
+    outsideEu: 'Not subject to Dutch VAT (service outside the EU)',
+    clientVatId: 'Customer VAT ID', vatInEur: (tax) => `${tax} in EUR`, exchangeRate: 'Rate',
   },
   es: {
     invoice: 'Factura', invoiceTo: 'Factura a', invoiceDetails: 'Detalles de factura',
@@ -1309,6 +1322,12 @@ const INVOICE_TRANSLATIONS = {
     companyDetails: 'Datos de la empresa', regNumber: (jur) => jur === 'DR' ? 'RNC' : 'Registro Mercantil',
     signature: 'Firma', scanQr: 'Escanee con su app bancaria\npara pagar directamente',
     tradingNameOf: (a, b) => `${a} es nombre comercial de ${b}.`, attn: 'A/A:',
+    creditNote: 'Factura rectificativa', creditNoteNumber: 'Número de rectificativa',
+    creditNoteFor: (nr, date) => `Rectificativa de la factura ${nr}${date ? ` de fecha ${date}` : ''}`,
+    deliveryDate: 'Fecha de entrega', period: 'Periodo',
+    reverseCharge: 'Inversión del sujeto pasivo — art. 196 Directiva IVA / VAT reverse charged',
+    outsideEu: 'No sujeto a IVA neerlandés (servicio fuera de la UE)',
+    clientVatId: 'NIF-IVA cliente', vatInEur: (tax) => `${tax} en EUR`, exchangeRate: 'Tipo de cambio',
   },
   de: {
     invoice: 'Rechnung', invoiceTo: 'Rechnung an', invoiceDetails: 'Rechnungsdetails',
@@ -1324,9 +1343,32 @@ const INVOICE_TRANSLATIONS = {
     companyDetails: 'Firmendaten', regNumber: () => 'Handelsregister',
     signature: 'Unterschrift', scanQr: 'Scannen Sie mit Ihrer Banking-App\num direkt zu bezahlen',
     tradingNameOf: (a, b) => `${a} ist ein Handelsname von ${b}.`, attn: 'z.H.',
+    creditNote: 'Gutschrift', creditNoteNumber: 'Gutschriftnummer',
+    creditNoteFor: (nr, date) => `Gutschrift zur Rechnung ${nr}${date ? ` vom ${date}` : ''}`,
+    deliveryDate: 'Leistungsdatum', period: 'Leistungszeitraum',
+    reverseCharge: 'Steuerschuldnerschaft des Leistungsempfängers — Art. 196 MwSt-Richtlinie / VAT reverse charged',
+    outsideEu: 'Nicht in den Niederlanden steuerbar (Leistung außerhalb der EU)',
+    clientVatId: 'USt-IdNr. Kunde', vatInEur: (tax) => `${tax} in EUR`, exchangeRate: 'Kurs',
   },
 };
-const getInvoiceT = (lang) => INVOICE_TRANSLATIONS[lang] || INVOICE_TRANSLATIONS.nl;
+// Met `invoice` erbij krijgt een creditnota automatisch de titel "Creditnota" i.p.v. "Factuur".
+const getInvoiceT = (lang, invoice) => {
+  const base = INVOICE_TRANSLATIONS[lang] || INVOICE_TRANSLATIONS.nl;
+  if (!isCreditNote(invoice)) return base;
+  return { ...base, invoice: base.creditNote, invoiceNumber: base.creditNoteNumber };
+};
+const isCreditNote = (inv) => !!inv && (inv.status === 'credit_note' || !!inv.creditNoteFor);
+// Nummer zoals de klant het kreeg (intern achtervoegsel bij oude dubbele nummers)
+const displayInvoiceNumber = (inv) => inv?.numberAsSent || inv?.number || '';
+// BTW-behandeling van deze factuur: opgeslagen waarde, anders afgeleid uit de klant
+const invoiceVatTreatment = (invoice, client) => invoice?.vatTreatment || deriveInvoiceVatTreatment(client);
+const escapeHtml = (str) => String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Bedrag-invoer: accepteert komma als decimaalteken ("12,50" → 12.5)
+const parseDecimal = (v) => {
+  if (typeof v === 'number') return v;
+  const n = Number(String(v ?? '').replace(/\s/g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+};
 
 // ============================================================================
 // ENTITY TYPES (Bedrijfsvormen)
@@ -2978,17 +3020,48 @@ const InvoicesView = ({ intent, invoices, setInvoices, allInvoices, clients, set
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm('Factuur verwijderen? Dit kan niet ongedaan worden gemaakt.')) {
-      setInvoices(prev => prev.filter(i => i.id !== id));
-      setView({ mode: 'list' });
-    }
+    const inv = (allInvoices || invoices).find(i => i.id === id);
+    const isSent = inv && inv.status !== 'draft';
+    const msg = !isSent
+      ? 'Concept verwijderen? Dit kan niet ongedaan worden gemaakt.'
+      : `Let op: ${isCreditNote(inv) ? 'creditnota' : 'factuur'} ${displayInvoiceNumber(inv)} is al verstuurd.\n\n` +
+        'Een verstuurde factuur mag je wettelijk niet verwijderen: je bent verplicht hem 7 jaar te bewaren en de nummerreeks moet doorlopend blijven. ' +
+        'Verwijderen haalt hem ook uit je omzet en BTW-aangifte.\n\n' +
+        (isCreditNote(inv) ? '' : 'Klopt de factuur niet? Maak dan een creditnota (knop "Creditnota") en stuur zo nodig een nieuwe factuur.\n\n') +
+        'Alleen verwijderen als dit een fout of dubbele invoer is die nooit naar de klant is gegaan. Toch verwijderen?';
+    if (!window.confirm(msg)) return;
+    setInvoices(prev => {
+      let next = prev.filter(i => i.id !== id);
+      // Creditnota weg → bijbehorend gecrediteerd bedrag op de originele factuur terugdraaien
+      if (inv?.creditNoteFor) {
+        const amount = Math.abs(computeInvoice(inv.items).total);
+        next = next.map(i => i.id === inv.creditNoteFor
+          ? { ...i, creditedAmount: Math.max(0, roundMoney(Number(i.creditedAmount || 0) - amount)) || undefined }
+          : i);
+      }
+      return next;
+    });
+    setView({ mode: 'list' });
   };
 
   // Werkt zowel de lijst als de open detailweergave direct bij (voorheen bleef de detailweergave
   // op de oude status staan tot je terugging naar de lijst — "er gebeurt niets").
   const handleUpdateInvoice = async (id, fields) => {
+    const existing = (allInvoices || invoices).find(i => i.id === id);
+    // Nummer of klant wijzigen van een verstuurde factuur: wettelijk is dat een ander document
+    if (existing && existing.status !== 'draft') {
+      const changes = [];
+      if (fields.number !== undefined && existing.number && fields.number !== existing.number) changes.push(`het nummer (${existing.number} → ${fields.number})`);
+      if (fields.clientId !== undefined && existing.clientId && fields.clientId !== existing.clientId) changes.push('de klant');
+      if (changes.length && !window.confirm(
+        `Je wijzigt ${changes.join(' en ')} van een verstuurde factuur.\n\n` +
+        'De klant heeft de factuur al met de oude gegevens ontvangen. Wettelijk mag je een verstuurde factuur niet aanpassen; ' +
+        'de juiste weg is een creditnota op deze factuur en daarna een nieuwe factuur met de juiste gegevens.\n\n' +
+        'Alleen doorgaan om een invoerfout in je administratie te herstellen die niet naar de klant is gegaan. Doorgaan?'
+      )) return;
+    }
     if (fields.number !== undefined) {
-      const current = (allInvoices || invoices).find(i => i.id === id);
+      const current = existing;
       if (isDuplicateInvoiceNumber(allInvoices || invoices, fields.number, current?.entityId, id)) {
         window.alert(`Factuurnummer ${fields.number} bestaat al. Kies een ander nummer.`);
         return;
@@ -3002,11 +3075,23 @@ const InvoicesView = ({ intent, invoices, setInvoices, allInvoices, clients, set
   const handleStatusChange = async (id, newStatus, extra = {}) => handleUpdateInvoice(id, { status: newStatus, ...extra });
 
   const handleDuplicate = (inv) => {
+    const dupEntity = (entities || []).find(e => e.id === inv.entityId) || activeEntity;
+    const terms = dupEntity?.paymentTerms || settings.invoice?.paymentTerms || 14;
     const newInv = {
       ...inv,
       id: undefined,
       number: undefined,
       invoiceNumber: undefined,
+      numberAsSent: undefined,
+      creditedAmount: undefined,
+      creditNoteForNumber: undefined,
+      creditNoteForDate: undefined,
+      deliveryDate: undefined,
+      periodFrom: undefined,
+      periodTo: undefined,
+      exchangeRate: undefined,
+      // Een kopie van een creditnota wordt een gewone factuur met positieve bedragen
+      items: inv.status === 'credit_note' ? (inv.items || []).map(it => ({ ...it, price: Math.abs(Number(it.price) || 0) })) : inv.items,
       status: 'draft',
       sentAt: null,
       paidAt: null,
@@ -3017,34 +3102,53 @@ const InvoicesView = ({ intent, invoices, setInvoices, allInvoices, clients, set
       createdAt: undefined,
       remindersSent: [],
       issueDate: todayISO(),
-      dueDate: addDays(todayISO(), settings.invoice.paymentTerms),
+      dueDate: addDays(todayISO(), terms),
     };
     setView({ mode: 'edit', invoice: newInv });
   };
 
+  // Creditnota: een nieuw, negatief document dat naar de originele factuur verwijst. De originele
+  // factuur blijft ongewijzigd bestaan (status blijft staan); alleen `creditedAmount` wordt opgehoogd,
+  // zodat invoiceOpenAmount() het gecrediteerde deel niet meer als openstaand telt.
   const handleCreateCreditNote = async (origInv) => {
     const allInv = allInvoices || invoices;
-    if (allInv.some(i => i.creditNoteFor === origInv.id) && !window.confirm(`Er bestaat al een creditnota voor ${origInv.number}. Nog een maken?`)) return;
+    const origNr = displayInvoiceNumber(origInv);
+    if (allInv.some(i => i.creditNoteFor === origInv.id) && !window.confirm(`Er bestaat al een creditnota voor ${origNr}. Nog een maken?`)) return;
     const cnBase = `CN-${origInv.number}`;
     let cnNumber = cnBase;
     for (let n = 2; allInv.some(i => i.number === cnNumber); n++) cnNumber = `${cnBase}-${n}`;
+    const items = (origInv.items || []).map(it => ({ ...it, price: -Math.abs(Number(it.price)) }));
     const creditNote = {
       ...origInv,
       id: generateId('inv'),
       number: cnNumber,
       invoiceNumber: cnNumber,
+      numberAsSent: undefined,
       status: 'credit_note',
       creditNoteFor: origInv.id,
+      creditNoteForNumber: origNr,
+      creditNoteForDate: origInv.issueDate || null,
+      creditedAmount: undefined,
       issueDate: todayISO(),
       dueDate: todayISO(),
       sentAt: null,
       paidAt: null,
+      paidAmount: 0,
       remindersSent: [],
       payments: [],
-      items: origInv.items.map(it => ({ ...it, price: -Math.abs(Number(it.price)) })),
-      notes: `Creditnota voor factuur ${origInv.number}`,
+      signToken: null, signedAt: null, signedByName: null, signedByIp: null,
+      qrEnabled: undefined,
+      createdAt: new Date().toISOString(),
+      items,
+      // Verwijzing naar de originele factuur wordt door de template zelf geprint (creditNoteForNumber);
+      // de opmerkingen blijven vrij voor de gebruiker.
+      notes: '',
     };
-    setInvoices(prev => [...prev, creditNote]);
+    const creditAmount = Math.abs(computeInvoice(items).total);
+    setInvoices(prev => [
+      ...prev.map(i => i.id === origInv.id ? { ...i, creditedAmount: roundMoney(Number(i.creditedAmount || 0) + creditAmount) } : i),
+      creditNote,
+    ]);
     setView({ mode: 'view', invoice: creditNote });
   };
 
@@ -3053,13 +3157,15 @@ const InvoicesView = ({ intent, invoices, setInvoices, allInvoices, clients, set
     const payments = [...(inv.payments || []), payment];
     const totals = computeInvoice(inv.items);
     const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-    const isFullyPaid = totalPaid >= totals.total - 0.005;
+    // Gecrediteerd deel hoeft niet meer betaald te worden
+    const isFullyPaid = totalPaid >= totals.total - Number(inv.creditedAmount || 0) - 0.005;
     const updated = {
       ...inv,
       payments,
       status: isFullyPaid ? 'paid' : 'partial',
       paidAmount: totalPaid,
-      paidAt: isFullyPaid ? new Date().toISOString() : null,
+      // Betaaldatum = datum van de (laatste) betaling, niet het moment van invoeren
+      paidAt: isFullyPaid ? `${payment.date || todayISO()}T12:00:00.000Z` : null,
     };
     setInvoices(prev => prev.map(i => i.id === inv.id ? updated : i));
     setView({ mode: 'view', invoice: updated });
@@ -3317,20 +3423,76 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
   const defaultBtw = jurisdiction.salesTax.standard;
   const taxName = jurisdiction.salesTax.name; // 'BTW', 'VAT', 'ITBIS', etc.
   const taxRates = jurisdiction.salesTax.rates; // e.g. [0,9,21]
+  const isNL = jurisdiction.code === 'NL';
   const [form, setForm] = useState({
     clientId: '', issueDate: todayISO(), dueDate: addDays(todayISO(), paymentTerms),
     items: [{ description: '', quantity: 1, price: 0, btwRate: defaultBtw, discount: null }],
     notes: '', reference: '',
     currency: settings.invoice?.currency || 'EUR',
     language: settings.invoice?.language || 'nl',
+    vatTreatment: deriveInvoiceVatTreatment(clients.find(c => c.id === invoice?.clientId)),
     ...invoice,
   });
+  const [deliveryMode, setDeliveryMode] = useState(invoice?.periodFrom || invoice?.periodTo ? 'period' : invoice?.deliveryDate ? 'date' : 'none');
+  const [rateLoading, setRateLoading] = useState(false);
+  const [rateError, setRateError] = useState('');
   const [addingClient, setAddingClient] = useState(false);
   const [aiLinesLoading, setAiLinesLoading] = useState(false);
   const [aiLinesError, setAiLinesError] = useState('');
   const aiLinesInputRef = useRef(null);
 
   const update = (key, val) => setForm({ ...form, [key]: val });
+  const zeroRated = isNL && isZeroRatedTreatment(form.vatTreatment);
+  const lineDefaultBtw = zeroRated ? 0 : defaultBtw;
+
+  // BTW-behandeling toepassen: verlegd / buiten EU → alle regels 0%; terug naar NL → standaardtarief
+  const applyTreatment = (treatment, f) => ({
+    ...f,
+    vatTreatment: treatment,
+    items: f.items.map(it => ({
+      ...it,
+      btwRate: isZeroRatedTreatment(treatment) ? 0 : (isZeroRatedTreatment(f.vatTreatment) ? defaultBtw : it.btwRate),
+    })),
+  });
+  const handleClientChange = (clientId, clientObj) => {
+    const c = clientObj || clients.find(x => x.id === clientId);
+    setForm(f => {
+      const next = { ...f, clientId };
+      return isNL && c ? applyTreatment(deriveInvoiceVatTreatment(c), next) : next;
+    });
+  };
+
+  // Koers op factuurdatum (EUR per 1 eenheid vreemde valuta). Voorinvullen, altijd aanpasbaar.
+  const prefillRate = async (cur) => {
+    if (!cur || cur === 'EUR') return;
+    setRateLoading(true);
+    setRateError('');
+    try {
+      let data;
+      try { data = await fetchExchangeRates('EUR'); }
+      catch (err) { if (settings.exchangeRates?.base === 'EUR' && settings.exchangeRates?.rates?.[cur]) data = settings.exchangeRates; else throw err; }
+      const perEur = Number(data?.rates?.[cur]);
+      if (!perEur) throw new Error('Geen koers gevonden');
+      setForm(f => (f.currency === cur ? { ...f, exchangeRate: +(1 / perEur).toFixed(6) } : f));
+    } catch (_) {
+      setRateError('Koers ophalen lukte niet — vul hem zelf in.');
+    } finally {
+      setRateLoading(false);
+    }
+  };
+  const handleCurrencyChange = (cur) => {
+    setForm(f => ({ ...f, currency: cur, exchangeRate: cur === 'EUR' ? undefined : f.exchangeRate }));
+    if (cur !== 'EUR') prefillRate(cur);
+  };
+  const setDelivery = (mode) => {
+    setDeliveryMode(mode);
+    setForm(f => ({
+      ...f,
+      deliveryDate: mode === 'date' ? (f.deliveryDate || f.issueDate) : undefined,
+      periodFrom: mode === 'period' ? f.periodFrom : undefined,
+      periodTo: mode === 'period' ? f.periodTo : undefined,
+    }));
+  };
   const updateItem = (idx, key, val) => {
     const items = [...form.items];
     items[idx] = { ...items[idx], [key]: val };
@@ -3346,7 +3508,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
     items[idx] = { ...items[idx], discount: items[idx].discount ? null : { type: 'percent', value: 0, name: '' } };
     setForm({ ...form, items });
   };
-  const addItem = () => setForm({ ...form, items: [...form.items, { description: '', quantity: 1, price: 0, btwRate: defaultBtw, discount: null }] });
+  const addItem = () => setForm({ ...form, items: [...form.items, { description: '', quantity: 1, price: 0, btwRate: lineDefaultBtw, discount: null }] });
   const removeItem = (idx) => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
 
   const handleAiFillLines = async (e) => {
@@ -3367,7 +3529,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
         description: it.description || '',
         quantity: Number(it.quantity) || 1,
         price: Number(it.price) || 0,
-        btwRate: defaultBtw,
+        btwRate: lineDefaultBtw,
         discount: null,
       }));
       setForm(f => {
@@ -3383,11 +3545,32 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
     }
   };
 
-  const totals = computeInvoice(form.items);
+  // Aantallen/prijzen mogen als tekst met komma worden ingevoerd; rekenen gebeurt op de genormaliseerde regels
+  const normItems = form.items.map(it => ({ ...it, quantity: parseDecimal(it.quantity), price: parseDecimal(it.price) }));
+  const totals = computeInvoice(normItems);
+  const selectedClient = clients.find(c => c.id === form.clientId);
+  const isForeign = (form.currency || 'EUR') !== 'EUR';
+  const rateNum = parseDecimal(form.exchangeRate);
+  const allZeroRate = Object.keys(totals.btwByRate).length > 0 && Object.keys(totals.btwByRate).every(r => Number(r) === 0);
 
   const isValid = form.clientId && form.items.length > 0 && form.items.every(i => i.description) && form.issueDate;
+  const handleSubmit = () => {
+    if (!isValid) return;
+    if (isForeign && !(rateNum > 0) && !window.confirm(`Er is geen koers ingevuld voor ${form.currency}. Zonder koers telt deze factuur 1-op-1 mee in je BTW-aangifte. Toch opslaan?`)) return;
+    onSave({
+      ...form,
+      items: normItems,
+      vatTreatment: isNL ? form.vatTreatment : undefined,
+      exchangeRate: isForeign && rateNum > 0 ? rateNum : undefined,
+      deliveryDate: deliveryMode === 'date' ? form.deliveryDate || undefined : undefined,
+      periodFrom: deliveryMode === 'period' ? form.periodFrom || undefined : undefined,
+      periodTo: deliveryMode === 'period' ? form.periodTo || undefined : undefined,
+    });
+  };
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 invoice-editor">
+      {/* iOS zoomt in op velden < 16px — op mobiel daarom 16px */}
+      <style>{`@media (max-width: 767px) { .invoice-editor input, .invoice-editor select, .invoice-editor textarea { font-size: 16px !important; } }`}</style>
       <div className="flex items-center justify-between gap-4">
         <button onClick={onCancel} className="flex items-center gap-2 text-sm hover:underline" style={{ color: 'var(--ink-2)' }}>
           <ArrowLeft size={14} /> {t('editor.back')}
@@ -3408,7 +3591,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
           onSave={(data) => {
             const newClient = { ...data, id: generateId('cli'), createdAt: new Date().toISOString() };
             if (setClients) setClients(prev => [...prev, newClient]);
-            update('clientId', newClient.id);
+            handleClientChange(newClient.id, newClient);
             setAddingClient(false);
           }}
           onClose={() => setAddingClient(false)}
@@ -3428,7 +3611,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
                 {t('editor.noClients')}
               </div>
             ) : (
-              <select value={form.clientId} onChange={e => update('clientId', e.target.value)}
+              <select value={form.clientId} onChange={e => handleClientChange(e.target.value)}
                 className="w-full px-3 py-2 text-sm rounded border"
                 style={{ background: 'var(--bg)', color: 'var(--text)', borderColor: 'var(--border)' }}>
                 <option value="">{t('editor.selectClient')}</option>
@@ -3438,7 +3621,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
           </div>
           <div>
             <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted)' }}>{t('editor.currency')}</label>
-            <select value={form.currency || 'EUR'} onChange={e => update('currency', e.target.value)}
+            <select value={form.currency || 'EUR'} onChange={e => handleCurrencyChange(e.target.value)}
               className="w-full px-3 py-2 text-sm rounded border"
               style={{ background: 'var(--bg)', color: 'var(--text)', borderColor: 'var(--border)' }}>
               {Object.entries(CURRENCIES).map(([code, cfg]) => (
@@ -3446,6 +3629,22 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
               ))}
             </select>
           </div>
+          {isForeign && (
+            <div>
+              <Input
+                label={`Koers op factuurdatum (EUR per 1 ${form.currency})`}
+                type="text" inputMode="decimal"
+                value={form.exchangeRate ?? ''}
+                onChange={e => update('exchangeRate', e.target.value)}
+                placeholder="bv. 0,92"
+                error={rateError || undefined}
+                hint={rateLoading ? 'Koers ophalen…' : rateNum > 0 ? `BTW in EUR: ${fmtCurrency(roundMoney(totals.btwTotal * rateNum), 'EUR')}` : 'Nodig voor je BTW-aangifte (bedragen in EUR).'}
+              />
+              <button type="button" onClick={() => prefillRate(form.currency)} className="text-xs mt-1 hover:underline" style={{ color: 'var(--accent)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                Actuele koers ophalen
+              </button>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted)' }}>{t('editor.invoiceLang')}</label>
             <select value={form.language || 'nl'} onChange={e => update('language', e.target.value)}
@@ -3470,11 +3669,52 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
           )}
           <Input label={`${t('editor.issueDate')} *`} type="date" value={form.issueDate} onChange={e => {
             update('issueDate', e.target.value);
-            if (!form.dueDate || daysBetween(form.issueDate, form.dueDate) === settings.invoice.paymentTerms) {
-              setForm(f => ({ ...f, issueDate: e.target.value, dueDate: addDays(e.target.value, settings.invoice.paymentTerms) }));
+            if (!form.dueDate || daysBetween(form.issueDate, form.dueDate) === paymentTerms) {
+              setForm(f => ({ ...f, issueDate: e.target.value, dueDate: addDays(e.target.value, paymentTerms) }));
             }
           }} />
           <Input label={`${t('editor.dueDate')} *`} type="date" value={form.dueDate} onChange={e => update('dueDate', e.target.value)} />
+          <div>
+            <Select label="Levering" value={deliveryMode} onChange={e => setDelivery(e.target.value)}>
+              <option value="none">Zelfde als factuurdatum</option>
+              <option value="date">Andere leverdatum</option>
+              <option value="period">Periode (bv. maand)</option>
+            </Select>
+          </div>
+          {deliveryMode === 'date' && (
+            <Input label="Leverdatum" type="date" value={form.deliveryDate || ''} onChange={e => update('deliveryDate', e.target.value)} />
+          )}
+          {deliveryMode === 'period' && (
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Periode van" type="date" value={form.periodFrom || ''} onChange={e => update('periodFrom', e.target.value)} />
+              <Input label="t/m" type="date" value={form.periodTo || ''} onChange={e => update('periodTo', e.target.value)} />
+            </div>
+          )}
+          {isNL && (
+            <div>
+              <Select label="BTW-behandeling" value={form.vatTreatment === 'eu_no_vatid' ? 'domestic' : (form.vatTreatment || 'domestic')}
+                onChange={e => setForm(f => applyTreatment(e.target.value, f))}>
+                <option value="domestic">Nederlandse BTW</option>
+                <option value="reverse_eu">BTW verlegd (ondernemer in EU)</option>
+                <option value="outside_eu">Buiten de EU (niet belast in NL)</option>
+              </Select>
+            </div>
+          )}
+          {isNL && form.clientId && (form.vatTreatment === 'reverse_eu' || form.vatTreatment === 'outside_eu' || form.vatTreatment === 'eu_no_vatid') && (
+            <div className="md:col-span-3 rounded-[9px] px-3 py-2.5 text-[12.5px] flex items-start gap-2"
+              style={form.vatTreatment === 'eu_no_vatid' || (form.vatTreatment === 'reverse_eu' && !selectedClient?.btw)
+                ? { background: 'var(--warning-soft)', color: 'var(--warning)' }
+                : { background: 'var(--info-soft)', color: 'var(--info)' }}>
+              <AlertCircle size={14} className="mt-0.5 shrink-0" />
+              <div>
+                {form.vatTreatment === 'reverse_eu' && (selectedClient?.btw
+                  ? <>BTW verlegd: klant is ondernemer in {selectedClient.country} ({selectedClient.btw}). Alle regels staan op 0% en de factuur vermeldt "BTW verlegd". Telt mee in rubriek 3b en je ICP-opgave.</>
+                  : <>BTW verlegd gekozen, maar deze klant heeft geen BTW-id. Vul het BTW-id in bij de klant — zonder geldig BTW-id mag je de BTW niet verleggen.</>)}
+                {form.vatTreatment === 'outside_eu' && <>Klant buiten de EU: alle regels staan op 0% en de factuur vermeldt "Niet belast in Nederland". Telt mee in rubriek 1e.</>}
+                {form.vatTreatment === 'eu_no_vatid' && <>Klant in {selectedClient?.country} zonder BTW-id: er wordt Nederlandse BTW gerekend (particulier). Is het een bedrijf? Vul dan het BTW-id in bij de klant om de BTW te verleggen.</>}
+              </div>
+            </div>
+          )}
           <div className="flex items-end">
             <div className="text-xs" style={{ color: 'var(--muted)' }}>
               {t('editor.paymentTerms')}: <strong className="num" style={{ color: 'var(--ink)' }}>{form.dueDate && form.issueDate ? daysBetween(form.issueDate, form.dueDate) : 0}</strong> {t('editor.paymentTermsDays')}
@@ -3520,7 +3760,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
               </thead>
               <tbody className="divide-y" style={{ borderColor: 'var(--border)' }}>
                 {form.items.map((item, idx) => {
-                  const line = computeLine(item);
+                  const line = computeLine(normItems[idx]);
                   const hasDiscount = !!item.discount;
                   return (
                     <React.Fragment key={idx}>
@@ -3536,8 +3776,8 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
                         </td>
                         <td className="py-2 pr-2">
                           <input
-                            type="number"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
                             value={item.quantity}
                             onChange={e => updateItem(idx, 'quantity', e.target.value)}
                             className="w-full px-2 py-1.5 text-sm text-right bg-transparent rounded border num"
@@ -3546,8 +3786,8 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
                         </td>
                         <td className="py-2 pr-2">
                           <input
-                            type="number"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
                             value={item.price}
                             onChange={e => updateItem(idx, 'price', e.target.value)}
                             className="w-full px-2 py-1.5 text-sm text-right bg-transparent rounded border num"
@@ -3612,7 +3852,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
                                 type="number"
                                 step="0.01"
                                 value={item.discount.value}
-                                onChange={e => updateItemDiscount(idx, 'value', Number(e.target.value))}
+                                onChange={e => updateItemDiscount(idx, 'value', parseDecimal(e.target.value))}
                                 className="w-20 px-2 py-1 bg-white rounded border text-xs text-right num"
                                 style={{ borderColor: 'var(--border)' }}
                               />
@@ -3631,7 +3871,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
           {/* Mobiele kaartweergave per lijnregel — verborgen op desktop */}
           <div className="md:hidden space-y-3">
             {form.items.map((item, idx) => {
-              const line = computeLine(item);
+              const line = computeLine(normItems[idx]);
               const hasDiscount = !!item.discount;
               return (
                 <div key={idx} className="rounded-lg border p-3 space-y-2" style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}>
@@ -3653,7 +3893,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
                     <div>
                       <div className="text-[10px] font-medium mb-1" style={{ color: 'var(--muted)' }}>{t('editor.colQty')}</div>
                       <input
-                        type="number" step="0.01" value={item.quantity}
+                        type="text" inputMode="decimal" value={item.quantity}
                         onChange={e => updateItem(idx, 'quantity', e.target.value)}
                         className="w-full px-2 py-1.5 text-sm text-right bg-transparent rounded border num"
                         style={{ borderColor: 'var(--border)' }}
@@ -3662,7 +3902,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
                     <div>
                       <div className="text-[10px] font-medium mb-1" style={{ color: 'var(--muted)' }}>{t('editor.colPrice')}</div>
                       <input
-                        type="number" step="0.01" value={item.price}
+                        type="text" inputMode="decimal" value={item.price}
                         onChange={e => updateItem(idx, 'price', e.target.value)}
                         className="w-full px-2 py-1.5 text-sm text-right bg-transparent rounded border num"
                         style={{ borderColor: 'var(--border)' }}
@@ -3715,7 +3955,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
                         </select>
                         <input
                           type="number" step="0.01" value={item.discount.value}
-                          onChange={e => updateItemDiscount(idx, 'value', Number(e.target.value))}
+                          onChange={e => updateItemDiscount(idx, 'value', parseDecimal(e.target.value))}
                           className="w-20 px-2 py-1 rounded border text-xs text-right num"
                           style={{ borderColor: 'var(--border)' }}
                         />
@@ -3750,9 +3990,9 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
               <span style={{ color: 'var(--muted)' }}>{t('editor.subtotal')}</span>
               <span className="num font-medium">{fmtCurrency(totals.subtotal, form.currency)}</span>
             </div>
-            {Object.entries(totals.btwByRate).map(([rate, amt]) => Number(rate) > 0 && (
+            {Object.entries(totals.btwByRate).map(([rate, amt]) => (Number(rate) > 0 || allZeroRate) && (
               <div key={rate} className="flex justify-between py-1.5">
-                <span style={{ color: 'var(--muted)' }}>{taxName} {rate}%</span>
+                <span style={{ color: 'var(--muted)' }}>{taxName} {rate}%{Number(rate) === 0 && zeroRated ? (form.vatTreatment === 'reverse_eu' ? ' (verlegd)' : ' (niet belast in NL)') : ''}</span>
                 <span className="num font-medium">{fmtCurrency(amt, form.currency)}</span>
               </div>
             ))}
@@ -3766,7 +4006,7 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
 
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onCancel}>{t('editor.cancel')}</Button>
-        <Button onClick={() => isValid && onSave(form)} disabled={!isValid}>
+        <Button onClick={handleSubmit} disabled={!isValid}>
           <Save size={14} /> {t('editor.save')}
         </Button>
       </div>
@@ -3777,18 +4017,32 @@ const InvoiceEditor = ({ invoice, clients, setClients, settings, activeEntity, n
 // ============================================================================
 // INVOICE DETAIL VIEW (with PDF preview)
 // ============================================================================
+// Papierkleuren voor de factuur-preview: de templates gebruiken var(--ink)/var(--muted)/var(--border),
+// die in de app (dark mode) licht zijn. Op de witte "papier"-kaart zetten we ze vast op printkleuren.
+const PAPER_VARS = {
+  '--text': '#1a1a1a', '--text-2': '#4a4a4a', '--text-3': '#888888',
+  '--ink': '#1a1a1a', '--ink-2': '#4a4a4a', '--muted': '#888888',
+  '--surface': '#ffffff', '--surface-2': '#f9fafb', '--surface-3': '#f3f4f6',
+  '--border': '#e5e7eb', '--border-2': '#d1d5db', '--border-3': '#9ca3af',
+  background: '#fff', color: '#1a1a1a',
+};
+
 const InvoiceDetail = ({ invoice, clients, settings, activeEntity, entities, onClose, onEdit, onDelete, onStatusChange, onDuplicate, onSendReminder, onCreateCreditNote, onRegisterPayment, onUpdateInvoice }) => {
   const { t } = useLang();
   const [showSendModal, setShowSendModal] = useState(false);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentModal, setPaymentModal] = useState(null); // null | 'partial' | 'full'
   const [changingClient, setChangingClient] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const client = clients.find(c => c.id === invoice.clientId);
   const totals = computeInvoice(invoice.items);
+  const creditNote = isCreditNote(invoice);
+  const shownNumber = displayInvoiceNumber(invoice);
 
   // Partial payment state
   const payments = invoice.payments || [];
   const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-  const remaining = Math.max(0, totals.total - totalPaid);
+  const credited = Number(invoice.creditedAmount || 0);
+  const remaining = Math.max(0, roundMoney(totals.total - totalPaid - credited));
   const status = computeInvoiceStatus(invoice);
   // Pick the entity this invoice belongs to (or fall back to active)
   const invoiceEntity = entities?.find(e => e.id === invoice.entityId) || activeEntity;
@@ -3800,160 +4054,225 @@ const InvoiceDetail = ({ invoice, clients, settings, activeEntity, entities, onC
   const qrLegalEntity = (invoiceEntity?.type === 'label' && invoiceParentEntity) ? invoiceParentEntity : invoiceEntity;
   const qrMissingIban = !qrLegalEntity?.iban;
 
-  const handlePrint = async () => {
-    const el = document.querySelector('.invoice-printable')
-    if (!el) { window.print(); return }
+  // Preview schaalt mee met de schermbreedte (geen horizontaal scrollen op mobiel)
+  const previewWrapRef = useRef(null);
+  const previewInnerRef = useRef(null);
+  const [preview, setPreview] = useState({ scale: 1, height: null });
+  useEffect(() => {
+    const wrap = previewWrapRef.current;
+    const inner = previewInnerRef.current;
+    if (!wrap || !inner) return;
+    const measure = () => {
+      const scale = Math.min(1, wrap.clientWidth / 800);
+      setPreview({ scale, height: scale < 1 ? inner.offsetHeight * scale : null });
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, []);
 
-    // Clone and convert external images (QR, logo) to data URLs so they print reliably
-    const clone = el.cloneNode(true)
+  const handlePrint = async () => {
+    const el = document.querySelector('.invoice-printable');
+    if (!el) { window.print(); return; }
+
+    // Venster direct openen, vóór elke await — anders blokkeren Safari/iOS de pop-up
+    const w = window.open('', '_blank', 'width=900,height=1200');
+    if (!w) {
+      window.alert('Je browser blokkeert het printvenster. Sta pop-ups toe voor deze site en probeer het opnieuw.');
+      return;
+    }
+    const title = escapeHtml(`${creditNote ? 'Creditnota' : 'Factuur'} ${shownNumber}`.trim());
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title></head><body style="font-family:-apple-system,sans-serif;padding:40px;color:#888">PDF voorbereiden…</body></html>`);
+
+    // De gecompileerde CSS van de app meenemen (geen CDN nodig bij het printen)
+    let appCss = '';
+    for (const sheet of Array.from(document.styleSheets)) {
+      try { appCss += Array.from(sheet.cssRules).map(r => r.cssText).join('\n') + '\n'; }
+      catch (_) { /* cross-origin sheet (bv. Google Fonts) — fonts laden we hieronder zelf */ }
+    }
+
+    // Externe afbeeldingen (QR, logo) omzetten naar data-URLs zodat ze betrouwbaar printen
+    const clone = el.cloneNode(true);
     await Promise.all(Array.from(clone.querySelectorAll('img[src^="http"]')).map(img => new Promise(resolve => {
-      const proxy = new Image()
-      proxy.crossOrigin = 'anonymous'
+      const proxy = new Image();
+      proxy.crossOrigin = 'anonymous';
       proxy.onload = () => {
         try {
-          const c = document.createElement('canvas')
-          c.width = proxy.naturalWidth; c.height = proxy.naturalHeight
-          c.getContext('2d').drawImage(proxy, 0, 0)
-          img.src = c.toDataURL('image/png')
-        } catch (_) {}
-        resolve()
-      }
-      proxy.onerror = resolve
-      proxy.src = img.src
-    })))
+          const c = document.createElement('canvas');
+          c.width = proxy.naturalWidth; c.height = proxy.naturalHeight;
+          c.getContext('2d').drawImage(proxy, 0, 0);
+          img.src = c.toDataURL('image/png');
+        } catch (_) { /* tainted canvas: originele URL houden */ }
+        resolve();
+      };
+      proxy.onerror = resolve;
+      proxy.src = img.src;
+    })));
 
-    const w = window.open('', '_blank', 'width=900,height=1200')
-    w.document.write(`<!DOCTYPE html>
+    if (w.closed) return;
+    const fontsHref = 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600&display=swap';
+    const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Factuur ${invoice.number || ''}</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"><\/script>
+  <title>${title}</title>
+  <link id="print-fonts" rel="stylesheet" href="${fontsHref}">
+  <style>${appCss.replace(/<\/style/gi, '<\\/style')}</style>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
-    body { margin: 0; padding: 0; background: #fff; font-family: 'Inter', -apple-system, sans-serif; }
-    :root {
-      --text: #1a1a1a; --text-2: #4a4a4a; --text-3: #888;
-      --surface: #fff; --surface-2: #f9fafb; --surface-3: #f3f4f6;
-      --border: #e5e7eb; --border-2: #d1d5db; --border-3: #9ca3af;
-      --accent: #2563eb; --success: #059669; --danger: #dc2626; --warning: #d97706;
-      --muted: #888; --ink: #1a1a1a; --ink-2: #4a4a4a;
+    html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; color: #1a1a1a !important; }
+    body { font-family: 'Inter', -apple-system, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    @page { size: A4; margin: 12mm; }
+    html body .invoice-printable {
+      position: static !important; visibility: visible !important; padding: 0 !important; margin: 0 auto !important;
+      max-width: 800px !important; min-width: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
     }
-    @media print {
-      @page { size: A4 portrait; margin: 0; }
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      tr { page-break-inside: avoid; }
-    }
+    html body .invoice-printable * { visibility: visible !important; }
+    html body .invoice-printable > div { min-height: 0 !important; }
+    tr { page-break-inside: avoid; break-inside: avoid; }
+    .invoice-footer { break-inside: avoid; }
   </style>
 </head>
 <body>
-${clone.innerHTML}
-<script>
-  window.addEventListener('load', function() {
-    var imgs = Array.from(document.querySelectorAll('img')).filter(function(i) { return !i.complete; });
-    if (!imgs.length) { window.print(); return; }
-    var done = 0;
-    imgs.forEach(function(img) {
-      function fin() { if (++done >= imgs.length) window.print(); }
-      img.addEventListener('load', fin); img.addEventListener('error', fin);
-    });
-    setTimeout(function() { window.print(); }, 5000);
-  });
-<\/script>
+${clone.outerHTML}
 </body>
-</html>`)
-    w.document.close()
-    w.focus()
+</html>`;
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+
+    const wd = w.document;
+    const timeout = (ms) => new Promise(r => setTimeout(r, ms));
+    const fontsLink = wd.getElementById('print-fonts');
+    const linkLoaded = new Promise(r => {
+      if (!fontsLink || fontsLink.sheet) return r();
+      fontsLink.addEventListener('load', r); fontsLink.addEventListener('error', r);
+    });
+    const imagesLoaded = Promise.all(Array.from(wd.images).map(img => img.complete ? null : new Promise(r => {
+      img.addEventListener('load', r); img.addEventListener('error', r);
+    })));
+    await Promise.race([Promise.all([linkLoaded, imagesLoaded]), timeout(5000)]);
+    try { await Promise.race([wd.fonts?.ready, timeout(3000)]); } catch (_) { /* geen FontFaceSet */ }
+    if (w.closed) return;
+    w.focus();
+    w.print();
   };
+
+  // ── Acties ─────────────────────────────────────────────────────────────────
+  const isOpen = status === 'sent' || status === 'overdue' || status === 'partial';
+  const primary = [];
+  const more = [];
+  if (status === 'draft') primary.push({ key: 'edit', label: t('detail.edit'), icon: Edit3, variant: 'secondary', onClick: () => onEdit(invoice) });
+  primary.push({ key: 'pdf', label: t('detail.downloadPdf'), icon: Download, variant: 'secondary', onClick: handlePrint });
+  if (status === 'draft') primary.push({ key: 'send', label: 'Versturen', icon: Send, onClick: () => setShowSendModal(true) });
+  if (isOpen && onRegisterPayment) {
+    primary.push({ key: 'payment', label: t('detail.registerPayment'), icon: Wallet, variant: 'secondary', onClick: () => setPaymentModal('partial') });
+    primary.push({ key: 'paid', label: t('detail.markPaid'), icon: Check, onClick: () => setPaymentModal('full') });
+  }
+  if (isOpen) more.push({ key: 'resend', label: 'Opnieuw versturen', icon: Send, onClick: () => setShowSendModal(true) });
+  if (status === 'draft') more.push({
+    key: 'markSent', label: 'Markeer als verstuurd', icon: CheckCircle2,
+    onClick: () => { if (window.confirm(t('detail.markSentConfirm'))) onStatusChange(invoice.id, 'sent', { sentAt: new Date().toISOString() }); },
+  });
+  more.push({ key: 'dup', label: t('detail.duplicate'), icon: Copy, onClick: () => onDuplicate(invoice) });
+  if (!creditNote && status !== 'draft' && onCreateCreditNote) {
+    more.push({ key: 'cn', label: 'Creditnota maken', icon: FileCheck2, onClick: () => onCreateCreditNote(invoice) });
+  }
+  if (status === 'paid') more.push({ key: 'unpaid', label: t('detail.markUnpaid'), icon: X, onClick: () => onStatusChange(invoice.id, 'sent', { paidAt: null, paidAmount: 0, payments: [] }) });
+  if (onUpdateInvoice) {
+    more.push({
+      key: 'nr', label: invoice.number ? t('detail.changeNr') : t('detail.enterNr'), icon: Edit3,
+      tone: !invoice.number ? 'var(--warning)' : undefined,
+      onClick: () => {
+        const nr = window.prompt('Factuurnummer:', invoice.number || '');
+        if (nr !== null && nr.trim() !== '') onUpdateInvoice(invoice.id, { number: nr.trim() });
+      },
+    });
+    more.push({ key: 'client', label: t('detail.changeClient'), icon: Edit3, onClick: () => setChangingClient(true) });
+    if (!creditNote) more.push({
+      key: 'qr', icon: Hash,
+      label: invoice.qrEnabled === false ? t('detail.qrOff') : invoice.qrEnabled ? (qrMissingIban ? t('detail.qrNoIban') : t('detail.qrOn')) : t('detail.qrDefault'),
+      title: invoice.qrEnabled && qrMissingIban
+        ? 'QR aan maar geen IBAN ingesteld — ga naar Instellingen › Entiteiten en voeg IBAN toe'
+        : invoice.currency && invoice.currency !== 'EUR'
+          ? `QR uitgeschakeld — SEPA QR werkt alleen voor EUR (deze factuur is in ${invoice.currency})`
+          : invoice.qrEnabled === false ? 'QR code verborgen' : invoice.qrEnabled ? 'QR code aan — klik om te verwijderen' : 'QR code volgt template instelling',
+      tone: invoice.qrEnabled ? (qrMissingIban ? 'var(--warning)' : 'var(--success)') : invoice.qrEnabled === false ? 'var(--danger)' : undefined,
+      onClick: () => onUpdateInvoice(invoice.id, { qrEnabled: invoice.qrEnabled === false ? undefined : invoice.qrEnabled ? false : true }),
+    });
+  }
+  more.push({ key: 'delete', label: 'Verwijderen', icon: Trash2, danger: true, onClick: () => onDelete(invoice.id) });
 
   return (
     <div className="space-y-5">
-      <div className="no-print flex items-center justify-between gap-4 flex-wrap">
+      <div className="no-print flex items-center justify-between gap-3 flex-wrap">
         <button onClick={onClose} className="flex items-center gap-2 text-sm hover:underline" style={{ color: 'var(--ink-2)' }}>
           <ArrowLeft size={14} /> {t('detail.backToList')}
         </button>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onClick={() => onDuplicate(invoice)}><Copy size={13} /> {t('detail.duplicate')}</Button>
-          <Button size="sm" variant="secondary" onClick={handlePrint}><Download size={13} /> {t('detail.downloadPdf')}</Button>
-          {onUpdateInvoice && (
-            <Button size="sm" variant="secondary"
-              onClick={() => onUpdateInvoice(invoice.id, { qrEnabled: invoice.qrEnabled === false ? undefined : invoice.qrEnabled ? false : true })}
-              title={
-                invoice.qrEnabled && qrMissingIban
-                  ? 'QR aan maar geen IBAN ingesteld — ga naar Instellingen › Entiteiten en voeg IBAN toe'
-                  : invoice.currency && invoice.currency !== 'EUR'
-                    ? `QR uitgeschakeld — SEPA QR werkt alleen voor EUR (deze factuur is in ${invoice.currency})`
-                    : invoice.qrEnabled === false ? 'QR code verborgen' : invoice.qrEnabled ? 'QR code aan — klik om te verwijderen' : 'QR code volgt template instelling'
-              }
-              style={{ borderColor: invoice.qrEnabled ? (qrMissingIban ? 'var(--warning)' : 'var(--success)') : invoice.qrEnabled === false ? 'var(--danger)' : 'var(--border-2)', color: invoice.qrEnabled ? (qrMissingIban ? 'var(--warning)' : 'var(--success)') : invoice.qrEnabled === false ? 'var(--danger)' : 'var(--ink-2)' }}
-            >
-              <Hash size={13} /> {invoice.qrEnabled === false ? t('detail.qrOff') : invoice.qrEnabled ? (qrMissingIban ? t('detail.qrNoIban') : t('detail.qrOn')) : t('detail.qrDefault')}
-            </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {changingClient && onUpdateInvoice && (
+            <div className="flex items-center gap-1">
+              <select
+                defaultValue={invoice.clientId || ''}
+                autoFocus
+                aria-label="Klant"
+                className="h-8 px-2 text-[13px] rounded-[8px] border"
+                onChange={e => {
+                  onUpdateInvoice(invoice.id, { clientId: e.target.value || null });
+                  setChangingClient(false);
+                }}
+              >
+                <option value="">{t('detail.noClient')}</option>
+                {clients.map(c => <option key={c.id} value={c.id}>{c.name || c.company || c.email || c.id}</option>)}
+              </select>
+              <Button size="sm" variant="ghost" onClick={() => setChangingClient(false)} aria-label="Annuleren"><X size={13} /></Button>
+            </div>
           )}
-          {onUpdateInvoice && (
-            <Button size="sm" variant="secondary"
-              style={!invoice.number ? { borderColor: 'var(--warning)', color: 'var(--warning)' } : {}}
-              onClick={() => {
-                const nr = window.prompt('Factuurnummer:', invoice.number || '');
-                if (nr !== null && nr.trim() !== '') onUpdateInvoice(invoice.id, { number: nr.trim() });
-              }}
-            ><Edit3 size={13} /> {invoice.number ? t('detail.changeNr') : t('detail.enterNr')}</Button>
-          )}
-          {onUpdateInvoice && (
-            changingClient ? (
-              <div className="flex items-center gap-1">
-                <select
-                  defaultValue={invoice.clientId || ''}
-                  autoFocus
-                  style={{ fontSize: '13px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border-2)', background: 'var(--surface)', color: 'var(--ink)' }}
-                  onChange={e => {
-                    onUpdateInvoice(invoice.id, { clientId: e.target.value || null });
-                    setChangingClient(false);
-                  }}
-                >
-                  <option value="">{t('detail.noClient')}</option>
-                  {clients.map(c => <option key={c.id} value={c.id}>{c.name || c.company || c.email || c.id}</option>)}
-                </select>
-                <button onClick={() => setChangingClient(false)} style={{ fontSize: '13px', color: 'var(--muted)', padding: '2px 6px' }}>✕</button>
-              </div>
-            ) : (
-              <Button size="sm" variant="secondary" onClick={() => setChangingClient(true)}>
-                <Edit3 size={13} /> {t('detail.changeClient')}
+          {/* Secundaire acties: inline op desktop */}
+          <div className="hidden lg:flex flex-wrap items-center gap-2">
+            {more.map(a => (
+              <Button key={a.key} size="sm" variant={a.danger ? 'danger' : 'secondary'} onClick={a.onClick} title={a.title || a.label}
+                aria-label={a.label} style={a.tone ? { borderColor: a.tone, color: a.tone } : undefined}>
+                <a.icon size={13} /> {a.danger ? null : a.label}
               </Button>
-            )
-          )}
-          {status === 'draft' && <Button size="sm" variant="secondary" onClick={() => onEdit(invoice)}><Edit3 size={13} /> {t('detail.edit')}</Button>}
-          {status === 'draft' && (
-            <Button size="sm" variant="secondary"
-              onClick={() => { if (window.confirm(t('detail.markSentConfirm'))) onStatusChange(invoice.id, 'sent', { sentAt: new Date().toISOString() }); }}
-              title="Markeer als verstuurd zonder te versturen via de app"
-            >
-              <CheckCircle2 size={13} /> {t('detail.markSent')}
+            ))}
+          </div>
+          {/* …en in een "Meer"-menu op kleinere schermen */}
+          <div className="relative lg:hidden">
+            <Button size="sm" variant="secondary" onClick={() => setMoreOpen(o => !o)} aria-expanded={moreOpen} aria-haspopup="menu">
+              Meer <ChevronDown size={13} />
             </Button>
-          )}
-          {(status === 'draft' || status === 'sent' || status === 'overdue' || status === 'partial') && (
-            <Button size="sm" onClick={() => setShowSendModal(true)}><Send size={13} /> {status === 'draft' ? t('detail.send') : t('detail.resend')}</Button>
-          )}
-          {(status === 'sent' || status === 'overdue' || status === 'partial') && onRegisterPayment && (
-            <Button size="sm" variant="secondary" onClick={() => setShowPaymentModal(true)}><Wallet size={13} /> {t('detail.registerPayment')}</Button>
-          )}
-          {status !== 'paid' && status !== 'draft' && status !== 'credit_note' && (
-            <Button size="sm" onClick={() => onStatusChange(invoice.id, 'paid', { paidAt: new Date().toISOString(), paidAmount: totals.total, payments: [...payments, { amount: +remaining.toFixed(2), date: todayISO(), note: 'Volledig betaald' }] })}><Check size={13} /> {t('detail.markPaid')}</Button>
-          )}
-          {status === 'paid' && (
-            <Button size="sm" variant="secondary" onClick={() => onStatusChange(invoice.id, 'sent', { paidAt: null, paidAmount: 0, payments: [] })}><X size={13} /> {t('detail.markUnpaid')}</Button>
-          )}
-          {status === 'paid' && onCreateCreditNote && (
-            <Button size="sm" variant="secondary" onClick={() => onCreateCreditNote(invoice)}><FileCheck2 size={13} /> {t('detail.creditNote')}</Button>
-          )}
-          <Button size="sm" variant="danger" onClick={() => onDelete(invoice.id)}><Trash2 size={13} /></Button>
+            {moreOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
+                <div role="menu" className="absolute right-0 mt-1 z-50 min-w-[220px] py-1 rounded-[10px]"
+                  style={{ background: 'var(--surface)', border: '1px solid var(--border-2)', boxShadow: 'var(--shadow-pop)' }}>
+                  {more.map(a => (
+                    <button key={a.key} role="menuitem" title={a.title}
+                      onClick={() => { setMoreOpen(false); a.onClick(); }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-[14px] hover:bg-[color:var(--surface-2)]"
+                      style={{ color: a.danger ? 'var(--danger)' : a.tone || 'var(--text)', background: 'none', border: 'none', cursor: 'pointer' }}>
+                      <a.icon size={14} /> {a.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          {primary.map(a => (
+            <Button key={a.key} size="sm" variant={a.variant || 'primary'} onClick={a.onClick}>
+              <a.icon size={13} /> {a.label}
+            </Button>
+          ))}
         </div>
       </div>
 
       <div className="no-print flex items-center gap-3 flex-wrap">
-        <h1 className="page-title">Factuur {invoice.number}</h1>
-        {invoice.numberAsSent && (
+        <h1 className="page-title">{creditNote ? 'Creditnota' : 'Factuur'} {invoice.number}</h1>
+        {invoice.numberAsSent && invoice.numberAsSent !== invoice.number && (!creditNote || /^CN/i.test(invoice.numberAsSent)) && (
           <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }} title="Intern achtervoegsel; de klant kreeg dit nummer">
             verstuurd als {invoice.numberAsSent}
           </span>
@@ -3961,6 +4280,12 @@ ${clone.innerHTML}
         <Badge status={status} />
         {invoice.sentAt && <span className="text-xs" style={{ color: 'var(--muted)' }}>{t('detail.sentOn')} {fmtDate(invoice.sentAt)}</span>}
         {invoice.paidAt && <span className="text-xs" style={{ color: 'var(--success)' }}>{t('detail.paidOn')} {fmtDate(invoice.paidAt)}</span>}
+        {credited > 0 && !creditNote && (
+          <span className="text-xs" style={{ color: 'var(--text-3)' }}>Gecrediteerd: <Money value={credited} currency={invoice.currency || 'EUR'} /></span>
+        )}
+        {creditNote && invoice.creditNoteForNumber && (
+          <span className="text-xs" style={{ color: 'var(--text-3)' }}>voor factuur {invoice.creditNoteForNumber}</span>
+        )}
       </div>
 
       {invoice.remindersSent && invoice.remindersSent.length > 0 && (
@@ -3998,7 +4323,7 @@ ${clone.innerHTML}
             <span>{t('detail.paymentOutstanding')}</span>
             <span className="num" style={{ color: remaining > 0 ? 'var(--warning)' : 'var(--success)' }}>{fmtCurrency(remaining, invoice.currency)}</span>
           </div>
-          {remaining > 0 && (
+          {remaining > 0 && totals.total > 0 && (
             <div className="mt-2 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface-3)' }}>
               <div className="h-full rounded-full" style={{ background: 'var(--success)', width: `${Math.min(100, (totalPaid / totals.total) * 100)}%`, transition: 'width 0.4s' }} />
             </div>
@@ -4006,12 +4331,13 @@ ${clone.innerHTML}
         </Card>
       )}
 
-      {/* Invoice preview / printable — uses template selected on entity */}
-      {/* Wrapper zorgt voor horizontaal scrollen op mobiel als factuur breder is dan scherm */}
-      <div className="overflow-x-auto scrollable">
-        <Card className="invoice-printable" style={{ maxWidth: 800, margin: '0 auto', overflow: 'hidden', minWidth: 520 }}>
-          {renderTemplate(invoiceEntity?.templateId || 'classic', { invoice, entity: invoiceEntity, client, totals, parentEntity: invoiceParentEntity })}
-        </Card>
+      {/* Factuur-preview: schaalt mee op smalle schermen i.p.v. horizontaal te scrollen */}
+      <div ref={previewWrapRef} style={{ width: '100%', overflow: 'hidden', height: preview.height ?? undefined }}>
+        <div ref={previewInnerRef} style={preview.scale < 1 ? { width: 800, transform: `scale(${preview.scale})`, transformOrigin: 'top left' } : undefined}>
+          <Card className="invoice-printable" style={{ maxWidth: 800, margin: '0 auto', overflow: 'hidden', ...PAPER_VARS }}>
+            {renderTemplate(invoiceEntity?.templateId || 'classic', { invoice, entity: invoiceEntity, client, totals, parentEntity: invoiceParentEntity })}
+          </Card>
+        </div>
       </div>
 
       {showSendModal && (
@@ -4019,11 +4345,14 @@ ${clone.innerHTML}
           invoice={invoice}
           client={client}
           settings={settings}
+          entity={invoiceEntity}
+          legalEntity={qrLegalEntity}
+          onDownloadPdf={handlePrint}
           onSend={(reminderLevel) => {
             if (reminderLevel !== undefined) {
               onSendReminder(invoice, reminderLevel);
             } else {
-              onStatusChange(invoice.id, 'sent', { sentAt: new Date().toISOString() });
+              onStatusChange(invoice.id, status === 'draft' ? 'sent' : invoice.status, { sentAt: new Date().toISOString() });
             }
             setShowSendModal(false);
           }}
@@ -4032,16 +4361,17 @@ ${clone.innerHTML}
         />
       )}
 
-      {showPaymentModal && (
+      {paymentModal && (
         <RegisterPaymentModal
           invoice={invoice}
           remaining={remaining}
           totals={totals}
+          fullOnly={paymentModal === 'full'}
           onSave={(payment) => {
             onRegisterPayment(invoice, payment);
-            setShowPaymentModal(false);
+            setPaymentModal(null);
           }}
-          onClose={() => setShowPaymentModal(false)}
+          onClose={() => setPaymentModal(null)}
         />
       )}
     </div>
@@ -4051,26 +4381,28 @@ ${clone.innerHTML}
 // ============================================================================
 // REGISTER PAYMENT MODAL
 // ============================================================================
-const RegisterPaymentModal = ({ invoice, remaining, totals, onSave, onClose }) => {
+// fullOnly: "Markeer betaald" — bedrag staat vast op het restant, alleen de betaaldatum kiezen
+const RegisterPaymentModal = ({ invoice, remaining, totals, onSave, onClose, fullOnly = false }) => {
   const { t } = useLang();
-  const [amount, setAmount] = useState(remaining.toFixed(2));
+  const [amount, setAmount] = useState(remaining.toFixed(2).replace('.', ','));
   const [date, setDate] = useState(todayISO());
   const [note, setNote] = useState('');
-  const amountNum = Math.max(0, Number(amount) || 0);
+  const amountNum = fullOnly ? remaining : Math.max(0, parseDecimal(amount));
   const isFullPayment = amountNum >= remaining - 0.005;
 
   return (
     <Modal open onClose={onClose} size="sm">
       <div className="px-6 py-5 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
         <div>
-          <h2 className="font-display text-xl">{t('payment.title')}</h2>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Factuur {invoice.number} · {t('payment.subtitle')} {fmtCurrency(remaining, invoice.currency)}</p>
+          <h2 className="font-display text-xl">{fullOnly ? 'Markeer als betaald' : t('payment.title')}</h2>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Factuur {displayInvoiceNumber(invoice)} · {t('payment.subtitle')} {fmtCurrency(remaining, invoice.currency)}</p>
         </div>
-        <button onClick={onClose} className="p-1.5 rounded hover:bg-[color:var(--surface-2)]"><X size={16} /></button>
+        <button onClick={onClose} className="p-1.5 rounded hover:bg-[color:var(--surface-2)]" aria-label="Sluiten"><X size={16} /></button>
       </div>
       <div className="p-6 space-y-4">
-        <Input label={t('payment.amountLabel')} type="number" step="0.01" min="0" value={amount} onChange={e => setAmount(e.target.value)} />
-        <Input label={t('payment.dateLabel')} type="date" value={date} onChange={e => setDate(e.target.value)} />
+        {!fullOnly && <Input label={t('payment.amountLabel')} type="text" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} />}
+        <Input label={t('payment.dateLabel')} type="date" value={date} max={todayISO()} onChange={e => setDate(e.target.value)}
+          hint={fullOnly ? 'De datum waarop het geld op je rekening stond.' : undefined} />
         <Input label={t('payment.noteLabel')} value={note} onChange={e => setNote(e.target.value)} placeholder={t('payment.notePlaceholder')} />
         {isFullPayment && amountNum > 0 && (
           <div className="rounded p-2 text-xs" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
@@ -4085,8 +4417,8 @@ const RegisterPaymentModal = ({ invoice, remaining, totals, onSave, onClose }) =
       </div>
       <div className="px-6 pb-5 flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose}>{t('editor.cancel')}</Button>
-        <Button disabled={amountNum <= 0} onClick={() => onSave({ amount: amountNum, date, note })}>
-          <Check size={14} /> {t('payment.save')}
+        <Button disabled={amountNum <= 0 || !date} onClick={() => onSave({ amount: roundMoney(amountNum), date, note: note || (fullOnly ? 'Volledig betaald' : '') })}>
+          <Check size={14} /> {fullOnly ? 'Markeer betaald' : t('payment.save')}
         </Button>
       </div>
     </Modal>
@@ -4096,30 +4428,49 @@ const RegisterPaymentModal = ({ invoice, remaining, totals, onSave, onClose }) =
 // ============================================================================
 // SEND INVOICE / REMINDER MODAL
 // ============================================================================
-const SendInvoiceModal = ({ invoice, client, settings, onSend, onClose, mode = 'send', reminderLevel = null }) => {
+// De app verstuurt zelf (nog) geen e-mail. Eerlijke flow: PDF downloaden → mailprogramma openen met
+// onderwerp/bericht ingevuld (PDF zelf bijvoegen) → markeren als verstuurd.
+// `entity` = entiteit van de factuur (afzender), `legalEntity` = juridische entiteit (IBAN). Zonder
+// deze props (bv. herinnering vanuit App) valt het terug op settings.company.
+const SendInvoiceModal = ({ invoice, client, settings, entity, legalEntity, onDownloadPdf, onSend, onClose, mode = 'send', reminderLevel = null }) => {
   const { t } = useLang();
   const totals = computeInvoice(invoice.items);
   const isReminder = mode === 'reminder';
   const template = isReminder
     ? settings.reminders.templates[reminderLevel] || settings.reminders.templates[0]
     : { subject: settings.email.invoiceSubject, body: settings.email.invoiceBody };
+  const sender = entity || settings.company || {};
+  const payee = legalEntity || entity || settings.company || {};
+  const number = displayInvoiceNumber(invoice);
+  // Herinnering: alleen wat nog openstaat (na deelbetalingen en creditnota's)
+  const amount = isReminder ? invoiceOpenAmount(invoice) : totals.total;
+  const docName = `${isCreditNote(invoice) ? 'Creditnota' : 'Factuur'} ${number}`;
 
   const replaceVars = (str) => (str || '')
-    .replace(/{{number}}/g, invoice.number)
+    .replace(/{{number}}/g, number)
     .replace(/{{contact}}/g, client?.contactName || client?.name || '')
-    .replace(/{{company}}/g, settings.company.name)
-    .replace(/{{amount}}/g, fmtCurrency(totals.total, invoice.currency))
+    .replace(/{{company}}/g, sender.name || settings.company?.name || '')
+    .replace(/{{amount}}/g, fmtCurrency(amount, invoice.currency))
     .replace(/{{date}}/g, fmtDate(invoice.issueDate))
     .replace(/{{dueDate}}/g, fmtDate(invoice.dueDate))
-    .replace(/{{senderName}}/g, settings.email.fromName)
-    .replace(/{{iban}}/g, settings.company.iban || '');
+    .replace(/{{senderName}}/g, settings.email?.fromName || sender.name || '')
+    .replace(/{{iban}}/g, payee.iban || '');
 
   const [channel, setChannel] = useState('email');
+  const [to, setTo] = useState(client?.email || '');
   const [subject, setSubject] = useState(replaceVars(template.subject));
   const [body, setBody] = useState(replaceVars(template.body));
   const [waBody, setWaBody] = useState(replaceVars(settings.email?.whatsappMessage || 'Hallo {{contact}}, factuur {{number}} — {{amount}} — vervalt {{dueDate}}.'));
+  const [pdfDone, setPdfDone] = useState(false);
+  const [mailOpened, setMailOpened] = useState(false);
 
   const whatsappNumber = (client?.phone || settings.email?.whatsappNumber || '').replace(/\D/g, '');
+
+  const openMail = () => {
+    const url = `mailto:${encodeURIComponent(to).replace(/%40/g, '@')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = url;
+    setMailOpened(true);
+  };
 
   const sendWhatsApp = () => {
     if (!whatsappNumber) {
@@ -4131,25 +4482,27 @@ const SendInvoiceModal = ({ invoice, client, settings, onSend, onClose, mode = '
     onSend(isReminder ? reminderLevel : undefined);
   };
 
+  const markLabel = isReminder ? 'Markeer herinnering als verstuurd' : 'Markeer als verstuurd';
+
   return (
     <Modal open onClose={onClose} size="lg">
       <div className="px-6 py-5 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
         <div>
           <h2 className="font-display text-2xl">{isReminder ? t('send.titleReminder') : t('send.titleInvoice')}</h2>
           <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-            {isReminder ? template.name : `Factuur ${invoice.number}`} → {client?.email || client?.name}
+            {isReminder ? template.name : docName} → {client?.email || client?.name}
           </p>
         </div>
-        <button onClick={onClose} className="p-1.5 rounded hover:bg-[color:var(--surface-2)]"><X size={16} /></button>
+        <button onClick={onClose} className="p-1.5 rounded hover:bg-[color:var(--surface-2)]" aria-label="Sluiten"><X size={16} /></button>
       </div>
 
       {/* Channel selector */}
       <div className="px-6 pt-4 flex gap-2">
         {[
-          { id: 'email', label: 'Email', icon: Mail },
+          { id: 'email', label: 'E-mail', icon: Mail },
           { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
         ].map(ch => (
-          <button key={ch.id} onClick={() => setChannel(ch.id)}
+          <button key={ch.id} onClick={() => setChannel(ch.id)} aria-pressed={channel === ch.id}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all"
             style={{
               background: channel === ch.id ? (ch.id === 'whatsapp' ? 'rgba(37,211,102,0.13)' : 'var(--accent-soft)') : 'transparent',
@@ -4167,17 +4520,23 @@ const SendInvoiceModal = ({ invoice, client, settings, onSend, onClose, mode = '
             <div className="rounded-md p-3 text-xs flex items-start gap-2" style={{ background: 'var(--info-soft)', color: 'var(--info)' }}>
               <AlertCircle size={14} className="mt-0.5 shrink-0" />
               <div>
-                {t('send.demoWarning')}
+                De app verstuurt de e-mail niet zelf. {onDownloadPdf ? 'Download de PDF, open' : 'Open'} je mailprogramma met het bericht al ingevuld{onDownloadPdf ? ', voeg de PDF als bijlage toe' : ''} en verstuur. Markeer daarna als verstuurd.
               </div>
             </div>
-            <Input label={t('send.from')} value={`${settings.email.fromName} <${settings.email.fromEmail || 'nog-niet-ingesteld@example.com'}>`} readOnly />
-            <Input label={t('send.to')} value={client?.email || t('send.noClientEmail')} readOnly />
+            {onDownloadPdf && (
+              <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-[9px]" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                <div className="flex items-center gap-2 min-w-0 text-[13px]">
+                  <FileText size={14} style={{ color: 'var(--text-3)' }} />
+                  <span className="truncate" style={{ color: 'var(--text-2)' }}>1. Sla {docName} op als PDF (kies "Opslaan als PDF" in het printvenster)</span>
+                </div>
+                <Button size="sm" variant={pdfDone ? 'secondary' : 'primary'} onClick={() => { onDownloadPdf(); setPdfDone(true); }}>
+                  <Download size={13} /> Download PDF
+                </Button>
+              </div>
+            )}
+            <Input label={t('send.to')} type="email" value={to} onChange={e => setTo(e.target.value)} placeholder={t('send.noClientEmail')} />
             <Input label={t('send.subject')} value={subject} onChange={e => setSubject(e.target.value)} />
             <Textarea label={t('send.message')} rows={8} value={body} onChange={e => setBody(e.target.value)} />
-            <div className="text-xs flex items-center gap-2 px-3 py-2 rounded" style={{ background: 'var(--surface-2)' }}>
-              <FileText size={14} style={{ color: 'var(--muted)' }} />
-              <span style={{ color: 'var(--ink-2)' }}>Bijlage: {invoice.number}.pdf</span>
-            </div>
           </>
         )}
 
@@ -4204,36 +4563,24 @@ const SendInvoiceModal = ({ invoice, client, settings, onSend, onClose, mode = '
         )}
       </div>
 
-      <div className="px-6 py-4 border-t flex items-center justify-between gap-2" style={{ borderColor: 'var(--border)' }}>
-        <div>
-          {channel === 'email' && (
-            <button
-              onClick={() => {
-                const to = client?.email || '';
-                const mailtoUrl = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-                window.open(mailtoUrl, '_blank');
-              }}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-all"
-              style={{ borderColor: 'var(--border-2)', color: 'var(--ink-2)', background: 'var(--surface)', cursor: 'pointer' }}
-            >
-              <Mail size={13} /> {t('send.openInGmail')}
-            </button>
-          )}
-        </div>
-        <div className="flex gap-2">
+      <div className="px-6 py-4 border-t flex items-center justify-end gap-2 flex-wrap" style={{ borderColor: 'var(--border)' }}>
         <Button variant="secondary" onClick={onClose}>Annuleren</Button>
         {channel === 'email' && (
-          <Button onClick={() => onSend(isReminder ? reminderLevel : undefined)}>
-            <Send size={14} /> {isReminder ? 'Herinnering versturen' : 'Versturen'}
-          </Button>
+          <>
+            <Button variant={mailOpened ? 'secondary' : 'primary'} onClick={openMail} disabled={!to}>
+              <Mail size={14} /> Open in mailprogramma
+            </Button>
+            <Button variant={mailOpened ? 'primary' : 'secondary'} onClick={() => onSend(isReminder ? reminderLevel : undefined)}>
+              <CheckCircle2 size={14} /> {markLabel}
+            </Button>
+          </>
         )}
         {channel === 'whatsapp' && (
           <button onClick={sendWhatsApp} disabled={!whatsappNumber}
             style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#25d366', border: 'none', borderRadius: 8, padding: '8px 16px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: whatsappNumber ? 'pointer' : 'not-allowed', opacity: whatsappNumber ? 1 : 0.5 }}>
-            <MessageSquare size={14} /> Verstuur via WhatsApp
+            <MessageSquare size={14} /> Open WhatsApp en markeer als verstuurd
           </button>
         )}
-        </div>
       </div>
     </Modal>
   );
@@ -4894,15 +5241,42 @@ const ExpenseProcessModal = ({ expense, settings, onSave, onDelete, onClose, onU
 // ============================================================================
 
 // ── Shared: line items + totals table ────────────────────────────────────────
-const InvoiceLineItemsAndTotals = ({ invoice, totals, jur, accent, style = 'executive' }) => {
+// Creditnota-verwijzing en leverdatum/periode — gedeeld door alle templates
+const InvoiceMetaNotes = ({ invoice, t }) => {
+  const lines = [];
+  if (isCreditNote(invoice) && (invoice.creditNoteForNumber || invoice.creditNoteFor)) {
+    lines.push(t.creditNoteFor(invoice.creditNoteForNumber || '—', invoice.creditNoteForDate ? fmtDate(invoice.creditNoteForDate) : ''));
+  }
+  if (invoice.periodFrom || invoice.periodTo) {
+    lines.push(`${t.period}: ${invoice.periodFrom ? fmtDate(invoice.periodFrom) : '…'} – ${invoice.periodTo ? fmtDate(invoice.periodTo) : '…'}`);
+  } else if (invoice.deliveryDate) {
+    lines.push(`${t.deliveryDate}: ${fmtDate(invoice.deliveryDate)}`);
+  }
+  if (!lines.length) return null;
+  return (
+    <div style={{ marginBottom: 16, fontSize: 11, lineHeight: 1.7, color: '#4a4a4a' }}>
+      {lines.map((l, i) => <div key={i} style={i === 0 && isCreditNote(invoice) ? { fontWeight: 600, color: '#1a1a1a' } : undefined}>{l}</div>)}
+    </div>
+  );
+};
+
+const InvoiceLineItemsAndTotals = ({ invoice, client, totals, jur, accent, style = 'executive' }) => {
   const editCtx = useContext(InvoiceEditContext);
-  const t = getInvoiceT(invoice.language);
+  const t = getInvoiceT(invoice.language, invoice);
+  const vatTreatment = invoiceVatTreatment(invoice, client);
+  // Verlegd / buiten de EU: alleen vermelden als er ook echt geen BTW berekend is
+  const zeroRatedNotice = (jur?.code || 'NL') === 'NL' && isZeroRatedTreatment(vatTreatment) && Math.abs(totals.btwTotal) < 0.005;
+  const rateEntries = Object.entries(totals.btwByRate);
+  const allZeroRate = rateEntries.length > 0 && rateEntries.every(([r]) => Number(r) === 0);
+  const isForeign = (invoice.currency || 'EUR') !== 'EUR';
+  const eurRate = isForeign && Number(invoice.exchangeRate) > 0 ? invoiceEurRate(invoice) : null;
   const isMinimal = style === 'atelier';
   const headerBg = style === 'studio' ? accent : 'transparent';
   const headerColor = style === 'studio' ? '#fff' : 'var(--ink)';
   const rowBorder = isMinimal ? '1px solid #e8e8e8' : '1px solid var(--border)';
   return (
     <>
+      <InvoiceMetaNotes invoice={invoice} t={t} />
       <table className="w-full text-sm mb-8" style={{ borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ background: headerBg }}>
@@ -4959,7 +5333,7 @@ const InvoiceLineItemsAndTotals = ({ invoice, totals, jur, accent, style = 'exec
             <span>{t.subtotalExcl(jur.salesTax.name)}</span>
             <span className="num">{fmtCurrency(totals.subtotal, invoice.currency)}</span>
           </div>
-          {Object.entries(totals.btwByRate).filter(([r]) => Number(r) > 0).map(([rate, amt]) => (
+          {rateEntries.filter(([r]) => Number(r) > 0 || allZeroRate).map(([rate, amt]) => (
             <div key={rate} className="flex justify-between py-1.5 text-xs" style={{ color: 'var(--ink-2)', borderBottom: '1px solid var(--border)' }}>
               <span>{jur.salesTax.name} {rate}%</span>
               <span className="num">{fmtCurrency(amt, invoice.currency)}</span>
@@ -4969,8 +5343,21 @@ const InvoiceLineItemsAndTotals = ({ invoice, totals, jur, accent, style = 'exec
             <span className="text-base font-semibold" style={{ color: 'var(--ink)' }}>{t.totalDue}</span>
             <span className="num text-xl font-bold" style={{ color: accent }}>{fmtCurrency(totals.total, invoice.currency)}</span>
           </div>
+          {eurRate && (
+            <div className="text-[10px]" style={{ color: '#6b6b6b', lineHeight: 1.6 }}>
+              <div className="flex justify-between"><span>{t.vatInEur(jur.salesTax.name)}</span><span className="num">{fmtCurrency(roundMoney(totals.btwTotal * eurRate), 'EUR')}</span></div>
+              <div className="flex justify-between"><span>{t.exchangeRate}</span><span className="num">1 {invoice.currency} = {eurRate.toLocaleString('nl-NL', { maximumFractionDigits: 6 })} EUR</span></div>
+            </div>
+          )}
         </div>
       </div>
+
+      {zeroRatedNotice && (
+        <div className="mb-6 text-[11px]" style={{ color: '#1a1a1a', borderLeft: `2px solid ${accent}`, paddingLeft: 10, lineHeight: 1.6 }}>
+          <div className="font-semibold">{vatTreatment === 'reverse_eu' ? t.reverseCharge : t.outsideEu}</div>
+          {vatTreatment === 'reverse_eu' && client?.btw && <div>{t.clientVatId}: <span className="font-mono">{client.btw}</span></div>}
+        </div>
+      )}
 
       {(invoice.notes || editCtx.editMode) && (
         <div className="mb-8 p-4 rounded-md text-xs" style={{ background: '#f9f8f6', border: `1px solid ${editCtx.editMode ? 'rgba(0,0,0,0.12)' : 'var(--border)'}` }}>
@@ -5013,7 +5400,7 @@ const buildEpcQr = ({ iban, bic, name, amount, reference }) => {
 
 const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice, totals }) => {
   const editCtx = useContext(InvoiceEditContext);
-  const t = getInvoiceT(invoice?.language);
+  const t = getInvoiceT(invoice?.language, invoice);
   const legalEntity = (entity?.type === 'label' && parentEntity) ? parentEntity : entity;
   const legalJur = (entity?.type === 'label' && parentEntity) ? JURISDICTIONS[parentEntity.jurisdiction || 'NL'] : jur;
   const opts = entity?.templateOptions || {};
@@ -5022,11 +5409,13 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
   const qrOn = invoice?.qrEnabled === true ? true : invoice?.qrEnabled === false ? false : opts.showQrCode !== false;
   // EPC/SEPA QR is only valid for EUR transactions (SEPA countries)
   const isSepaCompatible = !invoice?.currency || invoice?.currency === 'EUR';
-  const epcData = (qrOn && isSepaCompatible) ? buildEpcQr({
+  // QR met het nog openstaande bedrag; niet voor creditnota's of als er niets (meer) te betalen is
+  const qrAmount = !invoice ? 0 : invoice.status === 'draft' || !invoice.status ? Number(totals?.total || 0) : invoiceOpenAmount(invoice);
+  const epcData = (qrOn && isSepaCompatible && !isCreditNote(invoice) && qrAmount > 0.005) ? buildEpcQr({
     iban: legalEntity.iban,
     bic: legalEntity.bicCode,
     name: legalEntity.name,
-    amount: totals?.total,
+    amount: roundMoney(qrAmount),
     reference: invoice?.number,
   }) : null;
   const qrUrl = epcData
@@ -5084,33 +5473,37 @@ const InvoiceFooter = ({ entity, jur, parentEntity, style = 'executive', invoice
         )
       )}
 
-      {opts.showBankDetails !== false && (
-        <div className="text-xs" style={{ display: 'grid', gridTemplateColumns: qrUrl ? '1fr auto 1fr' : '1fr 1fr', gap: 24, alignItems: 'flex-start', color: 'var(--ink-2)' }}>
+      {/* Bedrijfsgegevens (naam, adres, KvK, BTW-id) zijn wettelijk verplicht en staan er altijd;
+          alleen bankgegevens + QR volgen de template-optie. Bij een label: gegevens van de moeder. */}
+      <div className="text-xs" style={{ display: 'grid', gridTemplateColumns: opts.showBankDetails === false ? '1fr' : qrUrl ? '1fr auto 1fr' : '1fr 1fr', gap: 24, alignItems: 'flex-start', color: 'var(--ink-2)' }}>
+        {opts.showBankDetails !== false && (
           <div>
             <div className="uppercase tracking-[0.12em] text-[9px] mb-2 font-semibold" style={{ color: 'var(--muted)' }}>{t.bankDetails}</div>
             {legalEntity.iban && <div className="font-mono font-medium" style={{ color: 'var(--ink)', letterSpacing: '0.05em' }}>{legalEntity.iban}</div>}
             <div className="mt-0.5">{t.payableTo} {legalEntity.name}</div>
             {legalEntity.bicCode && <div className="font-mono text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>BIC: {legalEntity.bicCode}</div>}
           </div>
-          {qrUrl && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
-              <div style={{ padding: 4, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-                <img src={qrUrl} alt="SEPA betaal-QR" width={84} height={84} style={{ display: 'block' }} />
-              </div>
-              <div style={{ fontSize: 7.5, color: '#aaa', textAlign: 'center', lineHeight: 1.4, letterSpacing: '0.04em' }}>
-                {t.scanQr.split('\n').map((line, i) => <span key={i}>{line}{i === 0 && <br />}</span>)}
-              </div>
+        )}
+        {opts.showBankDetails !== false && qrUrl && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
+            <div style={{ padding: 4, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+              <img src={qrUrl} alt="SEPA betaal-QR" width={84} height={84} style={{ display: 'block' }} />
             </div>
-          )}
-          <div className="text-right">
-            <div className="uppercase tracking-[0.12em] text-[9px] mb-2 font-semibold" style={{ color: 'var(--muted)' }}>{t.companyDetails}</div>
-            <div className="font-medium" style={{ color: 'var(--ink)' }}>{legalEntity.name}</div>
-            {legalEntity.registrationNumber && <div className="mt-0.5">{t.regNumber(legalJur.code)}: <span className="font-mono">{legalEntity.registrationNumber}</span></div>}
-            {legalEntity.taxNumber && <div>{legalJur.salesTax.name}-nr: <span className="font-mono">{legalEntity.taxNumber}</span></div>}
-            {legalEntity.website && <div className="mt-0.5" style={{ color: 'var(--muted)' }}>{legalEntity.website}</div>}
+            <div style={{ fontSize: 7.5, color: '#aaa', textAlign: 'center', lineHeight: 1.4, letterSpacing: '0.04em' }}>
+              {t.scanQr.split('\n').map((line, i) => <span key={i}>{line}{i === 0 && <br />}</span>)}
+            </div>
           </div>
+        )}
+        <div className={opts.showBankDetails === false ? '' : 'text-right'}>
+          <div className="uppercase tracking-[0.12em] text-[9px] mb-2 font-semibold" style={{ color: 'var(--muted)' }}>{t.companyDetails}</div>
+          <div className="font-medium" style={{ color: 'var(--ink)' }}>{legalEntity.name}</div>
+          {legalEntity.address && <div className="mt-0.5">{legalEntity.address}</div>}
+          {(legalEntity.postal || legalEntity.city) && <div>{[legalEntity.postal, legalEntity.city].filter(Boolean).join(' ')}{legalEntity.country ? `, ${legalEntity.country}` : ''}</div>}
+          {legalEntity.registrationNumber && <div className="mt-0.5">{t.regNumber(legalJur.code)}: <span className="font-mono">{legalEntity.registrationNumber}</span></div>}
+          {legalEntity.taxNumber && <div>{legalJur.salesTax.name}-id: <span className="font-mono">{legalEntity.taxNumber}</span></div>}
+          {legalEntity.website && <div className="mt-0.5" style={{ color: 'var(--muted)' }}>{legalEntity.website}</div>}
         </div>
-      )}
+      </div>
     </div>
   );
 };
@@ -5123,7 +5516,7 @@ const InvoiceClientBlock = ({ client, t }) => (
     {client?.address && <div>{client.address}</div>}
     {(client?.postal || client?.city) && <div>{client.postal} {client.city}</div>}
     {client?.country && <div>{client.country}</div>}
-    {client?.btw && <div className="mt-1 font-mono text-[10px]" style={{ color: 'var(--muted)' }}>{client.btw}</div>}
+    {client?.btw && <div className="mt-1 text-[10px]" style={{ color: 'var(--muted)' }}>{t?.clientVatId ? `${t.clientVatId}: ` : ''}<span className="font-mono">{client.btw}</span></div>}
   </div>
 );
 
@@ -5165,7 +5558,7 @@ const TemplateClassic = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
-  const t = getInvoiceT(invoice.language);
+  const t = getInvoiceT(invoice.language, invoice);
   return (
     <div className="bg-white" style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Accent top bar */}
@@ -5209,7 +5602,7 @@ const TemplateClassic = ({ invoice, entity, client, totals, parentEntity }) => {
           </div>
         </div>
 
-        <InvoiceLineItemsAndTotals invoice={invoice} totals={totals} jur={jur} accent={accent} style="executive" />
+        <InvoiceLineItemsAndTotals invoice={invoice} client={client} totals={totals} jur={jur} accent={accent} style="executive" />
         <InvoiceFooter entity={entity} jur={jur} parentEntity={parentEntity} style="executive" invoice={invoice} totals={totals} />
       </div>
     </div>
@@ -5222,7 +5615,7 @@ const TemplateModern = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
-  const t = getInvoiceT(invoice.language);
+  const t = getInvoiceT(invoice.language, invoice);
   return (
     <div className="bg-white" style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Full-bleed header */}
@@ -5267,7 +5660,7 @@ const TemplateModern = ({ invoice, entity, client, totals, parentEntity }) => {
       </div>
 
       <div style={{ padding: '36px 52px 48px' }}>
-        <InvoiceLineItemsAndTotals invoice={invoice} totals={totals} jur={jur} accent={accent} style="studio" />
+        <InvoiceLineItemsAndTotals invoice={invoice} client={client} totals={totals} jur={jur} accent={accent} style="studio" />
         <InvoiceFooter entity={entity} jur={jur} parentEntity={parentEntity} style="studio" invoice={invoice} totals={totals} />
       </div>
     </div>
@@ -5280,7 +5673,7 @@ const TemplateMinimal = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
-  const t = getInvoiceT(invoice.language);
+  const t = getInvoiceT(invoice.language, invoice);
   return (
     <div className="bg-white" style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, padding: '64px 72px 56px', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Decorative accent dot */}
@@ -5328,7 +5721,7 @@ const TemplateMinimal = ({ invoice, entity, client, totals, parentEntity }) => {
         </div>
       </div>
 
-      <InvoiceLineItemsAndTotals invoice={invoice} totals={totals} jur={jur} accent={accent} style="atelier" />
+      <InvoiceLineItemsAndTotals invoice={invoice} client={client} totals={totals} jur={jur} accent={accent} style="atelier" />
       <InvoiceFooter entity={entity} jur={jur} parentEntity={parentEntity} style="atelier" invoice={invoice} totals={totals} />
     </div>
   );
@@ -5341,7 +5734,7 @@ const TemplateStatement = ({ invoice, entity, client, totals, parentEntity }) =>
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
   const logoScale = (entity.logoScale || 100) / 100;
-  const t = getInvoiceT(invoice.language);
+  const t = getInvoiceT(invoice.language, invoice);
   return (
     <div className="bg-white" style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, display: 'flex', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Left sidebar */}
@@ -5396,7 +5789,7 @@ const TemplateStatement = ({ invoice, entity, client, totals, parentEntity }) =>
           </div>
         </div>
 
-        <InvoiceLineItemsAndTotals invoice={invoice} totals={totals} jur={jur} accent={accent} style="signature" />
+        <InvoiceLineItemsAndTotals invoice={invoice} client={client} totals={totals} jur={jur} accent={accent} style="signature" />
         <InvoiceFooter entity={entity} jur={jur} parentEntity={parentEntity} style="signature" invoice={invoice} totals={totals} />
       </div>
     </div>
@@ -5409,7 +5802,7 @@ const TemplateNordic = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
-  const t = getInvoiceT(invoice.language);
+  const t = getInvoiceT(invoice.language, invoice);
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, background: '#fff', fontFamily: 'Geist, -apple-system, sans-serif', position: 'relative', overflow: 'hidden' }}>
       {/* Rechter accentstreep */}
@@ -5461,7 +5854,7 @@ const TemplateNordic = ({ invoice, entity, client, totals, parentEntity }) => {
           ))}
         </div>
 
-        <InvoiceLineItemsAndTotals invoice={invoice} totals={totals} jur={jur} accent={accent} style="nordic" />
+        <InvoiceLineItemsAndTotals invoice={invoice} client={client} totals={totals} jur={jur} accent={accent} style="nordic" />
         <InvoiceFooter entity={entity} jur={jur} parentEntity={parentEntity} style="nordic" invoice={invoice} totals={totals} />
       </div>
     </div>
@@ -5474,7 +5867,7 @@ const TemplateBold = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
-  const t = getInvoiceT(invoice.language);
+  const t = getInvoiceT(invoice.language, invoice);
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, background: '#fff', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       <div style={{ padding: '48px 56px 0' }}>
@@ -5515,7 +5908,7 @@ const TemplateBold = ({ invoice, entity, client, totals, parentEntity }) => {
           </div>
         </div>
 
-        <InvoiceLineItemsAndTotals invoice={invoice} totals={totals} jur={jur} accent={accent} style="bold" />
+        <InvoiceLineItemsAndTotals invoice={invoice} client={client} totals={totals} jur={jur} accent={accent} style="bold" />
         <InvoiceFooter entity={entity} jur={jur} parentEntity={parentEntity} style="bold" invoice={invoice} totals={totals} />
       </div>
     </div>
@@ -5528,7 +5921,7 @@ const TemplateHorizon = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
-  const t = getInvoiceT(invoice.language);
+  const t = getInvoiceT(invoice.language, invoice);
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, background: '#fff', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Gespleten header */}
@@ -5568,7 +5961,7 @@ const TemplateHorizon = ({ invoice, entity, client, totals, parentEntity }) => {
             <div style={{ fontSize: 9, color: '#ccc', marginTop: 3 }}>{t.inclTax(jur.salesTax.name)}</div>
           </div>
         </div>
-        <InvoiceLineItemsAndTotals invoice={invoice} totals={totals} jur={jur} accent={accent} style="horizon" />
+        <InvoiceLineItemsAndTotals invoice={invoice} client={client} totals={totals} jur={jur} accent={accent} style="horizon" />
         <InvoiceFooter entity={entity} jur={jur} parentEntity={parentEntity} style="horizon" invoice={invoice} totals={totals} />
       </div>
     </div>
@@ -5581,7 +5974,7 @@ const TemplateSplit = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#7C2D2D';
   const opts = entity?.templateOptions || {};
-  const t = getInvoiceT(invoice.language);
+  const t = getInvoiceT(invoice.language, invoice);
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, display: 'flex', fontFamily: 'Geist, -apple-system, sans-serif' }}>
       {/* Links paneel: warm beige, linkerrand in accent */}
@@ -5599,12 +5992,7 @@ const TemplateSplit = ({ invoice, entity, client, totals, parentEntity }) => {
 
         <div>
           <div style={{ fontSize: 8.5, letterSpacing: '0.16em', textTransform: 'uppercase', color: '#c5b9a8', marginBottom: 10, fontWeight: 700 }}>{t.invoiceTo}</div>
-          <div style={{ fontSize: 10, color: '#666', lineHeight: 1.85 }}>
-            <div style={{ fontWeight: 700, color: '#3a3530' }}>{client?.name || '—'}</div>
-            {client?.contactName && <div>{client.contactName}</div>}
-            {client?.address && <div>{client.address}</div>}
-            {(client?.postal || client?.city) && <div>{client.postal} {client.city}</div>}
-          </div>
+          <InvoiceClientBlock client={client} t={t} />
         </div>
 
         <div>
@@ -5630,7 +6018,7 @@ const TemplateSplit = ({ invoice, entity, client, totals, parentEntity }) => {
           <div style={{ width: 20, height: 20, borderRadius: '50%', background: accent, flexShrink: 0 }} />
           <div style={{ fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', fontWeight: 600, color: '#bbb' }}>{t.invoice}</div>
         </div>
-        <InvoiceLineItemsAndTotals invoice={invoice} totals={totals} jur={jur} accent={accent} style="split" />
+        <InvoiceLineItemsAndTotals invoice={invoice} client={client} totals={totals} jur={jur} accent={accent} style="split" />
         <InvoiceFooter entity={entity} jur={jur} parentEntity={parentEntity} style="split" invoice={invoice} totals={totals} />
       </div>
     </div>
@@ -5643,7 +6031,7 @@ const TemplateBloom = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#C9899E';
   const opts = entity?.templateOptions || {};
-  const t = getInvoiceT(invoice.language);
+  const t = getInvoiceT(invoice.language, invoice);
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', minHeight: 1050, fontFamily: 'Geist, -apple-system, sans-serif', background: '#fff' }}>
       {/* Dunne accentlijn bovenaan */}
@@ -5683,7 +6071,7 @@ const TemplateBloom = ({ invoice, entity, client, totals, parentEntity }) => {
 
       {/* Regels + totalen + notities */}
       <div style={{ padding: '4px 56px 48px' }}>
-        <InvoiceLineItemsAndTotals invoice={invoice} totals={totals} jur={jur} accent={accent} style="atelier" />
+        <InvoiceLineItemsAndTotals invoice={invoice} client={client} totals={totals} jur={jur} accent={accent} style="atelier" />
         <InvoiceFooter entity={entity} jur={jur} parentEntity={parentEntity} style="bloom" invoice={invoice} totals={totals} />
       </div>
     </div>
@@ -5696,7 +6084,7 @@ const TemplateVelvet = ({ invoice, entity, client, totals, parentEntity }) => {
   const jur = JURISDICTIONS[entity.jurisdiction || 'NL'];
   const accent = entity.accentColor || '#9E6B7A';
   const opts = entity?.templateOptions || {};
-  const t = getInvoiceT(invoice.language);
+  const t = getInvoiceT(invoice.language, invoice);
   // Donkere headerkleur: gebruik accent maar verduister het flink
   const headerBg = accent;
   return (
@@ -5735,7 +6123,7 @@ const TemplateVelvet = ({ invoice, entity, client, totals, parentEntity }) => {
         </div>
 
         {/* Regels + totalen + notities */}
-        <InvoiceLineItemsAndTotals invoice={invoice} totals={totals} jur={jur} accent={accent} style="executive" />
+        <InvoiceLineItemsAndTotals invoice={invoice} client={client} totals={totals} jur={jur} accent={accent} style="executive" />
         <InvoiceFooter entity={entity} jur={jur} parentEntity={parentEntity} style="velvet" invoice={invoice} totals={totals} />
       </div>
     </div>
@@ -5745,8 +6133,11 @@ const TemplateVelvet = ({ invoice, entity, client, totals, parentEntity }) => {
 const renderTemplate = (templateId, rawProps) => {
   // Facturen die (door een oude bug) met een dubbel nummer verstuurd zijn, hebben intern een
   // A/B/C-achtervoegsel. Op de factuur zelf blijft het nummer staan zoals de klant het kreeg.
-  const props = rawProps.invoice?.numberAsSent
-    ? { ...rawProps, invoice: { ...rawProps.invoice, number: rawProps.invoice.numberAsSent } }
+  // Oude creditnota's kregen per ongeluk het `numberAsSent` van de originele factuur mee — die negeren.
+  const inv = rawProps.invoice;
+  const asSent = inv?.numberAsSent && !(isCreditNote(inv) && !/^CN/i.test(inv.numberAsSent)) ? inv.numberAsSent : null;
+  const props = asSent
+    ? { ...rawProps, invoice: { ...inv, number: asSent } }
     : rawProps;
   switch (templateId) {
     case 'modern': return <TemplateModern {...props} />;
