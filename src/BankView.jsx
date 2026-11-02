@@ -6,6 +6,7 @@ import {
   ArrowDownCircle, ArrowUpCircle, AlertTriangle, Star,
 } from 'lucide-react'
 import { computeInvoice, suggestVatTreatment, VAT_TREATMENTS, isRevenueInvoice } from './finance'
+import { Button, Modal, Card, Segmented, Money } from './ui'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const genId = (p = 'bt') => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
@@ -148,18 +149,12 @@ const inp = {
   borderRadius: '8px', color: 'var(--text)', padding: '8px 11px',
   fontSize: '12.5px', width: '100%', outline: 'none', boxSizing: 'border-box',
 }
-const Card = ({ children, style = {} }) => (
-  <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', ...style }}>
+// Icoonknop in een transactierij (compacte Button)
+const IconBtn = ({ title, onClick, danger, children }) => (
+  <Button size="sm" variant={danger ? 'danger' : 'secondary'} title={title} aria-label={title} onClick={onClick} style={{ padding: '0 8px' }}>
     {children}
-  </div>
+  </Button>
 )
-const btn = (variant = 'ghost') => ({
-  display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 11px',
-  borderRadius: '7px', fontSize: '12px', fontWeight: '600', cursor: 'pointer',
-  border: variant === 'primary' ? 'none' : '1px solid var(--border-2)',
-  background: variant === 'primary' ? 'var(--accent)' : 'var(--surface)',
-  color: variant === 'primary' ? '#fff' : 'var(--text-2)',
-})
 
 export default function BankView({
   transactions = [], setTransactions,
@@ -229,7 +224,38 @@ export default function BankView({
 
   const markPersonal = (id) => updateTx(id, { status: 'personal', matchedInvoiceId: null, matchedExpenseId: null, boekEntryId: null })
   const markIgnored = (id) => updateTx(id, { status: 'ignored', matchedInvoiceId: null, matchedExpenseId: null, boekEntryId: null })
-  const resetTx = (id) => updateTx(id, { status: 'unmatched', matchedInvoiceId: null, matchedExpenseId: null, boekEntryId: null })
+
+  // Betaling die deze banktransactie op een factuur zette weer verwijderen en de status herberekenen.
+  // Factuur die al (handmatig) betaald was zonder betaling van deze transactie blijft ongemoeid.
+  const removePaymentFromInvoice = (invoiceId, tx) => {
+    if (!setInvoices || !invoiceId) return
+    setInvoices(prev => prev.map(i => {
+      if (i.id !== invoiceId) return i
+      if (!(i.payments || []).some(p => p.bankTxId === tx.id)) return i
+      const payments = i.payments.filter(p => p.bankTxId !== tx.id)
+      const total = computeInvoice(i.items).total
+      const paid = payments.reduce((s, p) => s + Number(p.amount || 0), 0)
+      const full = paid > 0 && paid >= total - 0.01
+      const status = full ? 'paid' : paid > 0 ? 'partial' : 'sent'
+      return { ...i, payments, paidAmount: +paid.toFixed(2), status, paidAt: full ? (i.paidAt || null) : null }
+    }))
+  }
+
+  // Draait terug wat de boeking aanmaakte: de kostenpost die vanuit deze transactie is gemaakt,
+  // de journaalpost, en de betaling op een gekoppelde factuur. Een bestaande (handmatige) bon
+  // waaraan alleen gekoppeld werd, blijft staan.
+  const undoBooking = (tx) => {
+    if (tx.matchedExpenseId && setExpenses) {
+      setExpenses(prev => (prev || []).filter(e => !(e.id === tx.matchedExpenseId && e.source === 'bank' && e.bankTxId === tx.id)))
+    }
+    if (tx.boekEntryId && setEntries) setEntries(prev => (prev || []).filter(e => e.id !== tx.boekEntryId))
+    if (tx.matchedInvoiceId) removePaymentFromInvoice(tx.matchedInvoiceId, tx)
+  }
+
+  const resetTx = (tx) => {
+    if (tx.status === 'matched') undoBooking(tx)
+    updateTx(tx.id, { status: 'unmatched', matchedInvoiceId: null, matchedExpenseId: null, boekEntryId: null })
+  }
 
   const confirmBook = (tx, form) => {
     const amountIncl = Math.abs(Number(tx.amount) || 0)
@@ -290,6 +316,9 @@ export default function BankView({
     if (!setInvoices) return
     setInvoices(prev => prev.map(i => {
       if (i.id !== invoiceId) return i
+      // Al betaald zonder betalingsregels (handmatig op betaald gezet): alleen koppelen,
+      // niet opnieuw opbouwen — anders zakt hij terug naar 'deels betaald'.
+      if (i.status === 'paid' && !(i.payments || []).length) return i
       const payments = (i.payments || []).filter(p => p.bankTxId !== tx.id)
       payments.push({ amount: Math.abs(Number(tx.amount) || 0), date: tx.date, note: `Bank: ${tx.counterparty || tx.description || ''}`.trim(), bankTxId: tx.id })
       const total = computeInvoice(i.items).total
@@ -367,11 +396,15 @@ export default function BankView({
     return next
   })
 
+  // Bij omzetten van al gematchte transacties eerst de boeking terugdraaien (anders blijven kosten/betalingen hangen)
+  const undoSelectedMatched = () => (transactions || []).filter(t => selected.has(t.id) && t.status === 'matched').forEach(undoBooking)
   const bulkMarkPersonal = () => {
+    undoSelectedMatched()
     setTransactions(prev => prev.map(t => selected.has(t.id) ? { ...t, status: 'personal', matchedInvoiceId: null, matchedExpenseId: null, boekEntryId: null } : t))
     clearSelection()
   }
   const bulkMarkIgnored = () => {
+    undoSelectedMatched()
     setTransactions(prev => prev.map(t => selected.has(t.id) ? { ...t, status: 'ignored', matchedInvoiceId: null, matchedExpenseId: null, boekEntryId: null } : t))
     clearSelection()
   }
@@ -497,7 +530,7 @@ export default function BankView({
     }
     const s = map[status] || map.unmatched
     return (
-      <span style={{ fontSize: '10.5px', fontWeight: '700', padding: '3px 8px', borderRadius: '20px', background: s.bg, color: s.c, whiteSpace: 'nowrap' }}>
+      <span style={{ fontSize: '10.5px', fontWeight: '600', padding: '3px 8px', borderRadius: '20px', background: s.bg, color: s.c, whiteSpace: 'nowrap' }}>
         {s.label}
       </span>
     )
@@ -517,13 +550,13 @@ export default function BankView({
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleFile} />
-          <button style={btn()} onClick={() => fileRef.current?.click()}>
+          <Button variant="secondary" onClick={() => fileRef.current?.click()}>
             <Upload size={13} /> CSV importeren
-          </button>
-          <button style={btn('primary')} onClick={runAISuggestions} disabled={aiBusy}>
+          </Button>
+          <Button onClick={runAISuggestions} disabled={aiBusy}>
             {aiBusy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
             {aiBusy ? 'Bezig…' : 'AI-suggesties'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -546,18 +579,7 @@ export default function BankView({
 
       {/* ── Filters ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '14px' }}>
-        <div style={{ display: 'flex', gap: '3px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', padding: '3px' }}>
-          {FILTERS.map(f => (
-            <button key={f.id} onClick={() => setFilter(f.id)} style={{
-              display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 13px',
-              borderRadius: '7px', fontSize: '12.5px', fontWeight: '600', border: 'none', cursor: 'pointer',
-              background: filter === f.id ? 'var(--accent-soft)' : 'transparent',
-              color: filter === f.id ? 'var(--accent)' : 'var(--text-3)',
-            }}>
-              {f.label} <span style={{ opacity: 0.6 }}>{counts[f.id] || 0}</span>
-            </button>
-          ))}
-        </div>
+        <Segmented value={filter} onChange={setFilter} options={FILTERS.map(f => ({ ...f, count: counts[f.id] || 0 }))} />
         <div style={{ position: 'relative', marginLeft: 'auto', minWidth: '220px' }}>
           <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
           <input style={{ ...inp, paddingLeft: '30px' }} placeholder="Zoeken…" value={search} onChange={e => setSearch(e.target.value)} />
@@ -567,14 +589,12 @@ export default function BankView({
       {/* ── Bulk-actiebalk ── */}
       {selected.size > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: '10px', padding: '9px 13px', marginBottom: '14px' }}>
-          <span style={{ fontSize: '12.5px', fontWeight: '700', color: 'var(--accent)' }}>{selected.size} geselecteerd</span>
-          <button style={btn('primary')} onClick={bulkAcceptAI}>
-            <Sparkles size={12} /> Accepteer AI-suggesties
-          </button>
-          <button style={btn()} onClick={bulkMarkPersonal}><EyeOff size={12} /> Privé</button>
-          <button style={btn()} onClick={bulkMarkIgnored}><Ban size={12} /> Negeer</button>
-          <button style={{ ...btn(), color: 'var(--danger)' }} onClick={bulkDelete}><Trash2 size={12} /> Verwijderen</button>
-          <button style={{ ...btn(), marginLeft: 'auto' }} onClick={clearSelection}><X size={12} /> Deselecteer</button>
+          <span style={{ fontSize: '12.5px', fontWeight: '600', color: 'var(--accent)' }}>{selected.size} geselecteerd</span>
+          <Button size="sm" onClick={bulkAcceptAI}><Sparkles size={12} /> Accepteer AI-suggesties</Button>
+          <Button size="sm" variant="secondary" onClick={bulkMarkPersonal}><EyeOff size={12} /> Privé</Button>
+          <Button size="sm" variant="secondary" onClick={bulkMarkIgnored}><Ban size={12} /> Negeer</Button>
+          <Button size="sm" variant="danger" onClick={bulkDelete}><Trash2 size={12} /> Verwijderen</Button>
+          <Button size="sm" variant="ghost" style={{ marginLeft: 'auto' }} onClick={clearSelection}><X size={12} /> Deselecteer</Button>
         </div>
       )}
 
@@ -588,7 +608,7 @@ export default function BankView({
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
               <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} title="Selecteer alles in deze weergave" />
-              <span style={{ fontSize: '10.5px', fontWeight: '700', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-3)' }}>
                 Selecteer alles ({filtered.length})
               </span>
             </div>
@@ -597,10 +617,10 @@ export default function BankView({
                 <div style={{
                   position: 'sticky', top: 0, zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   padding: '6px 16px', background: 'var(--surface-3)', borderBottom: '1px solid var(--border)',
-                  fontSize: '11px', fontWeight: '700', color: 'var(--text-3)',
+                  fontSize: '12px', fontWeight: '500', color: 'var(--text-3)',
                 }}>
                   <span>{fmtDayLabel(g.date)}</span>
-                  <span style={{ fontFamily: 'monospace' }}>{g.net < 0 ? '-' : '+'}{fmtMoney(Math.abs(g.net))}</span>
+                  <Money value={g.net} signed />
                 </div>
                 {g.items.map(tx => (
                   <div key={tx.id} style={{
@@ -617,7 +637,7 @@ export default function BankView({
                       <div style={{ fontSize: '13.5px', fontWeight: '600', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {tx.description || tx.counterparty || '—'}
                         {isLikelyInternalTransfer(tx, ownNames) && tx.status === 'unmatched' && (
-                          <span title="Lijkt een interne overboeking tussen eigen rekeningen — controleer voor je boekt" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: '700', color: 'var(--warning)', background: 'var(--warning-soft)', padding: '2px 6px', borderRadius: '10px', flexShrink: 0 }}>
+                          <span title="Lijkt een interne overboeking tussen eigen rekeningen — controleer voor je boekt" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: '600', color: 'var(--warning)', background: 'var(--warning-soft)', padding: '2px 6px', borderRadius: '10px', flexShrink: 0 }}>
                             <AlertTriangle size={10} /> Interne overboeking?
                           </span>
                         )}
@@ -635,7 +655,7 @@ export default function BankView({
                             <button title="Accepteer suggestie en boek direct" onClick={() => quickAcceptAI(tx)} style={{
                               display: 'flex', alignItems: 'center', gap: '3px', border: 'none', cursor: 'pointer',
                               background: 'var(--success-soft)', color: 'var(--success)', borderRadius: '20px',
-                              fontSize: '10px', fontWeight: '700', padding: '2px 7px',
+                              fontSize: '10px', fontWeight: '600', padding: '2px 7px',
                             }}>
                               <Check size={9} /> Accepteer
                             </button>
@@ -644,8 +664,8 @@ export default function BankView({
                       )}
                     </div>
 
-                    <div style={{ width: '110px', flexShrink: 0, textAlign: 'right', fontFamily: 'monospace', fontSize: '13px', fontWeight: '700', color: tx.amount < 0 ? 'var(--danger)' : 'var(--success)' }}>
-                      {tx.amount < 0 ? '-' : '+'}{fmtMoney(Math.abs(tx.amount), tx.currency)}
+                    <div style={{ width: '110px', flexShrink: 0, textAlign: 'right', fontSize: '13px', fontWeight: '600', color: tx.amount < 0 ? 'var(--danger)' : 'var(--success)' }}>
+                      <Money value={tx.amount} currency={tx.currency || 'EUR'} signed />
                     </div>
 
                     <div style={{ width: '92px', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
@@ -655,31 +675,17 @@ export default function BankView({
                     <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
                       {tx.status === 'unmatched' && (
                         <>
-                          <button title="Boek als journaalpost" onClick={() => setBookTx(tx)} style={{ ...btn(), padding: '5px 8px' }}>
-                            <Receipt size={12} />
-                          </button>
-                          <button title="Koppel aan factuur" onClick={() => setLinkTx({ tx, mode: 'invoice' })} style={{ ...btn(), padding: '5px 8px' }}>
-                            <FileText size={12} />
-                          </button>
-                          <button title="Koppel aan uitgave" onClick={() => setLinkTx({ tx, mode: 'expense' })} style={{ ...btn(), padding: '5px 8px' }}>
-                            <Link2 size={12} />
-                          </button>
-                          <button title="Markeer als privé" onClick={() => markPersonal(tx.id)} style={{ ...btn(), padding: '5px 8px' }}>
-                            <EyeOff size={12} />
-                          </button>
-                          <button title="Negeer (interne overboeking)" onClick={() => markIgnored(tx.id)} style={{ ...btn(), padding: '5px 8px' }}>
-                            <Ban size={12} />
-                          </button>
+                          <IconBtn title="Boek als journaalpost" onClick={() => setBookTx(tx)}><Receipt size={12} /></IconBtn>
+                          <IconBtn title="Koppel aan factuur" onClick={() => setLinkTx({ tx, mode: 'invoice' })}><FileText size={12} /></IconBtn>
+                          <IconBtn title="Koppel aan uitgave" onClick={() => setLinkTx({ tx, mode: 'expense' })}><Link2 size={12} /></IconBtn>
+                          <IconBtn title="Markeer als privé" onClick={() => markPersonal(tx.id)}><EyeOff size={12} /></IconBtn>
+                          <IconBtn title="Negeer (interne overboeking)" onClick={() => markIgnored(tx.id)}><Ban size={12} /></IconBtn>
                         </>
                       )}
                       {tx.status !== 'unmatched' && (
-                        <button title="Ongedaan maken" onClick={() => resetTx(tx.id)} style={{ ...btn(), padding: '5px 8px' }}>
-                          <RotateCcw size={12} />
-                        </button>
+                        <IconBtn title="Ongedaan maken (boeking terugdraaien)" onClick={() => resetTx(tx)}><RotateCcw size={12} /></IconBtn>
                       )}
-                      <button title="Verwijderen" onClick={() => deleteTx(tx.id)} style={{ ...btn(), padding: '5px 8px', color: 'var(--danger)' }}>
-                        <Trash2 size={12} />
-                      </button>
+                      <IconBtn title="Verwijderen" danger onClick={() => deleteTx(tx.id)}><Trash2 size={12} /></IconBtn>
                     </div>
                   </div>
                 ))}
@@ -732,10 +738,10 @@ const BookModal = ({ tx, ledgerAccounts, salesTax, isInternalTransfer, onCancel,
   const { btwAmount: btwPreview } = form.asExpense ? vatForExpense(amountIncl, form.vatTreatment, form.btwRate) : { btwAmount: 0 }
   const reversePreview = form.asExpense && form.vatTreatment.startsWith('reverse') ? +(amountIncl * 0.21).toFixed(2) : 0
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-      <Card style={{ width: '420px', maxWidth: '90vw', padding: '20px' }}>
+    <Modal open onClose={onCancel} size="sm">
+      <div style={{ padding: '20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-          <h3 style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text)', margin: 0 }}>Boek als journaalpost</h3>
+          <h3 style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text)', margin: 0 }}>Boek als journaalpost</h3>
           <button onClick={onCancel} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', display: 'flex' }}><X size={16} /></button>
         </div>
         <div style={{ fontSize: '12px', color: 'var(--text-3)', marginBottom: '12px' }}>
@@ -789,11 +795,11 @@ const BookModal = ({ tx, ledgerAccounts, salesTax, isInternalTransfer, onCancel,
           )}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
-          <button style={btn()} onClick={onCancel}>Annuleren</button>
-          <button style={btn('primary')} onClick={() => onConfirm(form)}><Check size={13} /> Boeken</button>
+          <Button variant="secondary" onClick={onCancel}>Annuleren</Button>
+          <Button onClick={() => onConfirm(form)}><Check size={13} /> Boeken</Button>
         </div>
-      </Card>
-    </div>
+      </div>
+    </Modal>
   )
 }
 
@@ -808,10 +814,10 @@ const LinkModal = ({ tx, mode, options, clients, isInternalTransfer, onCancel, o
     return best ? [best, ...options.filter(o => o.id !== bestId)] : options
   }, [options, bestId])
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-      <Card style={{ width: '440px', maxWidth: '90vw', padding: '20px' }}>
+    <Modal open onClose={onCancel} size="sm">
+      <div style={{ padding: '20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-          <h3 style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text)', margin: 0 }}>
+          <h3 style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text)', margin: 0 }}>
             Koppel aan {mode === 'invoice' ? 'factuur' : 'uitgave'}
           </h3>
           <button onClick={onCancel} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', display: 'flex' }}><X size={16} /></button>
@@ -845,29 +851,29 @@ const LinkModal = ({ tx, mode, options, clients, isInternalTransfer, onCancel, o
                 {mode === 'invoice' ? (o.number || 'Factuur') : (o.vendor || 'Uitgave')}
                 {mode === 'invoice' && o.clientId ? ` · ${clientName(o.clientId)}` : ''}
                 {mode === 'invoice' && o.status === 'paid' && (
-                  <span style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-3)', background: 'var(--surface-3)', padding: '2px 6px', borderRadius: '10px' }}>
+                  <span style={{ fontSize: '10px', fontWeight: '600', color: 'var(--text-3)', background: 'var(--surface-3)', padding: '2px 6px', borderRadius: '10px' }}>
                     Betaald
                   </span>
                 )}
                 {o.id === bestId && (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: '700', color: 'var(--success)', background: 'var(--success-soft)', padding: '2px 6px', borderRadius: '10px' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: '600', color: 'var(--success)', background: 'var(--success-soft)', padding: '2px 6px', borderRadius: '10px' }}>
                     <Star size={9} /> Waarschijnlijke match
                   </span>
                 )}
               </span>
-              <span style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-3)' }}>
-                {fmtMoney(optionAmount(o, mode))}
+              <span style={{ fontSize: '12px', color: 'var(--text-2)' }}>
+                <Money value={optionAmount(o, mode)} />
               </span>
             </button>
           ))}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
-          <button style={btn()} onClick={onCancel}>Annuleren</button>
-          <button style={btn('primary')} disabled={!selected} onClick={() => selected && onConfirm(selected)}>
+          <Button variant="secondary" onClick={onCancel}>Annuleren</Button>
+          <Button disabled={!selected} onClick={() => selected && onConfirm(selected)}>
             <Link2 size={13} /> Koppelen
-          </button>
+          </Button>
         </div>
-      </Card>
-    </div>
+      </div>
+    </Modal>
   )
 }

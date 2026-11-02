@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useLang } from './LangContext'
-import { computeInvoice, isRevenueInvoice, isCountedExpense, expenseNet, entrySignedAmount as coreEntrySignedAmount, invoiceOpenAmount, invoiceDate, buildVatReturn } from './finance'
+import { computeInvoice, isRevenueInvoice, isCountedExpense, expenseNet, entrySignedAmount as coreEntrySignedAmount, invoiceOpenAmount, invoiceDate, buildVatReturn, todayISO } from './finance'
+import { Button, Card, Segmented, Money } from './ui'
 import {
   Plus, Trash2, Edit3, TrendingUp, RotateCcw,
   ChevronDown, ChevronRight, Car, Monitor, Building2, Package,
@@ -11,10 +12,6 @@ const ASSET_CATEGORIES = ['Auto', 'Hardware', 'Meubilair', 'Machine', 'Inventari
 const ENTRY_CATEGORIES = ['Correctie', 'Restverschil', 'Terugboeking', 'Extra afschrijving', 'Omzetaanpassing', 'Kostenpost', 'Overig']
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const fmtEUR = (n) => {
-  const num = Number(n || 0)
-  return '€ ' + num.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
 
 const fmtDate = (iso) => {
   if (!iso) return '—'
@@ -23,41 +20,72 @@ const fmtDate = (iso) => {
   return d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
-const todayISO = () => new Date().toISOString().split('T')[0]
 const genId = () => `b_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`
 
-// Compute depreciation schedule for an asset (linear method)
-const computeAsset = (asset) => {
+// ── Afschrijving: één regel voor W&V, activa-overzicht én balans ──────────────
+// Lineair, hele jaren: het aanschafjaar telt als volledig eerste afschrijvingsjaar.
+// Boekwaarde "ultimo jaar J" = aanschafwaarde − alle afschrijvingen t/m J (dus eind aanschafjaar al verlaagd).
+// Afgeboekte activa (is_active === false) schrijven af t/m het jaar vóór `deactivatedAt`; in en na
+// het afboekjaar niet meer. Oude afgeboekte activa zonder `deactivatedAt` tellen (zoals voorheen) niet mee.
+const yearOfISO = (iso) => (iso ? Number(String(iso).slice(0, 4)) : null)
+const currentYearNow = () => Number(todayISO().slice(0, 4))
+
+const assetBasics = (asset) => {
   const purchaseValue = parseFloat(asset.purchase_value) || 0
   const residualValue = parseFloat(asset.residual_value) || 0
   const years = parseInt(asset.depreciation_years) || 1
   const annualDep = years > 0 ? (purchaseValue - residualValue) / years : 0
-  const purchaseYear = asset.purchase_date
-    ? new Date(asset.purchase_date).getFullYear()
-    : new Date().getFullYear()
+  const purchaseYear = yearOfISO(asset.purchase_date) || currentYearNow()
+  // Eerste jaar waarin het activum NIET meer afschrijft door afboeking (null = nooit afgeboekt)
+  const stopYear = asset.is_active === false ? (yearOfISO(asset.deactivatedAt) ?? -Infinity) : null
+  return { purchaseValue, residualValue, years, annualDep, purchaseYear, stopYear }
+}
 
-  const schedule = Array.from({ length: years }, (_, y) => {
-    const startValue = purchaseValue - annualDep * y
-    const endValue = Math.max(residualValue, startValue - annualDep)
-    return { year: purchaseYear + y, depreciation: annualDep, startValue, endValue }
+const assetDepreciationInYear = (asset, year) => {
+  const b = assetBasics(asset)
+  if (year < b.purchaseYear || year >= b.purchaseYear + b.years) return 0
+  if (b.stopYear !== null && year >= b.stopYear) return 0
+  return b.annualDep
+}
+
+// Boekwaarde na afschrijving van jaar `year` (null als het activum dan al is afgeboekt)
+const assetBookValueEndOf = (asset, year) => {
+  const b = assetBasics(asset)
+  if (year < b.purchaseYear) return null
+  if (b.stopYear !== null && year >= b.stopYear) return null
+  const elapsed = Math.min(b.years, year - b.purchaseYear + 1)
+  return Math.max(b.residualValue, b.purchaseValue - b.annualDep * elapsed)
+}
+
+// Boekwaarde voor de balans: aanschafwaarde − som van de afschrijvingen die in de W&V t/m `year`
+// zijn genomen. Zo sluiten balans en W&V altijd op elkaar aan (ook in het afboekjaar).
+const assetBookValueForBalance = (asset, year) => {
+  const b = assetBasics(asset)
+  let dep = 0
+  for (let y = b.purchaseYear; y <= year; y++) dep += assetDepreciationInYear(asset, y)
+  return Math.max(b.residualValue, b.purchaseValue - dep)
+}
+
+// Depreciation schedule for an asset (linear method) — zelfde regel als hierboven
+const computeAsset = (asset) => {
+  const b = assetBasics(asset)
+  const schedule = Array.from({ length: b.years }, (_, y) => {
+    const startValue = b.purchaseValue - b.annualDep * y
+    const endValue = Math.max(b.residualValue, startValue - b.annualDep)
+    const year = b.purchaseYear + y
+    return { year, depreciation: assetDepreciationInYear(asset, year), startValue, endValue, stopped: b.stopYear !== null && year >= b.stopYear }
   })
+  const currentYear = currentYearNow()
+  const yearsElapsed = Math.max(0, Math.min(b.years, currentYear - b.purchaseYear + 1))
+  const bv = assetBookValueEndOf(asset, currentYear)
+  const currentBookValue = bv === null ? (currentYear < b.purchaseYear ? b.purchaseValue : 0) : bv
+  const isFullyDepreciated = currentYear >= b.purchaseYear + b.years - 1
 
-  const currentYear = new Date().getFullYear()
-  const yearsElapsed = Math.max(0, currentYear - purchaseYear)
-  const currentBookValue = Math.max(residualValue, purchaseValue - annualDep * yearsElapsed)
-  const isFullyDepreciated = yearsElapsed >= years
-
-  return { annualDep, schedule, currentBookValue, yearsElapsed, isFullyDepreciated }
+  return { annualDep: b.annualDep, schedule, currentBookValue, yearsElapsed, isFullyDepreciated }
 }
 
 const getDepreciationForYear = (assets, year) =>
-  (assets || [])
-    .filter(a => a.is_active !== false)
-    .reduce((sum, asset) => {
-      const { schedule } = computeAsset(asset)
-      const entry = schedule.find(s => s.year === year)
-      return sum + (entry ? entry.depreciation : 0)
-    }, 0)
+  (assets || []).reduce((sum, asset) => sum + assetDepreciationInYear(asset, year), 0)
 
 // Memoriaalboekingen gebruiken `type: 'credit'|'debet'`, maar journaalposten die vanuit de bank
 // geboekt worden (BankView) gebruiken `isDebit: boolean` zonder `type`. Deze helper ondersteunt beide
@@ -81,27 +109,23 @@ const inp = {
   borderRadius: '8px', color: 'var(--text)', padding: '9px 12px',
   fontSize: '13px', width: '100%', outline: 'none', boxSizing: 'border-box',
 }
-const th = {
-  textAlign: 'left', padding: '10px 16px', color: 'var(--text-3)',
-  fontSize: '11px', fontWeight: '600', textTransform: 'uppercase',
-  letterSpacing: '0.06em', borderBottom: '1px solid var(--border)',
-}
-const td = {
-  padding: '11px 16px', color: 'var(--text)', fontSize: '13px',
-  borderBottom: '1px solid var(--border)',
-}
-
-const Card = ({ children, style = {} }) => (
-  <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', ...style }}>
-    {children}
-  </div>
-)
+// Tabellen gebruiken .ledger (index.css); th/td blijven voor incidentele overrides
+const th = {}
+const td = {}
 
 const Label = ({ children }) => (
-  <div style={{ color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '5px' }}>
+  <div style={{ color: 'var(--text-2)', fontSize: '12.5px', fontWeight: '500', marginBottom: '5px' }}>
     {children}
   </div>
 )
+
+// Jaartallen waarin iets geboekt is (+ huidig en twee vorige jaren)
+const collectYears = (...lists) => {
+  const cy = currentYearNow()
+  const set = new Set([cy, cy - 1, cy - 2])
+  lists.forEach(list => (list || []).forEach(x => { const y = yearOfISO(x?.issueDate || x?.date); if (y) set.add(y) }))
+  return [...set].sort((a, b) => b - a)
+}
 
 // ── Winst/Verlies tab ─────────────────────────────────────────────────────────
 function WinstVerliesTab({ invoices, expenses, assets, entries, clients, ledgerAccounts }) {
@@ -111,15 +135,7 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients, ledgerA
   const [open, setOpen] = useState({ revenue: true, costs: true, depreciation: true, memo: true })
   const toggle = (k) => setOpen(s => ({ ...s, [k]: !s[k] }))
 
-  const years = useMemo(() => {
-    const set = new Set([currentYear, currentYear - 1, currentYear - 2])
-    ;(invoices || []).forEach(i => {
-      const d = i.issueDate || i.date
-      if (d) set.add(new Date(d).getFullYear())
-    })
-    ;(expenses || []).forEach(e => e.date && set.add(new Date(e.date).getFullYear()))
-    return [...set].sort((a, b) => b - a)
-  }, [invoices, expenses, currentYear])
+  const years = useMemo(() => collectYears(invoices, expenses, entries), [invoices, expenses, entries])
 
   const paidInvoices = useMemo(() =>
     (invoices || []).filter(i => {
@@ -152,11 +168,11 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients, ledgerA
       width: '100%', padding: '10px 16px', background: 'var(--surface-2)',
       border: 'none', borderTop: '1px solid var(--border)', cursor: 'pointer',
     }}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: '600', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', fontWeight: '600', color: 'var(--text-2)' }}>
         {open[sectionKey] ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         {label}
       </span>
-      <span style={{ fontFamily: 'monospace', fontSize: '13px', fontWeight: '700', color }}>{fmtEUR(value)}</span>
+      <Money value={value} style={{ fontSize: '13px', fontWeight: 600, color }} />
     </button>
   )
 
@@ -166,14 +182,14 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients, ledgerA
         <div style={{ fontSize: '12px', color: 'var(--text-2)' }}>{label}</div>
         {subLabel && <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '2px' }}>{subLabel}</div>}
       </div>
-      <span style={{ fontFamily: 'monospace', fontSize: '12px', color, flexShrink: 0, marginLeft: '12px' }}>{fmtEUR(value)}</span>
+      <Money value={value} style={{ fontSize: '12.5px', color, flexShrink: 0, marginLeft: '12px' }} />
     </div>
   )
 
   const TotalRow = ({ label, value, color, large }) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: large ? '14px 16px' : '10px 16px', borderTop: '1px solid var(--border)', background: large ? (result >= 0 ? 'rgba(16,185,129,0.05)' : 'rgba(239,68,68,0.05)') : 'transparent' }}>
-      <span style={{ fontSize: large ? '15px' : '13px', fontWeight: '700', color: color || 'var(--text)' }}>{label}</span>
-      <span style={{ fontFamily: 'monospace', fontSize: large ? '20px' : '14px', fontWeight: '800', color: color || 'var(--text)' }}>{fmtEUR(value)}</span>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: large ? '14px 16px' : '10px 16px', borderTop: '1px solid var(--border)', background: large ? (result >= 0 ? 'var(--success-soft)' : 'var(--danger-soft)') : 'transparent' }}>
+      <span style={{ fontSize: large ? '15px' : '13px', fontWeight: '650', color: color || 'var(--text)' }}>{label}</span>
+      <Money value={value} style={{ fontSize: large ? '20px' : '14px', fontWeight: 650, color: color || 'var(--text)' }} />
     </div>
   )
 
@@ -187,15 +203,15 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients, ledgerA
             {years.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           {[
             { label: t('bk.revenueLabel'), value: totalRevenue, color: 'var(--success)' },
             { label: t('bk.costsLabel'), value: totalCosts, color: 'var(--danger)' },
             { label: t('bk.resultLabel'), value: result, color: result >= 0 ? 'var(--success)' : 'var(--danger)' },
           ].map(s => (
             <div key={s.label} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 16px', textAlign: 'right' }}>
-              <div style={{ fontSize: '10px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: '3px' }}>{s.label}</div>
-              <div style={{ fontFamily: 'monospace', fontWeight: '700', fontSize: '15px', color: s.color }}>{fmtEUR(s.value)}</div>
+              <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-3)', marginBottom: '3px' }}>{s.label}</div>
+              <Money value={s.value} style={{ fontWeight: 650, fontSize: '15px', color: s.color }} />
             </div>
           ))}
         </div>
@@ -252,14 +268,11 @@ function WinstVerliesTab({ invoices, expenses, assets, entries, clients, ledgerA
         <SectionHeader label={t('bk.depreciation')} value={totalDepreciation} sectionKey="depreciation" color="var(--warning)" />
         {open.depreciation && (
           <>
-            {(assets || []).filter(a => a.is_active !== false).length === 0
+            {(assets || []).filter(a => assetDepreciationInYear(a, year) > 0).length === 0
               ? <div style={{ padding: '10px 32px', fontSize: '12px', color: 'var(--text-3)', fontStyle: 'italic', borderBottom: '1px solid var(--border)' }}>{t('bk.noAssets')}</div>
-              : (assets || []).filter(a => a.is_active !== false).map(asset => {
-                const { schedule } = computeAsset(asset)
-                const entry = schedule.find(s => s.year === year)
-                if (!entry) return null
-                return <SubRow key={asset.id} label={`${asset.name} (${asset.category})`} value={entry.depreciation} color="var(--warning)" />
-              })
+              : (assets || []).filter(a => assetDepreciationInYear(a, year) > 0).map(asset => (
+                <SubRow key={asset.id} label={`${asset.name} (${asset.category})`} subLabel={asset.is_active === false ? `Afgeboekt ${fmtDate(asset.deactivatedAt)}` : null} value={assetDepreciationInYear(asset, year)} color="var(--warning)" />
+              ))
             }
             {totalDepreciation > 0 && <TotalRow label="Totaal afschrijvingen" value={totalDepreciation} color="var(--warning)" />}
           </>
@@ -337,14 +350,17 @@ function VasteActivaTab({ assets, setAssets }) {
     setShowForm(true)
   }
 
+  // Afboeken legt de datum vast: afschrijving t/m het jaar ervoor blijft in de W&V staan
   const handleDeactivate = (id) => {
-    if (!confirm('Activum afboeken? Het wordt niet meer meegenomen in afschrijvingen.')) return
-    setAssets(prev => prev.map(a => a.id === id ? { ...a, is_active: false } : a))
+    const date = window.prompt('Activum afboeken per datum (JJJJ-MM-DD). Vanaf dat jaar wordt niet meer afgeschreven; eerdere jaren blijven staan.', todayISO())
+    if (!date) return
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) { alert('Ongeldige datum, gebruik JJJJ-MM-DD.'); return }
+    setAssets(prev => prev.map(a => a.id === id ? { ...a, is_active: false, deactivatedAt: date.trim() } : a))
   }
 
   const activeAssets = (assets || []).filter(a => a.is_active !== false)
   const inactiveAssets = (assets || []).filter(a => a.is_active === false)
-  const currentYear = new Date().getFullYear()
+  const currentYear = currentYearNow()
 
   const catIcon = (cat) => {
     if (cat === 'Auto') return Car
@@ -368,12 +384,9 @@ function VasteActivaTab({ assets, setAssets }) {
             </button>
           )}
         </div>
-        <button
-          onClick={() => { setEditId(null); resetForm(); setShowForm(v => !v) }}
-          style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '8px 14px', color: '#fff', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}
-        >
+        <Button onClick={() => { setEditId(null); resetForm(); setShowForm(v => !v) }}>
           <Plus size={14} /> {t('bk.addAsset')}
-        </button>
+        </Button>
       </div>
 
       {/* Form */}
@@ -418,16 +431,12 @@ function VasteActivaTab({ assets, setAssets }) {
           </div>
           {annualPreview !== null && (
             <div style={{ marginTop: '12px', padding: '10px 14px', background: 'var(--accent-soft)', borderRadius: '8px', fontSize: '12px', color: 'var(--text-2)' }}>
-              Lineaire afschrijving: <strong style={{ color: 'var(--accent)' }}>{fmtEUR(annualPreview)}</strong> per jaar over {form.depreciation_years} jaar
+              Lineaire afschrijving: <strong style={{ color: 'var(--accent)' }}><Money value={annualPreview} /></strong> per jaar over {form.depreciation_years} jaar, het aanschafjaar telt als eerste volle jaar
             </div>
           )}
           <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-            <button onClick={handleSave} style={{ background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '9px 18px', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}>
-              {editId ? 'Opslaan' : 'Inboeken'}
-            </button>
-            <button onClick={() => { setShowForm(false); setEditId(null); resetForm() }} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px', padding: '9px 14px', color: 'var(--text-2)', fontSize: '13px', cursor: 'pointer' }}>
-              Annuleren
-            </button>
+            <Button onClick={handleSave}>{editId ? 'Opslaan' : 'Inboeken'}</Button>
+            <Button variant="secondary" onClick={() => { setShowForm(false); setEditId(null); resetForm() }}>Annuleren</Button>
           </div>
         </Card>
       )}
@@ -462,20 +471,17 @@ function VasteActivaTab({ assets, setAssets }) {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '10px', color: 'var(--text-3)', marginBottom: '2px' }}>Boekwaarde nu</div>
-                  <div style={{ fontFamily: 'monospace', fontWeight: '700', fontSize: '16px', color: c.isFullyDepreciated ? 'var(--text-3)' : 'var(--accent)' }}>
-                    {fmtEUR(c.currentBookValue)}
-                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-3)', marginBottom: '2px' }}>Boekwaarde ultimo {currentYear}</div>
+                  <Money value={c.currentBookValue} style={{ fontWeight: 650, fontSize: '16px', color: c.isFullyDepreciated ? 'var(--text-3)' : 'var(--accent)' }} />
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '10px', color: 'var(--text-3)', marginBottom: '2px' }}>Per jaar</div>
-                  <div style={{ fontFamily: 'monospace', fontSize: '14px', color: 'var(--warning)', fontWeight: '600' }}>{fmtEUR(c.annualDep)}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-3)', marginBottom: '2px' }}>Per jaar</div>
+                  <Money value={c.annualDep} style={{ fontSize: '14px', color: 'var(--warning)', fontWeight: 600 }} />
                 </div>
                 <div style={{ display: 'flex', gap: '6px' }}>
-                  <button onClick={() => setExpandedId(isExpanded ? null : asset.id)}
-                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '6px', padding: '5px 10px', color: 'var(--text-3)', fontSize: '12px', cursor: 'pointer' }}>
+                  <Button size="sm" variant="secondary" onClick={() => setExpandedId(isExpanded ? null : asset.id)}>
                     {isExpanded ? 'Inklappen' : 'Schema'}
-                  </button>
+                  </Button>
                   <button onClick={() => handleEdit(asset)}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: '5px', display: 'flex' }}>
                     <Edit3 size={14} />
@@ -491,11 +497,11 @@ function VasteActivaTab({ assets, setAssets }) {
             {/* Depreciation schedule */}
             {isExpanded && (
               <div style={{ borderTop: '1px solid var(--border)', overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table className="ledger">
                   <thead>
                     <tr>
-                      {['Jaar', 'Beginwaarde', 'Afschrijving', 'Eindwaarde', 'Status'].map(h => (
-                        <th key={h} style={th}>{h}</th>
+                      {['Jaar', 'Beginwaarde', 'Afschrijving', 'Eindwaarde', 'Status'].map((h, hi) => (
+                        <th key={h} className={hi >= 1 && hi <= 3 ? 'r' : ''}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -506,9 +512,9 @@ function VasteActivaTab({ assets, setAssets }) {
                       return (
                         <tr key={i} style={{ background: isCurrent ? 'var(--accent-soft)' : 'transparent' }}>
                           <td style={td}><strong style={{ color: isCurrent ? 'var(--accent)' : 'inherit' }}>{row.year}</strong></td>
-                          <td style={{ ...td, fontFamily: 'monospace' }}>{fmtEUR(row.startValue)}</td>
-                          <td style={{ ...td, fontFamily: 'monospace', color: 'var(--warning)' }}>{fmtEUR(row.depreciation)}</td>
-                          <td style={{ ...td, fontFamily: 'monospace' }}>{fmtEUR(row.endValue)}</td>
+                          <td className="r"><Money value={row.startValue} /></td>
+                          <td className="r"><Money value={row.depreciation} style={{ color: 'var(--warning)' }} /></td>
+                          <td className="r"><Money value={row.endValue} /></td>
                           <td style={td}>
                             {isCurrent
                               ? <span style={{ color: 'var(--accent)', fontSize: '12px', fontWeight: '600' }}>Huidig jaar</span>
@@ -530,7 +536,7 @@ function VasteActivaTab({ assets, setAssets }) {
       {/* Inactive assets */}
       {showInactive && inactiveAssets.length > 0 && (
         <div>
-          <div style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', margin: '8px 0', padding: '0 4px' }}>
+          <div style={{ fontSize: '12.5px', fontWeight: '500', color: 'var(--text-3)', margin: '8px 0', padding: '0 4px' }}>
             Afgeboekte activa
           </div>
           {inactiveAssets.map(asset => (
@@ -538,14 +544,13 @@ function VasteActivaTab({ assets, setAssets }) {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px' }}>
                 <div>
                   <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text-2)' }}>{asset.name}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>{asset.category} · aangeschaft {fmtDate(asset.purchase_date)}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>{asset.category} · aangeschaft {fmtDate(asset.purchase_date)}{asset.deactivatedAt ? ` · afgeboekt ${fmtDate(asset.deactivatedAt)}` : ''}</div>
                 </div>
-                <button
-                  onClick={() => setAssets(prev => prev.map(a => a.id === asset.id ? { ...a, is_active: true } : a))}
-                  style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '6px', padding: '5px 10px', color: 'var(--text-3)', fontSize: '12px', cursor: 'pointer' }}
+                <Button size="sm" variant="secondary"
+                  onClick={() => setAssets(prev => prev.map(a => a.id === asset.id ? { ...a, is_active: true, deactivatedAt: null } : a))}
                 >
                   <RotateCcw size={12} /> Terugboeken
-                </button>
+                </Button>
               </div>
             </Card>
           ))}
@@ -558,6 +563,7 @@ function VasteActivaTab({ assets, setAssets }) {
 // ── Memoriaal tab ─────────────────────────────────────────────────────────────
 function MemoriaalTab({ entries, setEntries }) {
   const { t } = useLang()
+  const [year, setYear] = useState('all')
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ date: todayISO(), description: '', amount: '', type: 'debet', category: 'Correctie' })
 
@@ -568,9 +574,14 @@ function MemoriaalTab({ entries, setEntries }) {
     setShowForm(false)
   }
 
+  // Al teruggeboekt? (vlag op het origineel, of er bestaat al een terugboeking die ernaar verwijst)
+  const isReversed = (entry) => !!entry.reversedBy || (entries || []).some(x => x.reversal_of === entry.id)
+
   const handleReverse = (entry) => {
+    if (entry.is_reversal || isReversed(entry)) return
+    const reversalId = genId()
     const reversal = {
-      id: genId(),
+      id: reversalId,
       date: todayISO(),
       description: `Terugboeking: ${entry.description}`,
       amount: entry.amount,
@@ -580,29 +591,56 @@ function MemoriaalTab({ entries, setEntries }) {
       is_reversal: true,
       reversal_of: entry.id,
     }
-    setEntries(prev => [reversal, ...(prev || [])])
+    setEntries(prev => {
+      const list = prev || []
+      // Dubbelklik/gelijktijdige klik: nogmaals checken op de actuele lijst
+      if (list.some(x => x.reversal_of === entry.id || (x.id === entry.id && x.reversedBy))) return list
+      return [reversal, ...list.map(x => x.id === entry.id ? { ...x, reversedBy: reversalId } : x)]
+    })
   }
 
   const handleDelete = (id) => {
     if (!confirm('Boeking verwijderen?')) return
-    setEntries(prev => prev.filter(e => e.id !== id))
+    // Terugboeking verwijderd → origineel is weer terug te boeken
+    setEntries(prev => prev.filter(e => e.id !== id).map(e => e.reversedBy === id ? { ...e, reversedBy: null } : e))
   }
 
-  const totalResult = (entries || []).reduce((s, e) => s + entrySignedAmount(e), 0)
+  const years = useMemo(() => collectYears(entries), [entries])
+  const shown = useMemo(() => {
+    const list = year === 'all' ? (entries || []) : (entries || []).filter(e => yearOfISO(e.date) === year)
+    return [...list].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+  }, [entries, year])
+  const totals = useMemo(() => {
+    let credit = 0, debet = 0
+    shown.forEach(e => { const v = entrySignedAmount(e); if (v >= 0) credit += v; else debet += -v })
+    return { credit, debet, net: credit - debet }
+  }, [shown])
+  const totalResult = totals.net
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ fontSize: '13px', color: 'var(--text-3)' }}>
-          Nettosaldo boekingen:{' '}
-          <strong style={{ color: totalResult >= 0 ? 'var(--success)' : 'var(--danger)', fontFamily: 'monospace' }}>
-            {fmtEUR(totalResult)}
-          </strong>
-        </div>
-        <button onClick={() => setShowForm(v => !v)}
-          style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '8px 14px', color: '#fff', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+        <Segmented
+          value={year}
+          onChange={setYear}
+          options={[{ id: 'all', label: 'Alle jaren' }, ...years.map(y => ({ id: y, label: String(y), count: (entries || []).filter(e => yearOfISO(e.date) === y).length }))]}
+        />
+        <Button onClick={() => setShowForm(v => !v)}>
           <Plus size={14} /> {t('bk.addEntry')}
-        </button>
+        </Button>
+      </div>
+
+      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+        {[
+          { label: `Credit (+)${year === 'all' ? '' : ' ' + year}`, value: totals.credit, color: 'var(--success)' },
+          { label: `Debet (−)${year === 'all' ? '' : ' ' + year}`, value: -totals.debet, color: 'var(--danger)' },
+          { label: `Nettosaldo${year === 'all' ? '' : ' ' + year}`, value: totalResult, color: totalResult >= 0 ? 'var(--success)' : 'var(--danger)' },
+        ].map(s => (
+          <div key={s.label} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 16px', textAlign: 'right' }}>
+            <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-3)', marginBottom: '3px' }}>{s.label}</div>
+            <Money value={s.value} style={{ fontWeight: 650, fontSize: '15px', color: s.color }} />
+          </div>
+        ))}
       </div>
 
       {showForm && (
@@ -636,36 +674,38 @@ function MemoriaalTab({ entries, setEntries }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
-            <button onClick={handleAdd} style={{ background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '9px 18px', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}>Boeken</button>
-            <button onClick={() => setShowForm(false)} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px', padding: '9px 14px', color: 'var(--text-2)', fontSize: '13px', cursor: 'pointer' }}>Annuleren</button>
+            <Button onClick={handleAdd}>Boeken</Button>
+            <Button variant="secondary" onClick={() => setShowForm(false)}>Annuleren</Button>
           </div>
         </Card>
       )}
 
       <Card>
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table className="ledger">
             <thead>
               <tr>
-                {['Datum', 'Omschrijving', 'Categorie', 'Type', 'Bedrag', 'Acties'].map(h => (
-                  <th key={h} style={th}>{h}</th>
+                {['Datum', 'Omschrijving', 'Categorie', 'Type', 'Bedrag', ''].map((h, hi) => (
+                  <th key={hi} className={hi >= 4 ? 'r' : ''}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {(entries || []).length === 0 ? (
+              {shown.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ ...td, textAlign: 'center', color: 'var(--text-3)', padding: '40px' }}>
-                    Nog geen memoriaalboekingen. Gebruik dit voor correcties, restverschillen en terugboekingen.
+                    {(entries || []).length === 0
+                      ? 'Nog geen memoriaalboekingen. Gebruik dit voor correcties, restverschillen en terugboekingen.'
+                      : `Geen boekingen in ${year}.`}
                   </td>
                 </tr>
-              ) : (entries || []).map(e => (
+              ) : shown.map(e => (
                 <tr key={e.id} style={{ opacity: e.is_reversal ? 0.75 : 1 }}>
                   <td style={td}><span style={{ fontSize: '12px', color: 'var(--text-2)' }}>{fmtDate(e.date)}</span></td>
                   <td style={td}>
                     {e.description}
                     {e.is_reversal && (
-                      <span style={{ marginLeft: '8px', fontSize: '10px', background: 'var(--warning-soft)', color: 'var(--warning)', padding: '1px 6px', borderRadius: '8px' }}>Terugboeking</span>
+                      <span style={{ marginLeft: '8px', fontSize: '11px', background: 'var(--warning-soft)', color: 'var(--warning)', padding: '1px 6px', borderRadius: '8px' }}>Terugboeking</span>
                     )}
                   </td>
                   <td style={td}><span style={{ fontSize: '12px', color: 'var(--text-3)' }}>{e.category}</span></td>
@@ -678,23 +718,22 @@ function MemoriaalTab({ entries, setEntries }) {
                       {entryIsCredit(e) ? 'Credit' : 'Debet'}
                     </span>
                   </td>
-                  <td style={td}>
-                    <span style={{ fontFamily: 'monospace', fontWeight: '700', color: entryIsCredit(e) ? 'var(--success)' : 'var(--danger)' }}>
-                      {entryIsCredit(e) ? '+' : '−'}{fmtEUR(e.amount)}
-                    </span>
+                  <td className="r">
+                    <Money value={entryIsCredit(e) ? Math.abs(Number(e.amount || 0)) : -Math.abs(Number(e.amount || 0))} signed style={{ fontWeight: 600, color: entryIsCredit(e) ? 'var(--success)' : 'var(--danger)' }} />
                   </td>
-                  <td style={td}>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                      {!e.is_reversal && (
-                        <button onClick={() => handleReverse(e)} title="Maak een tegengestelde boeking aan"
-                          style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--warning-soft)', border: 'none', borderRadius: '6px', padding: '4px 9px', color: 'var(--warning)', fontSize: '11px', fontWeight: '600', cursor: 'pointer' }}>
+                  <td className="r">
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'flex-end' }}>
+                      {!e.is_reversal && !isReversed(e) && (
+                        <Button size="sm" variant="secondary" onClick={() => handleReverse(e)} title="Maak een tegengestelde boeking aan">
                           <RotateCcw size={11} /> Terugboeken
-                        </button>
+                        </Button>
                       )}
-                      <button onClick={() => handleDelete(e.id)}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: '4px', display: 'flex' }}>
+                      {!e.is_reversal && isReversed(e) && (
+                        <span style={{ fontSize: '12px', color: 'var(--text-3)' }}>Teruggeboekt</span>
+                      )}
+                      <Button size="sm" variant="ghost" onClick={() => handleDelete(e.id)} title="Verwijderen" aria-label="Verwijderen" style={{ padding: '0 8px', color: 'var(--danger)' }}>
                         <Trash2 size={13} />
-                      </button>
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -709,16 +748,10 @@ function MemoriaalTab({ entries, setEntries }) {
 
 // ── Grootboek tab ─────────────────────────────────────────────────────────────
 function GrootboekTab({ invoices, expenses, entries, clients, ledgerAccounts }) {
-  const currentYear = new Date().getFullYear()
+  const currentYear = currentYearNow()
   const [year, setYear] = useState(currentYear)
 
-  const years = useMemo(() => {
-    const set = new Set([currentYear, currentYear - 1, currentYear - 2])
-    ;(invoices || []).forEach(i => { const d = i.issueDate || i.date; if (d) set.add(new Date(d).getFullYear()) })
-    ;(expenses || []).forEach(e => e.date && set.add(new Date(e.date).getFullYear()))
-    ;(entries || []).forEach(e => e.date && set.add(new Date(e.date).getFullYear()))
-    return [...set].sort((a, b) => b - a)
-  }, [invoices, expenses, entries, currentYear])
+  const years = useMemo(() => collectYears(invoices, expenses, entries), [invoices, expenses, entries])
 
   const rows = useMemo(() => {
     const out = []
@@ -790,8 +823,8 @@ function GrootboekTab({ invoices, expenses, entries, clients, ledgerAccounts }) 
             { label: 'Totaal', value: totals.grandTotal, color: totals.grandTotal >= 0 ? 'var(--success)' : 'var(--danger)' },
           ].map(s => (
             <div key={s.label} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 16px', textAlign: 'right' }}>
-              <div style={{ fontSize: '10px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: '3px' }}>{s.label}</div>
-              <div style={{ fontFamily: 'monospace', fontWeight: '700', fontSize: '15px', color: s.color }}>{fmtEUR(s.value)}</div>
+              <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-3)', marginBottom: '3px' }}>{s.label}</div>
+              <Money value={s.value} style={{ fontWeight: 650, fontSize: '15px', color: s.color }} />
             </div>
           ))}
         </div>
@@ -803,11 +836,11 @@ function GrootboekTab({ invoices, expenses, entries, clients, ledgerAccounts }) 
           <span style={{ fontWeight: '600', color: 'var(--text)', fontSize: '14px' }}>Grootboek {year}</span>
         </div>
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table className="ledger">
             <thead>
               <tr>
-                {['Datum', 'Type', 'Met wie / omschrijving', 'Grootboek', 'Bedrag'].map(h => (
-                  <th key={h} style={th}>{h}</th>
+                {['Datum', 'Type', 'Met wie / omschrijving', 'Grootboek', 'Bedrag'].map((h, hi) => (
+                  <th key={h} className={hi === 4 ? 'r' : ''}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -836,17 +869,15 @@ function GrootboekTab({ invoices, expenses, entries, clients, ledgerAccounts }) 
                   <td style={td}>
                     {r.ledger ? (
                       <>
-                        <span style={{ fontFamily: 'monospace', fontSize: '12px', fontWeight: '600', color: 'var(--text-2)' }}>{r.ledger}</span>
+                        <span className="num" style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-2)' }}>{r.ledger}</span>
                         {ledgerLabel(ledgerAccounts, r.ledger) && (
                           <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '2px' }}>{ledgerLabel(ledgerAccounts, r.ledger)}</div>
                         )}
                       </>
                     ) : <span style={{ fontSize: '12px', color: 'var(--text-3)' }}>—</span>}
                   </td>
-                  <td style={td}>
-                    <span style={{ fontFamily: 'monospace', fontWeight: '700', color: r.amount >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                      {r.amount >= 0 ? '+' : '−'}{fmtEUR(Math.abs(r.amount))}
-                    </span>
+                  <td className="r">
+                    <Money value={r.amount} signed style={{ fontWeight: 600, color: r.amount >= 0 ? 'var(--success)' : 'var(--danger)' }} />
                   </td>
                 </tr>
               ))}
@@ -854,11 +885,9 @@ function GrootboekTab({ invoices, expenses, entries, clients, ledgerAccounts }) 
             {rows.length > 0 && (
               <tfoot>
                 <tr>
-                  <td colSpan={4} style={{ ...td, fontWeight: '700', borderBottom: 'none' }}>Totaal</td>
-                  <td style={{ ...td, borderBottom: 'none' }}>
-                    <span style={{ fontFamily: 'monospace', fontWeight: '800', fontSize: '14px', color: totals.grandTotal >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                      {fmtEUR(totals.grandTotal)}
-                    </span>
+                  <td colSpan={4}>Totaal</td>
+                  <td className="r">
+                    <Money value={totals.grandTotal} style={{ fontSize: '14px', color: totals.grandTotal >= 0 ? 'var(--success)' : 'var(--danger)' }} />
                   </td>
                 </tr>
               </tfoot>
@@ -874,20 +903,18 @@ function GrootboekTab({ invoices, expenses, entries, clients, ledgerAccounts }) 
 // ── Balans tab ────────────────────────────────────────────────────────────────
 // Indicatieve balans op een peildatum. Eigen vermogen is de sluitpost (bezittingen − schulden).
 function BalansTab({ invoices, expenses, assets, transactions, purchaseInvoices, clients }) {
-  const currentYear = new Date().getFullYear()
+  const currentYear = currentYearNow()
   const [peil, setPeil] = useState(todayISO())
   const peilDate = new Date(peil + 'T23:59:59')
   const peilYear = peilDate.getFullYear()
 
   const data = useMemo(() => {
-    // Vaste activa: boekwaarde op peildatum (lineair, hele jaren)
-    const fixed = (assets || []).filter(a => a.is_active !== false && a.purchase_date && new Date(a.purchase_date) <= peilDate).map(a => {
-      const pv = parseFloat(a.purchase_value) || 0
-      const rv = parseFloat(a.residual_value) || 0
-      const yrs = parseInt(a.depreciation_years) || 1
-      const elapsed = Math.min(yrs, Math.max(0, peilYear - new Date(a.purchase_date).getFullYear() + (peil.endsWith('12-31') ? 1 : 0)))
-      return { label: a.name, value: Math.max(rv, pv - ((pv - rv) / yrs) * elapsed) }
-    })
+    // Vaste activa: boekwaarde na afschrijving van het peiljaar — exact dezelfde regel als de W&V
+    // (aanschafjaar = volledig eerste jaar). Afgeboekte activa tellen mee tot hun afboekdatum.
+    const fixed = (assets || [])
+      .filter(a => a.purchase_date && String(a.purchase_date).slice(0, 10) <= peil)
+      .filter(a => a.is_active !== false || (a.deactivatedAt && String(a.deactivatedAt).slice(0, 10) > peil))
+      .map(a => ({ label: a.name, value: assetBookValueForBalance(a, peilYear) }))
     // Debiteuren: openstaande facturen met factuurdatum t/m peildatum
     const debtors = (invoices || []).filter(i => invoiceDate(i) && new Date(invoiceDate(i)) <= peilDate)
       .map(i => ({ label: `${i.number} · ${(clients || []).find(c => c.id === i.clientId)?.name || ''}`, value: invoiceOpenAmount(i) }))
@@ -928,12 +955,12 @@ function BalansTab({ invoices, expenses, assets, transactions, purchaseInvoices,
       {groups.map(g => (
         <div key={g.title}>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 16px 4px', fontSize: '12.5px', color: 'var(--text-2)', fontWeight: 600 }}>
-            <span>{g.title}</span><span className="money">{fmtEUR(data.sum(g.rows))}</span>
+            <span>{g.title}</span><Money value={data.sum(g.rows)} />
           </div>
           {g.rows.length === 0 && <div style={{ padding: '2px 16px 8px 28px', fontSize: '12px', color: 'var(--text-3)' }}>Geen</div>}
           {g.rows.slice(0, 8).map((r, i) => (
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '3px 16px 3px 28px', fontSize: '12.5px', color: 'var(--text-3)' }}>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</span><span className="money">{fmtEUR(r.value)}</span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</span><Money value={r.value} />
             </div>
           ))}
           {g.rows.length > 8 && <div style={{ padding: '2px 16px 6px 28px', fontSize: '12px', color: 'var(--text-3)' }}>en nog {g.rows.length - 8}</div>}
@@ -941,7 +968,7 @@ function BalansTab({ invoices, expenses, assets, transactions, purchaseInvoices,
       ))}
       {extra}
       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', marginTop: 8, borderTop: '1px solid var(--border-2)', fontWeight: 700, fontSize: '14px', color: 'var(--text)' }}>
-        <span>Totaal</span><span className="money">{fmtEUR(total)}</span>
+        <span>Totaal</span><Money value={total} />
       </div>
     </Card>
   )
@@ -951,17 +978,21 @@ function BalansTab({ invoices, expenses, assets, transactions, purchaseInvoices,
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '13px', color: 'var(--text-3)' }}>Peildatum</span>
         <input type="date" style={{ ...inp, width: 'auto', padding: '6px 10px' }} value={peil} onChange={e => e.target.value && setPeil(e.target.value)} />
-        {[currentYear - 1, currentYear - 2].map(y => (
-          <button key={y} onClick={() => setPeil(`${y}-12-31`)} style={{ fontSize: '12.5px', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-2)', background: peil === `${y}-12-31` ? 'var(--surface-3)' : 'transparent', color: 'var(--text-2)', cursor: 'pointer' }}>31-12-{y}</button>
-        ))}
-        <button onClick={() => setPeil(todayISO())} style={{ fontSize: '12.5px', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-2)', background: peil === todayISO() ? 'var(--surface-3)' : 'transparent', color: 'var(--text-2)', cursor: 'pointer' }}>Vandaag</button>
+        <Segmented
+          value={peil}
+          onChange={setPeil}
+          options={[
+            ...[currentYear - 1, currentYear - 2].map(y => ({ id: `${y}-12-31`, label: `31-12-${y}` })),
+            { id: todayISO(), label: 'Vandaag' },
+          ]}
+        />
       </div>
       <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
         <Side title="Bezittingen" groups={data.activa} total={data.totalActiva} />
         <Side title="Eigen vermogen en schulden" groups={data.schulden} total={data.totalActiva}
           extra={
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 16px 4px', fontSize: '12.5px', color: 'var(--text-2)', fontWeight: 600 }}>
-              <span>Eigen vermogen</span><span className="money" style={{ color: data.equity < 0 ? 'var(--danger)' : 'var(--text-2)' }}>{fmtEUR(data.equity)}</span>
+              <span>Eigen vermogen</span><Money value={data.equity} style={{ color: data.equity < 0 ? 'var(--danger)' : 'var(--text-2)' }} />
             </div>
           } />
       </div>
@@ -991,20 +1022,8 @@ export default function BoekhoudenView({ invoices, expenses, assets, setAssets, 
         <p style={{ color: 'var(--text-3)', fontSize: '13px', margin: 0 }}>{t('bk.subtitle')}</p>
       </div>
 
-      <div style={{ display: 'flex', gap: '2px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '10px', padding: '4px', marginBottom: '20px', width: 'fit-content' }}>
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            style={{
-              padding: '7px 18px', borderRadius: '7px', border: 'none', cursor: 'pointer', fontSize: '13px',
-              fontWeight: tab === t.id ? '600' : '500',
-              background: tab === t.id ? 'var(--seg-active)' : 'transparent',
-              color: tab === t.id ? 'var(--text)' : 'var(--text-3)',
-              boxShadow: tab === t.id ? '0 1px 4px rgba(0,0,0,0.12)' : 'none',
-              transition: 'all 0.12s',
-            }}>
-            {t.label}
-          </button>
-        ))}
+      <div style={{ marginBottom: '20px' }}>
+        <Segmented value={tab} onChange={setTab} options={tabs} />
       </div>
 
       {tab === 'wv' && <WinstVerliesTab invoices={invoices} expenses={expenses} assets={assets} entries={entries} clients={clients} ledgerAccounts={ledgerAccounts} />}

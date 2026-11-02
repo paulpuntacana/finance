@@ -3,19 +3,16 @@ import {
   Plus, Trash2, Edit3, Check, X, Paperclip, Download,
   FileText, CheckCircle2, Clock, Euro, Search, Repeat, RefreshCw,
 } from 'lucide-react'
+import { todayISO } from './finance'
+import { Button, Modal, Segmented, Money } from './ui'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const fmtEUR = (n) => {
-  const num = Number(n || 0)
-  return '€ ' + num.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
 const fmtDate = (iso) => {
   if (!iso) return '—'
   const d = new Date(iso)
   if (isNaN(d)) return '—'
   return d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
-const todayISO = () => new Date().toISOString().split('T')[0]
 const genId = () => `pi_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`
 const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader()
@@ -42,22 +39,10 @@ const inp = {
   borderRadius: '8px', color: 'var(--text)', padding: '9px 12px',
   fontSize: '13px', width: '100%', outline: 'none', boxSizing: 'border-box',
 }
-const th = {
-  textAlign: 'left', padding: '10px 16px', color: 'var(--text-3)',
-  fontSize: '11px', fontWeight: '600', textTransform: 'uppercase',
-  letterSpacing: '0.06em', borderBottom: '1px solid var(--border)',
-}
-const td = {
-  padding: '11px 16px', color: 'var(--text)', fontSize: '13px',
-  borderBottom: '1px solid var(--border)',
-}
-const Card = ({ children, style = {} }) => (
-  <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', ...style }}>
-    {children}
-  </div>
-)
+// Tabel gebruikt .ledger (index.css); td blijft voor incidentele overrides
+const td = {}
 const Label = ({ children }) => (
-  <div style={{ color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '5px' }}>
+  <div style={{ color: 'var(--text-2)', fontSize: '12.5px', fontWeight: '500', marginBottom: '5px' }}>
     {children}
   </div>
 )
@@ -115,8 +100,8 @@ function PurchaseInvoiceModal({ invoice, onSave, onClose }) {
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: '16px', width: '100%', maxWidth: '600px', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 80px rgba(0,0,0,0.4)' }}>
+    <Modal open onClose={onClose} size="md">
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
 
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
@@ -129,7 +114,7 @@ function PurchaseInvoiceModal({ invoice, onSave, onClose }) {
         </div>
 
         {/* Body */}
-        <div style={{ overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
           {/* Supplier with autocomplete */}
           <div style={{ position: 'relative' }}>
@@ -143,7 +128,7 @@ function PurchaseInvoiceModal({ invoice, onSave, onClose }) {
               autoComplete="off"
             />
             {showSuggestions && filteredSuggestions.length > 0 && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: '8px', zIndex: 100, boxShadow: '0 8px 24px rgba(0,0,0,0.2)', marginTop: '2px', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: '8px', zIndex: 100, boxShadow: 'var(--shadow-pop)', marginTop: '2px', overflow: 'hidden' }}>
                 {filteredSuggestions.slice(0, 5).map(s => (
                   <button key={s} onMouseDown={() => { update('supplier', s); setShowSuggestions(false) }}
                     style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', color: 'var(--text)' }}
@@ -197,8 +182,8 @@ function PurchaseInvoiceModal({ invoice, onSave, onClose }) {
             </div>
             <div>
               <Label>Totaal incl. BTW</Label>
-              <div style={{ ...inp, background: 'var(--surface-3)', color: 'var(--text-2)', cursor: 'default', fontFamily: 'monospace' }}>
-                {fmtEUR(form.totalAmount || 0)}
+              <div style={{ ...inp, background: 'var(--surface-3)', color: 'var(--text-2)', cursor: 'default' }}>
+                <Money value={form.totalAmount || 0} />
               </div>
             </div>
           </div>
@@ -251,11 +236,10 @@ function PurchaseInvoiceModal({ invoice, onSave, onClose }) {
                 </button>
               </div>
             ) : (
-              <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-                style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--surface-2)', border: '1px solid var(--border-2)', borderRadius: '8px', padding: '9px 14px', color: 'var(--text-3)', fontSize: '13px', cursor: 'pointer' }}>
+              <Button variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
                 <Paperclip size={14} />
                 {uploading ? 'Uploaden...' : 'Bestand toevoegen'}
-              </button>
+              </Button>
             )}
           </div>
 
@@ -268,16 +252,13 @@ function PurchaseInvoiceModal({ invoice, onSave, onClose }) {
 
         {/* Footer */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '16px 24px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-          <button onClick={onClose} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px', padding: '9px 14px', color: 'var(--text-2)', fontSize: '13px', cursor: 'pointer' }}>
-            Annuleren
-          </button>
-          <button onClick={handleSave} disabled={!isValid}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: isValid ? 'var(--accent)' : 'var(--surface-3)', border: 'none', borderRadius: '8px', padding: '9px 18px', color: isValid ? '#fff' : 'var(--text-3)', fontSize: '13px', fontWeight: '600', cursor: isValid ? 'pointer' : 'not-allowed' }}>
+          <Button variant="secondary" onClick={onClose}>Annuleren</Button>
+          <Button onClick={handleSave} disabled={!isValid}>
             <Check size={14} /> {invoice ? 'Opslaan' : 'Toevoegen'}
-          </button>
+          </Button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -357,22 +338,21 @@ export default function PurchaseInvoicesView({ purchaseInvoices, setPurchaseInvo
           <h1 className="page-title" style={{ margin: '0 0 4px' }}>Inkoop</h1>
           <p style={{ color: 'var(--text-3)', fontSize: '13px', margin: 0 }}>Inkomende facturen van leveranciers</p>
         </div>
-        <button onClick={() => { setEditItem(null); setShowModal(true) }}
-          style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '9px 16px', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}>
+        <Button onClick={() => { setEditItem(null); setShowModal(true) }}>
           <Plus size={15} /> Factuur toevoegen
-        </button>
+        </Button>
       </div>
 
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
         {[
-          { label: 'Openstaand', value: fmtEUR(unpaidTotal), sub: `${unpaidCount} factuur${unpaidCount !== 1 ? 'en' : ''}`, color: unpaidCount > 0 ? 'var(--danger)' : 'var(--text)' },
-          { label: 'Deze maand', value: fmtEUR(thisMonthTotal), color: 'var(--text)' },
+          { label: 'Openstaand', value: <Money value={unpaidTotal} />, sub: `${unpaidCount} factuur${unpaidCount !== 1 ? 'en' : ''}`, color: unpaidCount > 0 ? 'var(--danger)' : 'var(--text)' },
+          { label: 'Deze maand', value: <Money value={thisMonthTotal} />, color: 'var(--text)' },
           { label: 'Totaal facturen', value: String((purchaseInvoices || []).length), color: 'var(--text)' },
         ].map(s => (
           <div key={s.label} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px' }}>
-            <div style={{ fontSize: '10px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: '6px' }}>{s.label}</div>
-            <div style={{ fontFamily: 'monospace', fontWeight: '700', fontSize: '20px', color: s.color }}>{s.value}</div>
+            <div style={{ fontSize: '12.5px', fontWeight: '500', color: 'var(--text-3)', marginBottom: '6px' }}>{s.label}</div>
+            <div className="num" style={{ fontWeight: '650', fontSize: '20px', color: s.color }}>{s.value}</div>
             {s.sub && <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '3px' }}>{s.sub}</div>}
           </div>
         ))}
@@ -380,18 +360,15 @@ export default function PurchaseInvoicesView({ purchaseInvoices, setPurchaseInvo
 
       {/* Filter + search */}
       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <div style={{ display: 'flex', gap: '2px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px', padding: '3px' }}>
-          {[
-            { id: 'all', label: 'Alles' },
-            { id: 'unpaid', label: `Te betalen${unpaidCount > 0 ? ` (${unpaidCount})` : ''}` },
-            { id: 'paid', label: 'Betaald' },
-          ].map(f => (
-            <button key={f.id} onClick={() => setFilter(f.id)}
-              style={{ padding: '5px 12px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: filter === f.id ? '600' : '500', background: filter === f.id ? 'var(--seg-active)' : 'transparent', color: filter === f.id ? 'var(--text)' : 'var(--text-3)', boxShadow: filter === f.id ? '0 1px 4px rgba(0,0,0,0.12)' : 'none', transition: 'all 0.1s' }}>
-              {f.label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { id: 'all', label: 'Alles', count: (purchaseInvoices || []).length },
+            { id: 'unpaid', label: 'Te betalen', count: unpaidCount },
+            { id: 'paid', label: 'Betaald', count: (purchaseInvoices || []).length - unpaidCount },
+          ]}
+        />
         <div style={{ position: 'relative', flex: 1, minWidth: '180px' }}>
           <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
           <input style={{ ...inp, paddingLeft: '32px' }} value={search} onChange={e => setSearch(e.target.value)} placeholder="Zoek op leverancier of nummer..." />
@@ -411,11 +388,11 @@ export default function PurchaseInvoicesView({ purchaseInvoices, setPurchaseInvo
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table className="ledger">
               <thead>
                 <tr>
-                  {['Leverancier', 'Nummer', 'Datum', 'Vervalt', 'Bedrag', 'Categorie', 'Status', 'Acties'].map(h => (
-                    <th key={h} style={th}>{h}</th>
+                  {['Leverancier', 'Nummer', 'Datum', 'Vervalt', 'Bedrag', 'Categorie', 'Status', ''].map((h, hi) => (
+                    <th key={hi} className={hi === 4 || hi === 7 ? 'r' : ''}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -423,7 +400,7 @@ export default function PurchaseInvoicesView({ purchaseInvoices, setPurchaseInvo
                 {filtered.map(item => {
                   const due = isDueStatus(item)
                   return (
-                    <tr key={item.id} style={{ background: due === 'overdue' ? 'rgba(239,68,68,0.03)' : 'transparent' }}>
+                    <tr key={item.id} style={{ background: due === 'overdue' ? 'var(--danger-soft)' : undefined }}>
                       <td style={td}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{ fontWeight: '500' }}>{item.supplier || '—'}</span>
@@ -435,23 +412,21 @@ export default function PurchaseInvoicesView({ purchaseInvoices, setPurchaseInvo
                           )}
                         </div>
                       </td>
-                      <td style={{ ...td, fontSize: '12px', color: 'var(--text-3)', fontFamily: 'monospace' }}>{item.invoiceNumber || '—'}</td>
+                      <td className="num" style={{ fontSize: '12px', color: 'var(--text-3)' }}>{item.invoiceNumber || '—'}</td>
                       <td style={{ ...td, fontSize: '12px', color: 'var(--text-2)' }}>{fmtDate(item.date)}</td>
                       <td style={td}>
                         {item.dueDate ? (
                           <span style={{ fontSize: '12px', color: due === 'overdue' ? 'var(--danger)' : due === 'soon' ? 'var(--warning)' : 'var(--text-2)' }}>
                             {fmtDate(item.dueDate)}
-                            {due === 'overdue' && <span style={{ display: 'block', fontSize: '10px', fontWeight: '600' }}>Verlopen</span>}
-                            {due === 'soon' && <span style={{ display: 'block', fontSize: '10px', fontWeight: '600' }}>Bijna verlopen</span>}
+                            {due === 'overdue' && <span style={{ display: 'block', fontSize: '11px', fontWeight: '500' }}>Verlopen</span>}
+                            {due === 'soon' && <span style={{ display: 'block', fontSize: '11px', fontWeight: '500' }}>Bijna verlopen</span>}
                           </span>
                         ) : <span style={{ color: 'var(--text-3)', fontSize: '12px' }}>—</span>}
                       </td>
-                      <td style={td}>
-                        <span style={{ fontFamily: 'monospace', fontWeight: '700', color: item.status === 'unpaid' ? 'var(--danger)' : 'var(--text-2)' }}>
-                          {fmtEUR(item.totalAmount)}
-                        </span>
+                      <td className="r">
+                        <Money value={item.totalAmount} currency={item.currency || 'EUR'} style={{ fontWeight: 600, color: item.status === 'unpaid' ? 'var(--danger)' : 'var(--text-2)' }} />
                         {Number(item.btwAmount) > 0 && (
-                          <div style={{ fontSize: '10px', color: 'var(--text-3)' }}>excl. {fmtEUR(item.amount)}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>excl. <Money value={item.amount} currency={item.currency || 'EUR'} /></div>
                         )}
                       </td>
                       <td style={{ ...td, fontSize: '12px', color: 'var(--text-3)' }}>{item.category || '—'}</td>
@@ -467,13 +442,12 @@ export default function PurchaseInvoicesView({ purchaseInvoices, setPurchaseInvo
                           </span>
                         )}
                       </td>
-                      <td style={td}>
-                        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                      <td className="r">
+                        <div style={{ display: 'flex', gap: '4px', alignItems: 'center', justifyContent: 'flex-end' }}>
                           {item.status === 'unpaid' && (
-                            <button onClick={() => handleMarkPaid(item)} title="Markeer als betaald"
-                              style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--success-soft)', border: 'none', borderRadius: '6px', padding: '4px 9px', color: 'var(--success)', fontSize: '11px', fontWeight: '600', cursor: 'pointer' }}>
-                              <Check size={11} /> Betaald
-                            </button>
+                            <Button size="sm" variant="secondary" onClick={() => handleMarkPaid(item)} title="Markeer als betaald">
+                              <Check size={12} /> Betaald
+                            </Button>
                           )}
                           {item.attachment && (
                             <a href={item.attachment} download={item.attachmentName || 'bijlage'} title="Download bijlage"
@@ -481,14 +455,12 @@ export default function PurchaseInvoicesView({ purchaseInvoices, setPurchaseInvo
                               <Download size={12} />
                             </a>
                           )}
-                          <button onClick={() => { setEditItem(item); setShowModal(true) }}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: '4px', display: 'flex' }}>
+                          <Button size="sm" variant="ghost" title="Bewerken" aria-label="Bewerken" style={{ padding: '0 8px' }} onClick={() => { setEditItem(item); setShowModal(true) }}>
                             <Edit3 size={13} />
-                          </button>
-                          <button onClick={() => handleDelete(item.id)}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: '4px', display: 'flex' }}>
+                          </Button>
+                          <Button size="sm" variant="ghost" title="Verwijderen" aria-label="Verwijderen" style={{ padding: '0 8px', color: 'var(--danger)' }} onClick={() => handleDelete(item.id)}>
                             <Trash2 size={13} />
-                          </button>
+                          </Button>
                         </div>
                       </td>
                     </tr>
