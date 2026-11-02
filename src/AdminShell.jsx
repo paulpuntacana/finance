@@ -175,7 +175,7 @@ export default function AdminShell() {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         const { data: p } = await supabase.from('profiles').select('*').eq('id', session.user.id).single()
-        if (p?.role === 'platform_admin') {
+        if (p?.role === 'platform_admin' && p?.is_active !== false) {
           setUser(session.user)
           setProfile(p)
         } else {
@@ -192,7 +192,7 @@ export default function AdminShell() {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) { setLoginError(error.message); setLoginLoading(false); return }
     const { data: p } = await supabase.from('profiles').select('*').eq('id', data.user.id).single()
-    if (p?.role !== 'platform_admin') {
+    if (p?.role !== 'platform_admin' || p?.is_active === false) {
       await supabase.auth.signOut()
       setLoginError('Geen admin-toegang.')
       setLoginLoading(false)

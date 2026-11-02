@@ -7720,9 +7720,15 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
     );
   }
 
+  // AI-output is onbetrouwbare tekst: eerst ALLE HTML escapen, daarna pas **vet** toepassen.
+  const escapeHtml = (s) => String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const boldSafe = (s) => escapeHtml(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
   const renderMarkdown = (text) => {
     // Lightweight markdown rendering
-    const lines = text.split('\n');
+    const lines = String(text || '').split('\n');
     return lines.map((line, i) => {
       if (line.startsWith('## ')) return <h3 key={i} className="font-display text-xl font-medium mt-5 mb-2">{line.slice(3)}</h3>;
       if (line.startsWith('### ')) return <h4 key={i} className="font-semibold text-base mt-4 mb-1.5">{line.slice(4)}</h4>;
@@ -7732,12 +7738,10 @@ Max 500 woorden. Praktisch, concreet, geen algemene praatjes.`;
         if (m) return <div key={i} className="mt-3"><strong>{m[1]}. {m[2]}</strong>{m[3] && `: ${m[3]}`}</div>;
       }
       if (line.startsWith('- ')) {
-        const content = line.slice(2).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-        return <li key={i} className="ml-5 list-disc" dangerouslySetInnerHTML={{ __html: content }} />;
+        return <li key={i} className="ml-5 list-disc" dangerouslySetInnerHTML={{ __html: boldSafe(line.slice(2)) }} />;
       }
       if (line.trim() === '') return <div key={i} className="h-2" />;
-      const content = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-      return <p key={i} className="leading-relaxed" dangerouslySetInnerHTML={{ __html: content }} />;
+      return <p key={i} className="leading-relaxed" dangerouslySetInnerHTML={{ __html: boldSafe(line) }} />;
     });
   };
 
@@ -9486,14 +9490,24 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
   const [settings, setSettings, settingsLoaded] = useCloudStorage('settings', DEFAULT_SETTINGS);
   const [userApiKeys, saveUserApiKeys] = useCloudStorage('userApiKeys', { apiKey: '', openaiApiKey: '' });
 
+  // Import-token voor Make.com: alleen de SHA-256-hash gaat naar de database
+  // (user_settings.api_token_hash, migratie v7). Het token zelf wordt één keer getoond.
   const generateImportToken = async () => {
-    if (!user?.id) return
-    const token = crypto.randomUUID()
-    await supabase.from('user_settings').upsert(
-      { user_id: user.id, org_id: profile?.organization_id || null, api_token: token, updated_at: new Date().toISOString() },
+    if (!user?.id) return null
+    const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '')
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+    const hash = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('')
+    // org_id en user_id worden server-side afgedwongen (trigger), maar user_id is nodig voor de upsert.
+    const { error } = await supabase.from('user_settings').upsert(
+      { user_id: user.id, api_token_hash: hash, updated_at: new Date().toISOString() },
       { onConflict: 'user_id' }
     )
-    await saveUserApiKeys({ ...userApiKeys, importToken: token })
+    if (error) {
+      alert(`Token aanmaken mislukt: ${error.message}`)
+      return null
+    }
+    window.prompt('Je nieuwe API-token. Kopieer hem nu: hij wordt maar één keer getoond en is daarna niet meer op te vragen. Het vorige token werkt niet meer.', token)
+    return token
   }
 
   const effectiveSettings = useMemo(() => ({

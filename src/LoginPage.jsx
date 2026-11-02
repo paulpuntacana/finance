@@ -145,6 +145,12 @@ function FinanceIllustration() {
   )
 }
 
+const ORG_HINT = {
+  nl: 'Na het aanmaken van je account maak je een organisatie aan of sluit je aan met een uitnodigingscode.',
+  en: 'After creating your account you can create an organisation or join one with an invite code.',
+  es: 'Después de crear tu cuenta puedes crear una organización o unirte con un código de invitación.',
+}
+
 export default function LoginPage() {
   const { signIn, signUp, isConfigured } = useAuth()
   const { t, lang, setLang, LANGUAGES } = useLang()
@@ -152,7 +158,6 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
-  const [inviteCode, setInviteCode] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -172,12 +177,10 @@ export default function LoginPage() {
     setError('')
     if (!fullName.trim()) { setError(t('login.nameRequired')); return }
     if (password.length < 8) { setError(t('login.passwordMin')); return }
-    if (inviteCode.trim().toUpperCase() !== 'DHS2026') {
-      setError(t('login.invalidInvite'))
-      return
-    }
+    // Registreren is open. Organisatie aanmaken of aansluiten (met uitnodigingscode)
+    // gebeurt na inloggen in de SetupWizard; de server controleert de code.
     setLoading(true)
-    const { error } = await signUp(email, password, fullName, '')
+    const { error } = await signUp(email, password, fullName)
     setLoading(false)
     if (error) setError(error.message)
     else setSuccess(t('login.emailConfirm'))
@@ -390,12 +393,9 @@ export default function LoginPage() {
                 </button>
               </div>
             </div>
-            <div>
-              <label style={{ display: 'block', color: '#475569', fontSize: '12px', fontWeight: '600', marginBottom: '7px' }}>
-                {t('login.inviteCode')} <span style={{ color: '#EF4444', fontWeight: '600' }}>{t('login.inviteCodeRequired')}</span>
-              </label>
-              <input className="lp-inp" type="text" value={inviteCode} onChange={e => setInviteCode(e.target.value)} placeholder={t('login.inviteCodePlaceholder')} />
-            </div>
+            <p style={{ color: '#64748B', fontSize: '12.5px', lineHeight: 1.55, margin: 0 }}>
+              {ORG_HINT[lang] || ORG_HINT.nl}
+            </p>
             <button type="submit" disabled={loading} className="lp-btn-primary" style={{ marginTop: '4px' }}>
               {loading
                 ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> {t('login.creating')}</>

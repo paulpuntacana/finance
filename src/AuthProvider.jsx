@@ -713,34 +713,15 @@ export const AuthProvider = ({ children }) => {
     return { data, error }
   }
 
-  const signUp = async (email, password, fullName, inviteCode) => {
+  // Registreren maakt alleen een account aan. Aansluiten bij of aanmaken van een
+  // organisatie gebeurt ná inloggen in de SetupWizard (via RPC's die de server controleert).
+  const signUp = async (email, password, fullName) => {
     if (!isSupabaseConfigured) return { error: { message: 'Supabase niet geconfigureerd.' } }
-
-    // Check invite code → employee joining an org
-    let orgId = null
-    if (inviteCode) {
-      const { data: org } = await supabase
-        .from('organizations')
-        .select('id')
-        .eq('invite_code', inviteCode.trim().toLowerCase())
-        .single()
-      if (org) orgId = org.id
-    }
-
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { full_name: fullName } },
     })
-
-    if (!error && data.user && orgId) {
-      // Update profile with org + employee role
-      await supabase
-        .from('profiles')
-        .update({ organization_id: orgId, role: 'employee' })
-        .eq('id', data.user.id)
-    }
-
     return { data, error }
   }
 
@@ -762,30 +743,45 @@ export const AuthProvider = ({ children }) => {
     return { error: null }
   }
 
+  // RPC-fouten → begrijpelijke Nederlandse melding
+  const rpcError = (error, fallback) => {
+    const msg = error?.message || ''
+    if (/could not find the function|PGRST202/i.test(msg)) {
+      return new Error('Deze functie is nog niet beschikbaar op de server (database-migratie v7 ontbreekt).')
+    }
+    return new Error(msg || fallback)
+  }
+
+  // Organisatie aanmaken + jezelf org_owner maken gebeurt atomair op de server.
   const createOrg = async (name) => {
     if (!isSupabaseConfigured || !user) return { error: new Error('Niet geconfigureerd') }
-    const { data: org, error: orgErr } = await supabase
-      .from('organizations')
-      .insert({ name: name.trim(), plan: 'starter' })
-      .select()
-      .single()
-    if (orgErr) return { error: orgErr }
-    const roleUpdate = profile?.role === 'platform_admin' ? {} : { role: 'org_owner' }
-    const { error: profileErr } = await supabase
-      .from('profiles')
-      .update({ organization_id: org.id, ...roleUpdate })
-      .eq('id', user.id)
-    if (!profileErr) {
-      setProfile(p => ({ ...p, organization_id: org.id, ...roleUpdate }))
-      setOrganization(org)
-    }
-    return { data: org, error: profileErr }
+    const { data, error } = await supabase.rpc('create_organization', { p_name: (name || '').trim() })
+    if (error) return { error: rpcError(error, 'Organisatie aanmaken is mislukt.') }
+    const org = Array.isArray(data) ? data[0] : data
+    if (!org?.id) return { error: new Error('Organisatie aanmaken is mislukt.') }
+    setProfile(p => ({ ...p, organization_id: org.id, role: p?.role === 'platform_admin' ? p.role : 'org_owner' }))
+    setOrganization({ id: org.id, name: org.name, plan: org.plan })
+    return { data: org, error: null }
+  }
+
+  // Aansluiten via uitnodigingscode (server zet org + rol employee/meekijk)
+  const joinOrgByInvite = async (code) => {
+    if (!isSupabaseConfigured || !user) return { error: new Error('Niet geconfigureerd') }
+    const { data: orgId, error } = await supabase.rpc('join_org_by_invite', { p_code: (code || '').trim() })
+    if (error) return { error: rpcError(error, 'Aansluiten is mislukt.') }
+    await fetchProfile(user.id)
+    return { data: orgId, error: null }
   }
 
   const updateOrganization = async (updates) => {
     if (!isSupabaseConfigured || !organization?.id) return
-    await supabase.from('organizations').update(updates).eq('id', organization.id)
+    const { error } = await supabase.from('organizations').update(updates).eq('id', organization.id)
+    if (error) {
+      console.error('[updateOrganization] Supabase error:', error.message)
+      return { error }
+    }
     setOrganization(o => ({ ...o, ...updates }))
+    return { error: null }
   }
 
   const isPlatformAdmin = profile?.role === 'platform_admin'
@@ -797,7 +793,7 @@ export const AuthProvider = ({ children }) => {
   return (
     <AuthContext.Provider value={{
       user, profile, organization, loading, profileLoading,
-      signIn, signUp, signOut, updateProfile, createOrg, updateOrganization,
+      signIn, signUp, signOut, updateProfile, createOrg, joinOrgByInvite, updateOrganization,
       isPlatformAdmin, isOrgOwner, isAccountant, isEmployee, isReadOnly,
       isConfigured: isSupabaseConfigured,
     }}>

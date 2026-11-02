@@ -1,36 +1,8 @@
 import { useState, useEffect } from 'react'
 import { supabase, isSupabaseConfigured } from './supabase'
-import { UserPlus, X, AlertCircle, Eye, EyeOff, RefreshCw, Users } from 'lucide-react'
-
-const inp = {
-  background: 'var(--surface-2)',
-  border: '1px solid var(--border-2)',
-  borderRadius: '8px',
-  color: 'var(--text)',
-  padding: '9px 12px',
-  fontSize: '13px',
-  width: '100%',
-  outline: 'none',
-  boxSizing: 'border-box',
-}
-
-const th = {
-  padding: '10px 12px',
-  textAlign: 'left',
-  fontSize: '11px',
-  fontWeight: '600',
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
-  color: 'var(--text-3)',
-  borderBottom: '1px solid var(--border)',
-}
-
-const td = {
-  padding: '12px',
-  fontSize: '13px',
-  color: 'var(--text)',
-  borderBottom: '1px solid var(--border)',
-}
+import { UserPlus, X, AlertCircle, RefreshCw, Users, Mail } from 'lucide-react'
+import { Button, Card, Input, Select, Modal, PageHeader, EmptyState } from './ui'
+import { inviteUser } from './manageUsers'
 
 const ROLE_LABELS = {
   accountant: { label: 'Accountant', color: 'var(--accent)', bg: 'var(--accent-soft)' },
@@ -38,140 +10,115 @@ const ROLE_LABELS = {
   org_owner:  { label: 'Eigenaar',   color: 'var(--warning)', bg: 'var(--warning-soft)' },
 }
 
-// ── Modal: voeg medewerker of accountant toe ───────────────────────────────────
+const ErrorBox = ({ children }) => (
+  <div role="alert" className="flex items-center gap-2 rounded-[8px] px-3 py-2.5 mb-4 text-[12.5px]" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>
+    <AlertCircle size={14} className="shrink-0" /> <span>{children}</span>
+  </div>
+)
+
+// ── Modal: nodig medewerker of accountant uit ─────────────────────────────────
 function AddUserModal({ orgId, onClose, onCreated }) {
-  const [form, setForm] = useState({ full_name: '', email: '', password: '', role: 'employee' })
+  const [form, setForm] = useState({ full_name: '', email: '', role: 'employee', access_type: 'bewerk' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [showPass, setShowPass] = useState(false)
+  const [sentTo, setSentTo] = useState('')
 
   const handleCreate = async (e) => {
     e.preventDefault()
-    if (!form.email || !form.full_name || form.password.length < 8) {
-      setError('Vul alle velden in (wachtwoord minimaal 8 tekens)')
+    if (!form.email.trim() || !form.full_name.trim()) {
+      setError('Vul naam en e-mailadres in.')
       return
     }
     setLoading(true)
     setError('')
-    const { data, error: err } = await supabase.auth.admin.createUser({
+    const { error: err } = await inviteUser({
       email: form.email,
-      password: form.password,
-      email_confirm: true,
-      user_metadata: { full_name: form.full_name },
+      fullName: form.full_name,
+      organizationId: orgId,
+      role: form.role,
+      accessType: form.role === 'accountant' ? form.access_type : 'meekijk',
     })
-    if (err) { setError(err.message); setLoading(false); return }
-    if (data?.user) {
-      await supabase.from('profiles').upsert({
-        id: data.user.id,
-        email: form.email,
-        full_name: form.full_name,
-        role: form.role,
-        organization_id: orgId,
-        is_active: true,
-      })
-    }
     setLoading(false)
+    if (err) { setError(err); return }
+    setSentTo(form.email.trim())
     onCreated()
-    onClose()
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border-2)', borderRadius: '16px', padding: '28px', width: '100%', maxWidth: '460px', boxShadow: '0 24px 80px rgba(0,0,0,0.4)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '22px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <Modal open onClose={onClose} size="sm">
+      <div className="p-6">
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-[10px] flex items-center justify-center" style={{ background: 'var(--accent-soft)' }}>
               <UserPlus size={17} style={{ color: 'var(--accent)' }} />
             </div>
             <div>
-              <h2 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: 'var(--text)' }}>Teamlid toevoegen</h2>
-              <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-3)' }}>Medewerker of accountant voor uw organisatie</p>
+              <h2 className="text-[16px] font-semibold m-0">Teamlid uitnodigen</h2>
+              <p className="text-[12px] m-0" style={{ color: 'var(--text-3)' }}>Medewerker of accountant voor je organisatie</p>
             </div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: '4px' }}>
-            <X size={18} />
-          </button>
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Sluiten"><X size={16} /></Button>
         </div>
 
-        {error && (
-          <div style={{ background: 'var(--danger-soft)', border: '1px solid var(--danger)', borderRadius: '8px', padding: '10px 12px', color: 'var(--danger)', fontSize: '12px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <AlertCircle size={14} /> {error}
-          </div>
-        )}
-
-        <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        {sentTo ? (
           <div>
-            <label style={{ display: 'block', color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '5px' }}>Volledige naam</label>
-            <input style={inp} value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} placeholder="Jan de Vries" required />
-          </div>
-          <div>
-            <label style={{ display: 'block', color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '5px' }}>E-mailadres</label>
-            <input style={inp} type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="jan@bedrijf.nl" required />
-          </div>
-          <div>
-            <label style={{ display: 'block', color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '5px' }}>Wachtwoord</label>
-            <div style={{ position: 'relative' }}>
-              <input
-                style={{ ...inp, paddingRight: '38px' }}
-                type={showPass ? 'text' : 'password'}
-                value={form.password}
-                onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                placeholder="Minimaal 8 tekens"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowPass(v => !v)}
-                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', padding: 0, display: 'flex' }}
-              >
-                {showPass ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
+            <div className="flex items-start gap-2 rounded-[8px] px-3 py-2.5 mb-4 text-[13px]" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}>
+              <Mail size={15} className="shrink-0 mt-0.5" />
+              <span>Uitnodiging verstuurd naar <strong>{sentTo}</strong>. Via de link in de mail kiest deze persoon zelf een wachtwoord.</span>
             </div>
+            <Button className="w-full" onClick={onClose}>Klaar</Button>
           </div>
-          <div>
-            <label style={{ display: 'block', color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '5px' }}>Rol</label>
-            <select style={inp} value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
-              <option value="employee">Medewerker — toegang tot dagelijkse administratie</option>
-              <option value="accountant">Accountant — boekhouding en rapportages bekijken</option>
-            </select>
-          </div>
-          <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
-            <button
-              type="submit"
-              disabled={loading}
-              style={{ flex: 1, background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '10px', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1 }}
-            >
-              {loading ? 'Aanmaken…' : 'Account aanmaken'}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px 16px', color: 'var(--text-2)', fontSize: '13px', cursor: 'pointer' }}
-            >
-              Annuleren
-            </button>
-          </div>
-        </form>
+        ) : (
+          <>
+            {error && <ErrorBox>{error}</ErrorBox>}
+            <form onSubmit={handleCreate} className="flex flex-col gap-3.5">
+              <Input label="Volledige naam" value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} placeholder="Jan de Vries" required />
+              <Input label="E-mailadres" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="jan@bedrijf.nl" required />
+              <Select label="Rol" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
+                <option value="employee">Medewerker — eigen declaraties en uren</option>
+                <option value="accountant">Accountant — boekhouding en rapportages</option>
+              </Select>
+              {form.role === 'accountant' && (
+                <Select label="Toegang" value={form.access_type} onChange={e => setForm(f => ({ ...f, access_type: e.target.value }))}>
+                  <option value="bewerk">Bewerken — kan boekingen aanpassen</option>
+                  <option value="meekijk">Meekijken — alleen lezen</option>
+                </Select>
+              )}
+              <p className="text-[12px] m-0" style={{ color: 'var(--text-3)' }}>
+                De persoon krijgt een e-mail met een link om een wachtwoord in te stellen.
+              </p>
+              <div className="flex gap-2.5 mt-1">
+                <Button type="submit" disabled={loading} className="flex-1">
+                  {loading ? 'Versturen…' : 'Uitnodiging versturen'}
+                </Button>
+                <Button type="button" variant="secondary" onClick={onClose}>Annuleren</Button>
+              </div>
+            </form>
+          </>
+        )}
       </div>
-    </div>
+    </Modal>
   )
 }
 
-// ── Hoofd component ────────────────────────────────────────────────────────────
+// ── Hoofdcomponent ───────────────────────────────────────────────────────────
 export default function OrgUsersView({ profile }) {
   const [members, setMembers] = useState([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const orgId = profile?.organization_id
 
   const load = async () => {
     if (!isSupabaseConfigured || !orgId) return
     setLoading(true)
-    const { data } = await supabase
+    const { data, error: err } = await supabase
       .from('profiles')
       .select('*')
       .eq('organization_id', orgId)
       .order('created_at', { ascending: false })
+    if (err) setError(`Teamleden laden mislukt: ${err.message}`)
+    else setError('')
     setMembers(data || [])
     setLoading(false)
   }
@@ -179,116 +126,109 @@ export default function OrgUsersView({ profile }) {
   useEffect(() => { load() }, [orgId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleActive = async (member) => {
-    await supabase.from('profiles').update({ is_active: !member.is_active }).eq('id', member.id)
-    setMembers(ms => ms.map(m => m.id === member.id ? { ...m, is_active: !m.is_active } : m))
+    setError('')
+    const next = !(member.is_active ?? true)
+    const { data, error: err } = await supabase.from('profiles').update({ is_active: next }).eq('id', member.id).select('id')
+    if (err) { setError(`Wijzigen mislukt: ${err.message}`); return }
+    if (!data?.length) { setError('Wijzigen mislukt: je hebt geen rechten om dit teamlid te beheren.'); return }
+    setMembers(ms => ms.map(m => m.id === member.id ? { ...m, is_active: next } : m))
   }
 
   if (!orgId) {
     return (
-      <div style={{ padding: '60px', textAlign: 'center', color: 'var(--text-3)' }}>
-        <Users size={32} style={{ marginBottom: '12px', opacity: 0.4, display: 'block', margin: '0 auto 12px' }} />
-        <p style={{ fontSize: '14px' }}>Geen organisatie gekoppeld aan uw account.</p>
-      </div>
+      <Card>
+        <EmptyState icon={Users} title="Geen organisatie" description="Er is geen organisatie gekoppeld aan je account." />
+      </Card>
     )
   }
 
+  const canManage = profile?.role === 'org_owner' || profile?.role === 'platform_admin'
+
   return (
-    <div style={{ maxWidth: '900px' }}>
+    <div className="space-y-5" style={{ maxWidth: 900 }}>
       {showCreate && (
         <AddUserModal orgId={orgId} onClose={() => setShowCreate(false)} onCreated={load} />
       )}
 
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
-        <div>
-          <h1 className="page-title" style={{ margin: '0 0 4px' }}>Teambeheer</h1>
-          <p style={{ color: 'var(--text-3)', fontSize: '13px', margin: 0 }}>Medewerkers en accountants van uw organisatie</p>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button
-            onClick={load}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 12px', color: 'var(--text-2)', fontSize: '12px', cursor: 'pointer' }}
-          >
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} /> Vernieuwen
-          </button>
-          <button
-            onClick={() => setShowCreate(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '8px 14px', color: '#fff', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}
-          >
-            <UserPlus size={14} /> Teamlid toevoegen
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Teambeheer"
+        sub="Medewerkers en accountants van je organisatie"
+        actions={<>
+          <Button variant="secondary" size="sm" onClick={load}>
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Vernieuwen
+          </Button>
+          {canManage && (
+            <Button size="sm" onClick={() => setShowCreate(true)}>
+              <UserPlus size={14} /> Teamlid uitnodigen
+            </Button>
+          )}
+        </>}
+      />
 
-      {/* Tabel */}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden' }}>
+      {error && <ErrorBox>{error}</ErrorBox>}
+
+      <Card className="overflow-hidden">
         {!isSupabaseConfigured ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-3)', fontSize: '13px' }}>
+          <div className="p-10 text-center text-[13px]" style={{ color: 'var(--text-3)' }}>
             Supabase niet geconfigureerd — gebruikersbeheer is niet beschikbaar.
           </div>
+        ) : members.length === 0 ? (
+          loading
+            ? <div className="p-10 text-center text-[13px]" style={{ color: 'var(--text-3)' }}>Laden…</div>
+            : <EmptyState icon={Users} title="Nog geen teamleden" description='Klik op "Teamlid uitnodigen" om te beginnen.' />
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                {['Gebruiker', 'Rol', 'Status', 'Acties'].map(h => (
-                  <th key={h} style={th}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {members.length === 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+              <thead>
                 <tr>
-                  <td colSpan={4} style={{ ...td, textAlign: 'center', padding: '40px', color: 'var(--text-3)' }}>
-                    {loading ? 'Laden…' : 'Nog geen teamleden — klik op "Teamlid toevoegen" om te beginnen.'}
-                  </td>
+                  {['Gebruiker', 'Rol', 'Status', ''].map(h => (
+                    <th key={h} className="text-left px-3 py-2.5 text-[12px] font-medium" style={{ color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                  ))}
                 </tr>
-              ) : members.map(m => {
-                const roleInfo = ROLE_LABELS[m.role] || { label: m.role, color: 'var(--text-3)', bg: 'var(--surface-3)' }
-                const isOwner = m.role === 'org_owner'
-                return (
-                  <tr key={m.id} style={{ opacity: m.is_active ? 1 : 0.5 }}>
-                    <td style={td}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: 'var(--accent)', fontSize: '13px', fontWeight: '700' }}>
-                          {(m.full_name || m.email || '?')[0].toUpperCase()}
+              </thead>
+              <tbody>
+                {members.map(m => {
+                  const roleInfo = ROLE_LABELS[m.role] || { label: m.role, color: 'var(--text-3)', bg: 'var(--surface-3)' }
+                  const active = m.is_active ?? true
+                  const isOwner = m.role === 'org_owner' || m.role === 'platform_admin'
+                  return (
+                    <tr key={m.id} style={{ opacity: active ? 1 : 0.55 }}>
+                      <td className="px-3 py-3 text-[13px]" style={{ borderBottom: '1px solid var(--border)' }}>
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-[13px] font-semibold" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                            {(m.full_name || m.email || '?')[0].toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-medium truncate">{m.full_name || '—'}</div>
+                            <div className="text-[11.5px] truncate" style={{ color: 'var(--text-3)' }}>{m.email}</div>
+                          </div>
                         </div>
-                        <div>
-                          <div style={{ fontWeight: '500' }}>{m.full_name || '—'}</div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>{m.email}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={td}>
-                      <span style={{ background: roleInfo.bg, color: roleInfo.color, fontSize: '11px', fontWeight: '600', padding: '3px 8px', borderRadius: '6px' }}>
-                        {roleInfo.label}
-                      </span>
-                    </td>
-                    <td style={td}>
-                      <span style={{
-                        background: m.is_active ? 'var(--success-soft)' : 'var(--surface-2)',
-                        color: m.is_active ? 'var(--success)' : 'var(--text-3)',
-                        fontSize: '11px', fontWeight: '600', padding: '3px 8px', borderRadius: '6px',
-                      }}>
-                        {m.is_active ? 'Actief' : 'Inactief'}
-                      </span>
-                    </td>
-                    <td style={td}>
-                      {!isOwner && (
-                        <button
-                          onClick={() => toggleActive(m)}
-                          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '6px', padding: '5px 10px', color: 'var(--text-2)', fontSize: '12px', cursor: 'pointer' }}
-                        >
-                          {m.is_active ? 'Deactiveren' : 'Activeren'}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                      </td>
+                      <td className="px-3 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+                        <span className="text-[11.5px] font-medium px-2 py-0.5 rounded-full" style={{ background: roleInfo.bg, color: roleInfo.color }}>
+                          {roleInfo.label}{m.access_type === 'meekijk' && m.role === 'accountant' ? ' · meekijken' : ''}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+                        <span className="text-[11.5px] font-medium px-2 py-0.5 rounded-full" style={{ background: active ? 'var(--success-soft)' : 'var(--surface-2)', color: active ? 'var(--success)' : 'var(--text-3)' }}>
+                          {active ? 'Actief' : 'Inactief'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-right" style={{ borderBottom: '1px solid var(--border)' }}>
+                        {canManage && !isOwner && (
+                          <Button variant="secondary" size="sm" onClick={() => toggleActive(m)}>
+                            {active ? 'Deactiveren' : 'Activeren'}
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
-      </div>
+      </Card>
     </div>
   )
 }

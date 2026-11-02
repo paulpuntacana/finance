@@ -1,24 +1,44 @@
-import { useState, useRef } from 'react'
-import { FileSignature, CheckCircle2, Check, AlertCircle, PenLine, Pen } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { FileSignature, CheckCircle2, Check, AlertCircle, PenLine, Loader2, X, Info } from 'lucide-react'
+import { supabase, isSupabaseConfigured } from './supabase'
+import { lineNet } from './finance'
+import { Button, Card, Input, Money } from './ui'
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// Publieke pagina voor klanten zonder account (?sign=TOKEN).
+// Offertes lopen via de RPC's get_quote_by_token / sign_quote (migratie v7):
+// de klant ziet alleen wat de RPC teruggeeft en kan precies één keer accepteren of afwijzen.
+
+const fmtDate = (iso) =>
+  iso ? new Date(iso).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long', year: 'numeric' }) : '—'
+
 const readLocal = (key) => {
   try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : null } catch { return null }
 }
 const writeLocal = (key, val) => {
-  try { localStorage.setItem(key, JSON.stringify(val)) } catch {}
+  try { localStorage.setItem(key, JSON.stringify(val)) } catch { /* opslag niet beschikbaar */ }
 }
-const fmtDate = (iso) =>
-  iso ? new Date(iso).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long', year: 'numeric' }) : '—'
+
+// Serverfout → leesbare tekst voor de klant
+const friendlyError = (msg = '') => {
+  if (/al verwerkt/i.test(msg)) return 'Deze offerte is al geaccepteerd of afgewezen.'
+  if (/verlopen/i.test(msg)) return 'Deze offerte is verlopen. Neem contact op met de afzender voor een nieuwe offerte.'
+  if (/niet gevonden|ongeldige link/i.test(msg)) return 'Deze link is ongeldig of verlopen.'
+  if (/naam is verplicht/i.test(msg)) return 'Vul je naam in (maximaal 200 tekens).'
+  if (/handtekening/i.test(msg)) return 'De handtekening kon niet worden verwerkt. Zet je handtekening opnieuw.'
+  if (/failed to fetch|network/i.test(msg)) return 'Geen verbinding met de server. Controleer je internet en probeer het opnieuw.'
+  return msg || 'Er ging iets mis. Probeer het later opnieuw.'
+}
 
 const ESIGN_FIELDS = [
-  { id: 'handtekening', label: 'Handtekening', color: '#6366f1' },
-  { id: 'naam',         label: 'Naam',         color: '#3b82f6' },
-  { id: 'datum',        label: 'Datum',        color: '#10b981' },
-  { id: 'tekst',        label: 'Vrij tekst',   color: '#f59e0b' },
+  { id: 'handtekening', label: 'Handtekening' },
+  { id: 'naam',         label: 'Naam' },
+  { id: 'datum',        label: 'Datum' },
+  { id: 'tekst',        label: 'Vrije tekst' },
 ]
 
-// ── Signature pad ─────────────────────────────────────────────────────────────
+const fieldLabel = 'block text-[12.5px] font-medium mb-1.5'
+
+// ── Handtekening-pad ─────────────────────────────────────────────────────────
 const SignaturePad = ({ onSave, onCancel }) => {
   const canvasRef = useRef(null)
   const [drawing, setDrawing] = useState(false)
@@ -52,62 +72,76 @@ const SignaturePad = ({ onSave, onCancel }) => {
     <div>
       <canvas
         ref={canvasRef} width={480} height={140}
-        style={{ background: '#fff', borderRadius: 10, border: '2px solid #e2e8f0', cursor: 'crosshair', touchAction: 'none', display: 'block', width: '100%' }}
+        aria-label="Tekenvlak voor handtekening"
+        style={{ background: '#fff', borderRadius: 'var(--radius)', border: '1px solid var(--border-2)', cursor: 'crosshair', touchAction: 'none', display: 'block', width: '100%' }}
         onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
         onTouchStart={start} onTouchMove={move} onTouchEnd={end}
       />
-      <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-        <button onClick={clear} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 14px', fontSize: 13, cursor: 'pointer', color: '#64748b' }}>
-          Wissen
-        </button>
-        <button onClick={() => onSave(canvasRef.current.toDataURL())} disabled={empty}
-          style={{ background: empty ? '#f1f5f9' : '#6366f1', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, color: empty ? '#94a3b8' : '#fff', cursor: empty ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div className="flex gap-2 mt-2.5 flex-wrap">
+        <Button variant="secondary" size="sm" onClick={clear}>Wissen</Button>
+        <Button size="sm" onClick={() => onSave(canvasRef.current.toDataURL('image/png'))} disabled={empty}>
           <Check size={14} /> Bevestigen
-        </button>
-        <button onClick={onCancel} style={{ background: 'none', border: 'none', fontSize: 12, color: '#94a3b8', cursor: 'pointer' }}>
-          Annuleren
-        </button>
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onCancel}>Annuleren</Button>
       </div>
     </div>
   )
 }
 
-// ── Not found ─────────────────────────────────────────────────────────────────
-const NotFound = ({ msg }) => (
-  <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-    <AlertCircle size={44} color="#94a3b8" style={{ margin: '0 auto 16px', display: 'block' }} />
-    <h2 style={{ color: '#334155', margin: '0 0 8px', fontSize: 20, fontWeight: 700 }}>Document niet gevonden</h2>
-    <p style={{ color: '#64748b', fontSize: 14, margin: 0 }}>{msg || 'De link is ongeldig of het document bestaat niet meer.'}</p>
-  </div>
-)
-
-// ── Success ───────────────────────────────────────────────────────────────────
-const Success = ({ title, sub, showAppLink }) => (
-  <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-    <div style={{ width: 68, height: 68, borderRadius: 20, background: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px' }}>
-      <CheckCircle2 size={34} color="#10b981" />
+const SignatureField = ({ sigData, setSigData }) => {
+  const [showPad, setShowPad] = useState(false)
+  if (sigData) return (
+    <div className="text-center">
+      <img src={sigData} alt="Handtekening" className="block mx-auto mb-2.5" style={{ maxHeight: 80, background: '#fff', borderRadius: 8, padding: 8, border: '1px solid var(--border-2)' }} />
+      <Button variant="secondary" size="sm" onClick={() => setSigData(null)}>Opnieuw</Button>
     </div>
-    <h2 style={{ color: '#0f172a', margin: '0 0 8px', fontSize: 22, fontWeight: 700 }}>{title}</h2>
-    <p style={{ color: '#64748b', fontSize: 14, margin: showAppLink ? '0 0 24px' : 0 }}>{sub}</p>
-    {showAppLink && (
-      <a href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#0f172a', color: '#fff', textDecoration: 'none', borderRadius: 10, padding: '10px 20px', fontSize: 13, fontWeight: 600 }}>
-        ← Terug naar DHS Finance
-      </a>
-    )}
+  )
+  if (showPad) return <SignaturePad onSave={d => { setSigData(d); setShowPad(false) }} onCancel={() => setShowPad(false)} />
+  return (
+    <button
+      type="button"
+      onClick={() => setShowPad(true)}
+      className="w-full flex items-center justify-center gap-2 text-[13px] p-5"
+      style={{ border: '2px dashed var(--border-3)', borderRadius: 'var(--radius)', background: 'var(--surface-2)', color: 'var(--text-2)', cursor: 'pointer' }}
+    >
+      <PenLine size={16} /> Klik hier om te ondertekenen
+    </button>
+  )
+}
+
+// ── Statusschermen ───────────────────────────────────────────────────────────
+const Notice = ({ icon: Icon = AlertCircle, title, msg, tone = 'muted' }) => (
+  <div className="text-center px-5 py-14">
+    <Icon size={44} className="mx-auto mb-4 block" style={{ color: tone === 'success' ? 'var(--success)' : 'var(--text-3)' }} />
+    <h2 className="text-[20px] font-semibold mb-2" style={{ color: 'var(--text)' }}>{title}</h2>
+    <p className="text-[14px] m-0 max-w-md mx-auto" style={{ color: 'var(--text-2)' }}>{msg}</p>
   </div>
 )
 
-// ── E-Sign public view ────────────────────────────────────────────────────────
+const ErrorBox = ({ children }) => (
+  <div role="alert" className="rounded-[10px] px-3.5 py-2.5 mb-4 text-[13px]" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>
+    {children}
+  </div>
+)
+
+// ── E-sign (nog alleen lokaal) ───────────────────────────────────────────────
+// E-sign-documenten staan (nog) alleen in de localStorage van de afzender; er is geen
+// serveropslag of publieke RPC voor. De link werkt daardoor alleen op het apparaat van de afzender.
 const EsignView = ({ token }) => {
   const [esignDocs, setEsignDocs] = useState(() => readLocal('dhs_esign_docs') || [])
   const [fieldValues, setFieldValues] = useState({})
-  const [showSigPad, setShowSigPad] = useState(false)
   const [sigData, setSigData] = useState(null)
   const [submitted, setSubmitted] = useState(false)
 
   const doc = esignDocs.find(d => d.signToken === token)
 
-  if (!doc) return <NotFound />
+  if (!doc) return (
+    <Notice
+      icon={Info}
+      title="Deze link werkt (nog) niet op dit apparaat"
+      msg="Digitaal ondertekenen van losse documenten werkt voorlopig alleen op het apparaat van de afzender. Neem contact op met de afzender om het document op een andere manier te ondertekenen."
+    />
+  )
 
   const sigFields = doc.fields?.filter(f => f.type === 'handtekening') || []
   const otherFields = doc.fields?.filter(f => f.type !== 'handtekening') || []
@@ -128,162 +162,164 @@ const EsignView = ({ token }) => {
   }
 
   if (doc.status === 'signed' || submitted) return (
-    <Success
-      title="Document ondertekend"
-      sub="Bedankt! Het document is succesvol ondertekend."
-      showAppLink
-    />
+    <Notice icon={CheckCircle2} tone="success" title="Document ondertekend" msg="Bedankt! Het document is ondertekend." />
   )
 
   return (
     <div>
-      {/* Document preview */}
-      <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #e2e8f0', marginBottom: 20, background: '#fff' }}>
-        {doc.fileType === 'image'
-          ? <img src={doc.fileData} style={{ display: 'block', width: '100%' }} alt="document" />
-          : (
-            <div style={{ position: 'relative' }}>
-              <iframe
-                src={doc.fileData}
-                style={{ display: 'block', width: '100%', height: 'clamp(340px, 65vh, 720px)', border: 'none' }}
-                title="document"
-              />
-              <div style={{ textAlign: 'center', padding: '6px 12px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', fontSize: 11, color: '#94a3b8' }}>
-                Scroll in het document om alle pagina's te bekijken
-              </div>
-            </div>
-          )
-        }
+      <div className="rounded-[10px] px-3.5 py-2.5 mb-4 text-[13px] flex gap-2 items-start" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
+        <Info size={15} className="shrink-0 mt-0.5" />
+        <span>Let op: dit document wordt alleen op dit apparaat opgeslagen. Ondertekenen via een link op een ander apparaat werkt nog niet.</span>
       </div>
 
-      {/* Sign card */}
-      <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', padding: 24 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>{doc.name}</h2>
-        <p style={{ color: '#64748b', fontSize: 13, margin: '0 0 24px' }}>Vul de gevraagde velden in en zet uw handtekening.</p>
+      <Card className="overflow-hidden mb-5">
+        {doc.fileType === 'image'
+          ? <img src={doc.fileData} className="block w-full" alt="Document" />
+          : <iframe src={doc.fileData} className="block w-full border-0" style={{ height: 'clamp(340px, 65vh, 720px)' }} title="Document" />
+        }
+      </Card>
 
-        {otherFields.map(f => {
-          const ft = ESIGN_FIELDS.find(t => t.id === f.type)
-          return (
-            <div key={f.id} style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', color: ft?.color || '#64748b', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
-                {f.label}
-              </label>
-              <input
-                style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, color: '#0f172a', padding: '10px 13px', fontSize: 14, width: '100%', outline: 'none', boxSizing: 'border-box' }}
-                type={f.type === 'datum' ? 'date' : 'text'}
-                value={fieldValues[f.id] || ''}
-                onChange={e => setFieldValues(v => ({ ...v, [f.id]: e.target.value }))}
-                placeholder={f.type === 'naam' ? 'Uw volledige naam' : f.label}
-              />
-            </div>
-          )
-        })}
+      <Card className="p-6">
+        <h2 className="text-[18px] font-semibold mb-1">{doc.name}</h2>
+        <p className="text-[13px] mb-6" style={{ color: 'var(--text-2)' }}>Vul de gevraagde velden in en zet je handtekening.</p>
+
+        {otherFields.map(f => (
+          <Input
+            key={f.id}
+            className="mb-4"
+            label={f.label || ESIGN_FIELDS.find(t => t.id === f.type)?.label}
+            type={f.type === 'datum' ? 'date' : 'text'}
+            value={fieldValues[f.id] || ''}
+            onChange={e => setFieldValues(v => ({ ...v, [f.id]: e.target.value }))}
+            placeholder={f.type === 'naam' ? 'Je volledige naam' : f.label}
+          />
+        ))}
 
         {sigFields.length > 0 && (
-          <div style={{ marginBottom: 24 }}>
-            <label style={{ display: 'block', color: '#6366f1', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
-              Handtekening
-            </label>
-            {sigData
-              ? (
-                <div style={{ textAlign: 'center' }}>
-                  <img src={sigData} alt="handtekening" style={{ maxHeight: 80, background: '#fff', borderRadius: 8, padding: 8, border: '1px solid #e2e8f0', display: 'block', margin: '0 auto 10px' }} />
-                  <button onClick={() => setSigData(null)} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 14px', fontSize: 12, cursor: 'pointer', color: '#64748b' }}>
-                    Opnieuw
-                  </button>
-                </div>
-              )
-              : showSigPad
-                ? <SignaturePad onSave={d => { setSigData(d); setShowSigPad(false) }} onCancel={() => setShowSigPad(false)} />
-                : (
-                  <button onClick={() => setShowSigPad(true)}
-                    style={{ width: '100%', border: '2px dashed #e2e8f0', borderRadius: 10, padding: 20, background: '#f8fafc', color: '#94a3b8', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                    <PenLine size={16} /> Klik hier om te ondertekenen
-                  </button>
-                )
-            }
+          <div className="mb-6">
+            <span className={fieldLabel} style={{ color: 'var(--text-2)' }}>Handtekening</span>
+            <SignatureField sigData={sigData} setSigData={setSigData} />
           </div>
         )}
 
-        <button onClick={handleSubmit} disabled={!allFilled}
-          style={{ width: '100%', background: allFilled ? '#10b981' : '#f1f5f9', border: 'none', borderRadius: 10, padding: 14, color: allFilled ? '#fff' : '#94a3b8', fontSize: 15, fontWeight: 700, cursor: allFilled ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          <Check size={18} /> Document ondertekenen &amp; bevestigen
-        </button>
-      </div>
+        <Button size="lg" className="w-full" onClick={handleSubmit} disabled={!allFilled}>
+          <Check size={18} /> Document ondertekenen
+        </Button>
+      </Card>
     </div>
   )
 }
 
-// ── Quote sign view ───────────────────────────────────────────────────────────
+// ── Offerte ondertekenen ─────────────────────────────────────────────────────
 const QuoteView = ({ token }) => {
-  const [quotes, setQuotes] = useState(() => readLocal('quotes') || [])
-  const [clients] = useState(() => readLocal('clients') || [])
+  const [state, setState] = useState({ loading: true, quote: null, error: '' })
   const [signerName, setSignerName] = useState('')
-  const [step, setStep] = useState('review')
+  const [step, setStep] = useState('review') // review | sign | decline | done
   const [sigData, setSigData] = useState(null)
-  const [showSigPad, setShowSigPad] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
+  const [result, setResult] = useState(null)
 
-  const quote = quotes.find(q => q.signToken === token)
-  const client = clients.find(c => c.id === quote?.clientId)
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      if (!isSupabaseConfigured) {
+        setState({ loading: false, quote: null, error: 'De server is niet bereikbaar.' })
+        return
+      }
+      const { data, error } = await supabase.rpc('get_quote_by_token', { p_token: token })
+      if (cancelled) return
+      if (error) setState({ loading: false, quote: null, error: friendlyError(error.message) })
+      else setState({ loading: false, quote: data || null, error: '' })
+    }
+    load()
+    return () => { cancelled = true }
+  }, [token])
 
-  if (!quote) return <NotFound msg="De offerte is niet gevonden. Controleer de link of neem contact op met de afzender." />
+  if (state.loading) return (
+    <div className="flex items-center justify-center gap-2 py-16 text-[14px]" style={{ color: 'var(--text-2)' }}>
+      <Loader2 size={16} className="animate-spin" /> Offerte laden…
+    </div>
+  )
+  if (state.error) return <Notice title="Offerte kon niet worden geladen" msg={state.error} />
+  const quote = state.quote
+  if (!quote) return <Notice title="Deze link is ongeldig of verlopen" msg="Controleer de link of neem contact op met de afzender." />
 
-  const handleSign = (sig) => {
-    const signedAt = new Date().toISOString()
-    const updated = quotes.map(q => q.id === quote.id ? {
-      ...q, status: 'accepted', signedAt, signatureData: sig, signerName,
-      history: [...(q.history || []), { status: 'accepted', at: signedAt, by: signerName }],
-    } : q)
-    writeLocal('quotes', updated)
-    setQuotes(updated)
+  const submit = async (status) => {
+    setSubmitError('')
+    if (!signerName.trim()) { setSubmitError('Vul je naam in.'); return }
+    if (status === 'accepted' && !sigData) { setSubmitError('Zet eerst je handtekening.'); return }
+    setSubmitting(true)
+    const { data, error } = await supabase.rpc('sign_quote', {
+      p_token: token,
+      p_name: signerName.trim(),
+      p_signature: status === 'accepted' ? sigData : null,
+      p_status: status,
+    })
+    setSubmitting(false)
+    if (error) { setSubmitError(friendlyError(error.message)); return }
+    setResult(data || { status, signedByName: signerName.trim(), signedAt: new Date().toISOString() })
     setStep('done')
   }
 
-  if (step === 'done' || quote.status === 'accepted') return (
-    <Success
-      title="Offerte geaccepteerd"
-      sub={`Ondertekend${signerName ? ` door ${signerName}` : ''}${quote.signedAt ? ` op ${fmtDate(quote.signedAt)}` : ''}.`}
-      showAppLink
-    />
-  )
+  const final = result || (quote.signedAt || ['accepted', 'declined', 'converted'].includes(quote.status)
+    ? { status: quote.status === 'declined' ? 'declined' : 'accepted', signedAt: quote.signedAt, signedByName: quote.signedByName }
+    : null)
 
-  const totals = (quote.items || []).reduce((acc, it) => {
-    const net = Number(it.quantity || 0) * Number(it.price || 0)
+  if (final) {
+    const by = `${final.signedByName ? ` door ${final.signedByName}` : ''}${final.signedAt ? ` op ${fmtDate(final.signedAt)}` : ''}`
+    return final.status === 'declined'
+      ? <Notice icon={X} title="Offerte afgewezen" msg={`Afgewezen${by}. De afzender is hiervan op de hoogte.`} />
+      : <Notice icon={CheckCircle2} tone="success" title="Offerte geaccepteerd" msg={`Ondertekend${by}. Bedankt!`} />
+  }
+
+  const expired = quote.validUntil && quote.validUntil < new Date().toISOString().slice(0, 10)
+  const currency = quote.currency || 'EUR'
+  const items = quote.items || []
+  const computed = items.reduce((acc, it) => {
+    const { net } = lineNet(it)
     return { sub: acc.sub + net, btw: acc.btw + net * (Number(it.btwRate || 0) / 100) }
   }, { sub: 0, btw: 0 })
-
-  const fmtEUR = n => '€\u00a0' + Number(n).toLocaleString('nl-NL', { minimumFractionDigits: 2 })
+  const subtotal = quote.subtotal != null ? Number(quote.subtotal) : computed.sub
+  const btwTotal = quote.btwTotal != null ? Number(quote.btwTotal) : computed.btw
+  const total = quote.total != null ? Number(quote.total) : subtotal + btwTotal
 
   return (
     <div>
-      {/* Quote card */}
-      <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', padding: 24, marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+      <Card className="p-6 mb-4">
+        <div className="flex items-start justify-between gap-3 mb-5 flex-wrap">
           <div>
-            <h2 style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>Offerte {quote.number}</h2>
-            {client && <p style={{ color: '#64748b', fontSize: 13, margin: 0 }}>Voor: <strong>{client.name}</strong></p>}
+            {quote.companyName && <p className="text-[12.5px] mb-1" style={{ color: 'var(--text-3)' }}>{quote.companyName}</p>}
+            <h2 className="text-[20px] font-semibold mb-1">Offerte {quote.number}</h2>
+            {quote.clientName && <p className="text-[13px] m-0" style={{ color: 'var(--text-2)' }}>Voor: <strong>{quote.clientName}</strong></p>}
           </div>
           {quote.validUntil && (
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 12px', fontSize: 12, color: '#64748b' }}>
-              Geldig tot {fmtDate(quote.validUntil)}
+            <div className="rounded-[8px] px-3 py-1.5 text-[12px]" style={{ background: expired ? 'var(--danger-soft)' : 'var(--surface-2)', color: expired ? 'var(--danger)' : 'var(--text-2)', border: '1px solid var(--border)' }}>
+              {expired ? 'Verlopen op' : 'Geldig tot'} {fmtDate(quote.validUntil)}
             </div>
           )}
         </div>
 
-        {quote.items?.length > 0 && (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        {quote.subject && <p className="text-[14px] font-medium mb-2">{quote.subject}</p>}
+        {quote.intro && <p className="text-[13.5px] mb-4 whitespace-pre-line" style={{ color: 'var(--text-2)' }}>{quote.intro}</p>}
+
+        {items.length > 0 && (
+          <table className="w-full" style={{ borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                <th style={{ textAlign: 'left', padding: '8px 0', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#94a3b8', borderBottom: '1px solid #f1f5f9' }}>Omschrijving</th>
-                <th style={{ textAlign: 'right', padding: '8px 0', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#94a3b8', borderBottom: '1px solid #f1f5f9' }}>Bedrag</th>
+                <th className="text-left py-2 text-[11.5px] font-medium" style={{ color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>Omschrijving</th>
+                <th className="text-right py-2 text-[11.5px] font-medium" style={{ color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>Bedrag</th>
               </tr>
             </thead>
             <tbody>
-              {quote.items.map((it, i) => (
+              {items.map((it, i) => (
                 <tr key={i}>
-                  <td style={{ padding: '10px 0', fontSize: 13, color: '#334155', borderBottom: '1px solid #f8fafc' }}>{it.description}</td>
-                  <td style={{ padding: '10px 0', fontSize: 13, color: '#334155', textAlign: 'right', borderBottom: '1px solid #f8fafc', fontVariantNumeric: 'tabular-nums' }}>
-                    {fmtEUR(Number(it.quantity || 0) * Number(it.price || 0))}
+                  <td className="py-2.5 text-[13px]" style={{ borderBottom: '1px solid var(--border)' }}>
+                    {it.description}
+                    {Number(it.quantity) !== 1 && <span style={{ color: 'var(--text-3)' }}> · {it.quantity} × <Money value={it.price} currency={currency} /></span>}
+                  </td>
+                  <td className="py-2.5 text-[13px] text-right" style={{ borderBottom: '1px solid var(--border)' }}>
+                    <Money value={lineNet(it).net} currency={currency} />
                   </td>
                 </tr>
               ))}
@@ -291,96 +327,90 @@ const QuoteView = ({ token }) => {
           </table>
         )}
 
-        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '2px solid #f1f5f9', display: 'flex', justifyContent: 'flex-end' }}>
+        <div className="mt-4 pt-3.5 flex justify-end" style={{ borderTop: '1px solid var(--border-2)' }}>
           <div style={{ minWidth: 200 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#64748b', marginBottom: 4 }}>
-              <span>Subtotaal</span><span>{fmtEUR(totals.sub)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#64748b', marginBottom: 8 }}>
-              <span>BTW</span><span>{fmtEUR(totals.btw)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 16, fontWeight: 700, color: '#0f172a' }}>
-              <span>Totaal</span><span>{fmtEUR(totals.sub + totals.btw)}</span>
-            </div>
+            <div className="flex justify-between text-[12.5px] mb-1" style={{ color: 'var(--text-2)' }}><span>Subtotaal</span><Money value={subtotal} currency={currency} /></div>
+            <div className="flex justify-between text-[12.5px] mb-2" style={{ color: 'var(--text-2)' }}><span>Btw</span><Money value={btwTotal} currency={currency} /></div>
+            <div className="flex justify-between text-[16px] font-semibold"><span>Totaal</span><Money value={total} currency={currency} /></div>
           </div>
         </div>
-      </div>
 
-      {step === 'review' && (
-        <button onClick={() => setStep('sign')}
-          style={{ width: '100%', background: '#10b981', border: 'none', borderRadius: 10, padding: 14, color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          <Check size={18} /> Accepteren &amp; ondertekenen
-        </button>
-      )}
+        {quote.notes && <p className="text-[12.5px] mt-5 whitespace-pre-line" style={{ color: 'var(--text-3)' }}>{quote.notes}</p>}
+      </Card>
 
-      {step === 'sign' && (
-        <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', padding: 24 }}>
-          <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700, color: '#0f172a' }}>Ondertekenen</h3>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: 'block', color: '#64748b', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Uw naam</label>
-            <input
-              style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, color: '#0f172a', padding: '10px 13px', fontSize: 14, width: '100%', outline: 'none', boxSizing: 'border-box' }}
-              value={signerName} onChange={e => setSignerName(e.target.value)}
-              placeholder="Voor- en achternaam"
-            />
-          </div>
-          <label style={{ display: 'block', color: '#6366f1', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Handtekening</label>
-          {sigData
-            ? (
-              <div style={{ textAlign: 'center', marginBottom: 16 }}>
-                <img src={sigData} alt="handtekening" style={{ maxHeight: 80, background: '#fff', borderRadius: 8, padding: 8, border: '1px solid #e2e8f0', display: 'block', margin: '0 auto 10px' }} />
-                <button onClick={() => setSigData(null)} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 14px', fontSize: 12, cursor: 'pointer', color: '#64748b' }}>Opnieuw</button>
-              </div>
-            )
-            : showSigPad
-              ? <SignaturePad onSave={d => { setSigData(d); setShowSigPad(false) }} onCancel={() => setShowSigPad(false)} />
-              : (
-                <button onClick={() => setShowSigPad(true)}
-                  style={{ width: '100%', border: '2px dashed #e2e8f0', borderRadius: 10, padding: 20, background: '#f8fafc', color: '#94a3b8', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 16 }}>
-                  <Pen size={16} /> Klik hier om te ondertekenen
-                </button>
-              )
-          }
-          {sigData && (
-            <button onClick={() => handleSign(sigData)} disabled={!signerName.trim()}
-              style={{ width: '100%', background: signerName.trim() ? '#10b981' : '#f1f5f9', border: 'none', borderRadius: 10, padding: 14, color: signerName.trim() ? '#fff' : '#94a3b8', fontSize: 15, fontWeight: 700, cursor: signerName.trim() ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              <Check size={18} /> Bevestigen &amp; ondertekenen
-            </button>
+      {expired ? (
+        <Notice title="Deze offerte is verlopen" msg="Neem contact op met de afzender voor een nieuwe offerte." />
+      ) : step === 'review' ? (
+        <div className="flex flex-col gap-2">
+          <Button size="lg" className="w-full" onClick={() => { setStep('sign'); setSubmitError('') }}>
+            <Check size={18} /> Accepteren en ondertekenen
+          </Button>
+          <Button variant="ghost" size="md" className="w-full" onClick={() => { setStep('decline'); setSubmitError('') }}>
+            Offerte afwijzen
+          </Button>
+        </div>
+      ) : (
+        <Card className="p-6">
+          <h3 className="text-[16px] font-semibold mb-4">{step === 'sign' ? 'Ondertekenen' : 'Offerte afwijzen'}</h3>
+          {submitError && <ErrorBox>{submitError}</ErrorBox>}
+          <Input
+            className="mb-4"
+            label="Je naam"
+            maxLength={200}
+            value={signerName}
+            onChange={e => setSignerName(e.target.value)}
+            placeholder="Voor- en achternaam"
+          />
+          {step === 'sign' && (
+            <div className="mb-4">
+              <span className={fieldLabel} style={{ color: 'var(--text-2)' }}>Handtekening</span>
+              <SignatureField sigData={sigData} setSigData={setSigData} />
+            </div>
           )}
-        </div>
+          <div className="flex flex-col gap-2">
+            {step === 'sign' ? (
+              <Button size="lg" className="w-full" onClick={() => submit('accepted')} disabled={submitting || !sigData || !signerName.trim()}>
+                {submitting ? <><Loader2 size={16} className="animate-spin" /> Bezig…</> : <><Check size={18} /> Bevestigen en ondertekenen</>}
+              </Button>
+            ) : (
+              <Button variant="danger" size="lg" className="w-full" onClick={() => submit('declined')} disabled={submitting || !signerName.trim()}>
+                {submitting ? <><Loader2 size={16} className="animate-spin" /> Bezig…</> : <>Offerte definitief afwijzen</>}
+              </Button>
+            )}
+            <Button variant="ghost" size="md" className="w-full" onClick={() => { setStep('review'); setSubmitError('') }} disabled={submitting}>
+              Terug
+            </Button>
+          </div>
+        </Card>
       )}
     </div>
   )
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
+// ── Hoofdcomponent ───────────────────────────────────────────────────────────
 export default function PublicSignPage({ signToken }) {
   const isEsign = signToken?.startsWith('esign_')
 
-  return (
-    <div style={{ minHeight: '100vh', background: '#f1f5f9', fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
-      <style>{`
-        *, *::before, *::after { box-sizing: border-box; }
-        body, html { margin: 0; padding: 0; background: #f1f5f9; -webkit-text-size-adjust: 100%; }
-        input, button, textarea { font-family: inherit; }
-        input:focus { border-color: #6366f1 !important; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
-      `}</style>
+  // Klantpagina altijd in licht thema
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', 'light')
+  }, [])
 
-      {/* Header */}
-      <div style={{ background: '#fff', borderBottom: '1px solid #e2e8f0', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 10, position: 'sticky', top: 0, zIndex: 50 }}>
-        <div style={{ width: 34, height: 34, borderRadius: 9, background: 'linear-gradient(135deg, #10b981, #059669)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+  return (
+    <div className="min-h-screen" style={{ background: 'var(--bg)', color: 'var(--text)', fontFamily: 'var(--font-ui)' }}>
+      <header className="sticky top-0 z-50 flex items-center gap-2.5 px-5 py-3.5" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
+        <div className="w-[34px] h-[34px] rounded-[9px] flex items-center justify-center shrink-0" style={{ background: 'var(--accent)' }}>
           <FileSignature size={17} color="#fff" />
         </div>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', lineHeight: 1.2 }}>DHS Finance</div>
-          <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.2 }}>Digitaal ondertekenen</div>
+          <div className="text-[14px] font-semibold leading-tight">DHS Finance</div>
+          <div className="text-[11.5px] leading-tight" style={{ color: 'var(--text-3)' }}>Digitaal ondertekenen</div>
         </div>
-      </div>
+      </header>
 
-      {/* Content */}
-      <div style={{ maxWidth: 680, margin: '0 auto', padding: '24px 16px 56px' }}>
+      <main className="mx-auto px-4 pt-6 pb-14" style={{ maxWidth: 680 }}>
         {isEsign ? <EsignView token={signToken} /> : <QuoteView token={signToken} />}
-      </div>
+      </main>
     </div>
   )
 }
