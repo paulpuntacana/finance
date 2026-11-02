@@ -15,7 +15,7 @@ import { monthlySeries, buildProfitLoss, invoiceOpenAmount, isRevenueInvoice, to
 import { Button, Segmented, Money } from './ui'
 
 const MONTHS = ['Jan','Feb','Mrt','Apr','Mei','Jun','Jul','Aug','Sep','Okt','Nov','Dec']
-const fmtK = n => n >= 1000 ? `€${(n/1000).toFixed(1)}k` : `€${n}`
+const fmtK = n => { const v = Number(n) || 0; return Math.abs(v) >= 1000 ? `€${(v/1000).toFixed(1)}k` : `€${Math.round(v)}` }
 const fmtEUR = n => '€ ' + Number(n||0).toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2})
 const pct = (a,b) => b ? ((a-b)/b*100).toFixed(1) : '—'
 const currentYear = new Date().getFullYear()
@@ -230,7 +230,7 @@ function BudgetSection({ invoices, expenses, horizonData, setHorizonData }) {
                     </td>
                     <td className={R}><span className="num" style={{ color: C.muted }}>{margin}%</span></td>
                     <td className={R}>{isPast ? <Money value={act.omzet} /> : <span style={{ color: C.muted }}>—</span>}</td>
-                    <td className={R}>{diff !== null ? <Badge v={parseFloat(pct(act.omzet, bud.omzet))} /> : <span style={{ color: C.muted }}>—</span>}</td>
+                    <td className={R}>{diff !== null && bud.omzet > 0 ? <Badge v={parseFloat(pct(act.omzet, bud.omzet))} /> : <span style={{ color: C.muted }}>—</span>}</td>
                   </tr>
                 )
               })}

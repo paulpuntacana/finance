@@ -10412,6 +10412,12 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
   const entityInvoices = invoices.filter(i => !i.entityId || i.entityId === activeEntityId);
   const entityExpenses = expenses.filter(e => !e.entityId || e.entityId === activeEntityId);
   const entityPurchaseInvoices = purchaseInvoices.filter(i => !i.entityId || i.entityId === activeEntityId);
+  // Nieuwe activa/journaalposten krijgen het actieve bedrijf mee (bestaande records blijven ongemoeid).
+  const withEntityTag = (setter) => (next) => setter(prev => {
+    const resolved = typeof next === 'function' ? next(prev) : next;
+    const known = new Set((prev || []).map(x => x.id));
+    return (resolved || []).map(x => (!known.has(x.id) && !x.entityId ? { ...x, entityId: activeEntityId } : x));
+  });
   const dataIssueCount = findDataIssues({ invoices, expenses, entries: boekEntries, transactions: bankTransactions, clients, purchaseInvoices }).filter(i => i.severity !== 'low').length;
 
   return (
@@ -10505,10 +10511,10 @@ export default function App({ signToken, accountantMode, onAccountantBack }) {
             <BoekhoudenView
               invoices={entityInvoices}
               expenses={entityExpenses}
-              assets={boekAssets}
-              setAssets={setBoekAssets}
-              entries={boekEntries}
-              setEntries={setBoekEntries}
+              assets={boekAssets.filter(a => !a.entityId || a.entityId === activeEntityId)}
+              setAssets={withEntityTag(setBoekAssets)}
+              entries={boekEntries.filter(e => !e.entityId || e.entityId === activeEntityId)}
+              setEntries={withEntityTag(setBoekEntries)}
               clients={clients}
               ledgerAccounts={getLedgerAccounts(activeEntity?.jurisdiction || effectiveSettings.jurisdiction || 'NL')}
               transactions={bankTransactions.filter(t => !t.entityId || t.entityId === activeEntityId)}
