@@ -30,21 +30,35 @@ export const lineNet = (it) => {
   return { base, discount, net: Math.min(0, base + discount) }
 }
 
+// Geldbedrag afronden op centen, symmetrisch rond nul (creditnota's spiegelen exact) en zonder
+// float-artefacten (1.005 → 1.01).
+export const roundMoney = (n) => {
+  const v = Number(n) || 0
+  const r = Math.round((Math.abs(v) + Number.EPSILON) * 100) / 100
+  return v < 0 ? -r : r
+}
+
+// Factuurtotalen. BTW wordt per tarief op centen afgerond en het totaal is de som van de
+// afgeronde bedragen — zo telt de geprinte factuur altijd exact op (subtotaal + BTW-regels = totaal).
 export const computeInvoice = (items = []) => {
   let subtotal = 0
   let totalDiscount = 0
-  const btwByRate = {}
-  const netByRate = {}
+  const btwRaw = {}
+  const netRaw = {}
   ;(items || []).forEach((it) => {
     const { discount, net } = lineNet(it)
     const rate = Number(it.btwRate || 0)
     subtotal += net
     totalDiscount += discount
-    btwByRate[rate] = (btwByRate[rate] || 0) + net * (rate / 100)
-    netByRate[rate] = (netByRate[rate] || 0) + net
+    btwRaw[rate] = (btwRaw[rate] || 0) + net * (rate / 100)
+    netRaw[rate] = (netRaw[rate] || 0) + net
   })
-  const btwTotal = Object.values(btwByRate).reduce((a, b) => a + b, 0)
-  return { subtotal, totalDiscount, btwByRate, netByRate, btwTotal, total: subtotal + btwTotal }
+  const btwByRate = {}
+  const netByRate = {}
+  Object.keys(btwRaw).forEach((r) => { btwByRate[r] = roundMoney(btwRaw[r]); netByRate[r] = roundMoney(netRaw[r]) })
+  const btwTotal = roundMoney(Object.values(btwByRate).reduce((a, b) => a + b, 0))
+  const sub = roundMoney(subtotal)
+  return { subtotal: sub, totalDiscount: roundMoney(totalDiscount), btwByRate, netByRate, btwTotal, total: roundMoney(sub + btwTotal) }
 }
 
 // Telt mee als omzet: alles wat verstuurd is (factuurstelsel), incl. creditnota's (negatief).
@@ -59,10 +73,26 @@ export const invoicePaidAmount = (inv) => {
   return Number(inv.paidAmount || 0)
 }
 
+// Openstaand bedrag. Creditnota's: de originele factuur blijft wettelijk bestaan en houdt zijn
+// status (een verstuurde factuur wordt nooit "betaald" door een creditnota), maar krijgt
+// `creditedAmount` (positief bedrag incl. BTW van de gekoppelde creditnota's). Dat deel is niet meer
+// verschuldigd en telt dus niet als openstaand. In omzet/BTW tellen factuur (+) en creditnota (−)
+// gewoon allebei mee, zodat het saldo klopt.
 export const invoiceOpenAmount = (inv) => {
   if (!isRevenueInvoice(inv) || inv.status === 'credit_note' || inv.status === 'paid') return 0
-  return Math.max(0, computeInvoice(inv.items).total - invoicePaidAmount(inv))
+  const credited = Math.max(0, Number(inv.creditedAmount || 0))
+  return Math.max(0, roundMoney(computeInvoice(inv.items).total - invoicePaidAmount(inv) - credited))
 }
+
+// Koers naar EUR (EUR per 1 eenheid factuurvaluta), vastgelegd op de factuurdatum.
+// EUR-facturen → 1. Vreemde valuta zonder koers → 1 (en `invoiceMissingRate` geeft dat aan).
+export const invoiceEurRate = (inv) => {
+  const cur = (inv?.currency || 'EUR').toUpperCase()
+  if (cur === 'EUR') return 1
+  const r = Number(inv?.exchangeRate)
+  return r > 0 ? r : 1
+}
+export const invoiceMissingRate = (inv) => (inv?.currency || 'EUR').toUpperCase() !== 'EUR' && !(Number(inv?.exchangeRate) > 0)
 
 // ── EU-landen (voor ICP / verlegde BTW) ─────────────────────────────────────
 const EU_COUNTRIES = [
@@ -86,6 +116,20 @@ export const countryCode = (country) => {
   return hit ? hit[0] : 'NON_EU'
 }
 export const isEUCountry = (country) => countryCode(country) !== 'NON_EU'
+
+// BTW-behandeling van een verkoopfactuur (Nederlandse verkoper), afgeleid van land + BTW-id klant:
+//   domestic     Nederlandse klant → NL BTW
+//   reverse_eu   Ondernemer in andere EU-lidstaat mét BTW-id → 0%, BTW verlegd (art. 196 BTW-richtlijn), rubriek 3b
+//   eu_no_vatid  Klant in andere EU-lidstaat zonder BTW-id → NL BTW (particulier), of BTW-id ontbreekt nog
+//   outside_eu   Klant buiten de EU → 0%, niet belast in Nederland (dienst), rubriek 1e
+export const deriveInvoiceVatTreatment = (client) => {
+  if (!client) return 'domestic'
+  const cc = countryCode(client.country)
+  if (cc === 'NL') return 'domestic'
+  if (cc === 'NON_EU') return 'outside_eu'
+  return String(client.btw || client.vatNumber || '').trim() ? 'reverse_eu' : 'eu_no_vatid'
+}
+export const isZeroRatedTreatment = (t) => t === 'reverse_eu' || t === 'outside_eu'
 
 // ── Kosten / bonnen ─────────────────────────────────────────────────────────
 // BTW-behandeling per kostenpost:
@@ -169,9 +213,12 @@ export const buildVatReturn = ({ invoices = [], expenses = [], clients = [], sta
     const client = clients.find(c => c.id === inv.clientId)
     const cc = countryCode(client?.country)
     const t = computeInvoice(inv.items)
-    Object.entries(t.netByRate).forEach(([rateStr, net]) => {
+    // Vreemde valuta: omrekenen naar EUR met de koers op factuurdatum (inv.exchangeRate)
+    const fx = invoiceEurRate(inv)
+    Object.entries(t.netByRate).forEach(([rateStr, rawNet]) => {
       const rate = Number(rateStr)
-      const tax = t.btwByRate[rateStr] || 0
+      const net = rawNet * fx
+      const tax = (t.btwByRate[rateStr] || 0) * fx
       let box = '1c'
       if (rate >= 20) box = '1a'
       else if (rate >= 8 && rate < 10) box = '1b'
@@ -179,7 +226,7 @@ export const buildVatReturn = ({ invoices = [], expenses = [], clients = [], sta
       r[box].net += net
       r[box].tax += tax
     })
-    salesRows.push({ inv, client, totals: t, country: cc })
+    salesRows.push({ inv, client, totals: t, country: cc, eurRate: fx, missingRate: invoiceMissingRate(inv) })
   })
 
   const purchaseRows = []
