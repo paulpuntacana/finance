@@ -7,6 +7,7 @@ import {
   Eye as EyeOff, UserPlus, ChevronLeft, CreditCard, ShieldCheck,
 } from 'lucide-react'
 import App from '../factuur-app.jsx'
+import { inviteUser, generateInviteCode } from './manageUsers'
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const ThemeStyles = () => (
@@ -57,7 +58,9 @@ const ACCESS_LABELS = {
 }
 
 // ── Create Client Org Modal ───────────────────────────────────────────────────
-function CreateOrgModal({ accountantId, onClose, onCreated }) {
+// Er bestaat geen kolom `managed_by`. "Klanten van deze accountant" = organisaties die
+// deze gebruiker zelf heeft aangemaakt (`created_by`, standaard auth.uid() — migratie v7).
+function CreateOrgModal({ onClose, onCreated }) {
   const [form, setForm] = useState({ name: '', plan: 'starter' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -66,13 +69,19 @@ function CreateOrgModal({ accountantId, onClose, onCreated }) {
     e.preventDefault()
     if (!form.name.trim()) { setError('Naam is verplicht'); return }
     setLoading(true)
-    const inviteCode = Math.random().toString(36).slice(2, 8).toUpperCase()
-    const { data: org, error: err } = await supabase
+    setError('')
+    const { error: err } = await supabase
       .from('organizations')
-      .insert({ name: form.name.trim(), plan: form.plan, invite_code: inviteCode, managed_by: accountantId })
+      .insert({ name: form.name.trim(), plan: form.plan, invite_code: generateInviteCode() })
       .select()
       .single()
-    if (err) { setError(err.message); setLoading(false); return }
+    if (err) {
+      setError(/row-level security|42501/i.test(err.message)
+        ? 'Je hebt geen rechten om een organisatie aan te maken. Alleen accounts zonder eigen organisatie of een platformbeheerder kunnen dat.'
+        : `Aanmaken mislukt: ${err.message}`)
+      setLoading(false)
+      return
+    }
     setLoading(false)
     onCreated()
     onClose()
@@ -122,38 +131,28 @@ function CreateOrgModal({ accountantId, onClose, onCreated }) {
 
 // ── Create Account Modal ──────────────────────────────────────────────────────
 function CreateAccountModal({ org, onClose, onCreated }) {
-  const [form, setForm] = useState({ email: '', full_name: '', password: '', access_type: 'bewerk' })
-  const [showPass, setShowPass] = useState(false)
+  const [form, setForm] = useState({ email: '', full_name: '', access_type: 'bewerk' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  // Via edge function `manage-users`: alleen org_owner van deze org of platform_admin mag uitnodigen.
   const handleCreate = async (e) => {
     e.preventDefault()
-    if (!form.email || !form.full_name || form.password.length < 8) {
-      setError('Vul alle velden in (wachtwoord minimaal 8 tekens)')
+    if (!form.email.trim() || !form.full_name.trim()) {
+      setError('Vul naam en e-mailadres in.')
       return
     }
     setLoading(true)
     setError('')
-    const { data, error: err } = await supabase.auth.admin.createUser({
+    const { error: err } = await inviteUser({
       email: form.email,
-      password: form.password,
-      email_confirm: true,
-      user_metadata: { full_name: form.full_name },
+      fullName: form.full_name,
+      organizationId: org.id,
+      role: 'org_owner',
+      accessType: form.access_type,
     })
-    if (err) { setError(err.message); setLoading(false); return }
-    if (data?.user) {
-      await supabase.from('profiles').upsert({
-        id: data.user.id,
-        email: form.email,
-        full_name: form.full_name,
-        role: 'org_owner',
-        access_type: form.access_type,
-        organization_id: org.id,
-        is_active: true,
-      })
-    }
     setLoading(false)
+    if (err) { setError(err); return }
     onCreated()
     onClose()
   }
@@ -189,17 +188,9 @@ function CreateAccountModal({ org, onClose, onCreated }) {
             <label style={{ display: 'block', color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '5px' }}>E-mailadres</label>
             <input style={inp} type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="jan@bedrijf.nl" required />
           </div>
-          <div>
-            <label style={{ display: 'block', color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '5px' }}>Wachtwoord</label>
-            <div style={{ position: 'relative' }}>
-              <input style={{ ...inp, paddingRight: '38px' }} type={showPass ? 'text' : 'password'}
-                value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Minimaal 8 tekens" required />
-              <button type="button" onClick={() => setShowPass(v => !v)}
-                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', padding: 0, display: 'flex' }}>
-                {showPass ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-            </div>
-          </div>
+          <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-3)' }}>
+            De persoon krijgt een uitnodigingsmail en kiest zelf een wachtwoord.
+          </p>
           <div>
             <label style={{ display: 'block', color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '5px' }}>Toegang</label>
             <select style={inp} value={form.access_type} onChange={e => setForm(f => ({ ...f, access_type: e.target.value }))}>
@@ -315,6 +306,7 @@ export default function AccountantPortal() {
   const [orgs, setOrgs] = useState([])
   const [allProfiles, setAllProfiles] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [showCreateOrg, setShowCreateOrg] = useState(false)
   const [createAccountFor, setCreateAccountFor] = useState(null) // org object
   const [activeOrg, setActiveOrg] = useState(null) // { org, readOnly }
@@ -328,10 +320,15 @@ export default function AccountantPortal() {
   const load = async () => {
     if (!isSupabaseConfigured) { setLoading(false); return }
     setLoading(true)
-    const [{ data: orgData }, { data: profileData }] = await Promise.all([
-      supabase.from('organizations').select('*').eq('managed_by', user.id).order('created_at', { ascending: false }),
+    setLoadError('')
+    // Geen `managed_by`-kolom: toon de eigen org + orgs die deze gebruiker zelf aanmaakte.
+    const ownOrg = profile?.organization_id
+    const orgFilter = ownOrg ? `created_by.eq.${user.id},id.eq.${ownOrg}` : `created_by.eq.${user.id}`
+    const [{ data: orgData, error: orgErr }, { data: profileData, error: profErr }] = await Promise.all([
+      supabase.from('organizations').select('*').or(orgFilter).order('created_at', { ascending: false }),
       supabase.from('profiles').select('*'),
     ])
+    if (orgErr || profErr) setLoadError(`Laden mislukt: ${(orgErr || profErr).message}`)
     setOrgs(orgData || [])
     setAllProfiles(profileData || [])
     setLoading(false)
@@ -341,7 +338,9 @@ export default function AccountantPortal() {
 
   const handleDelete = async (org) => {
     if (!confirm(`Klant "${org.name}" verwijderen? Dit verwijdert de organisatie maar niet de bijbehorende accounts en data.`)) return
-    await supabase.from('organizations').delete().eq('id', org.id)
+    const { data, error } = await supabase.from('organizations').delete().eq('id', org.id).select('id')
+    if (error) { setLoadError(`Verwijderen mislukt: ${error.message}`); return }
+    if (!data?.length) { setLoadError('Verwijderen mislukt: alleen een platformbeheerder kan organisaties verwijderen.'); return }
     setOrgs(prev => prev.filter(o => o.id !== org.id))
   }
 
@@ -363,7 +362,7 @@ export default function AccountantPortal() {
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }} data-theme={theme}>
       <ThemeStyles />
       {showCreateOrg && (
-        <CreateOrgModal accountantId={user.id} onClose={() => setShowCreateOrg(false)} onCreated={load} />
+        <CreateOrgModal onClose={() => setShowCreateOrg(false)} onCreated={load} />
       )}
       {createAccountFor && (
         <CreateAccountModal org={createAccountFor} onClose={() => setCreateAccountFor(null)} onCreated={load} />
@@ -415,6 +414,12 @@ export default function AccountantPortal() {
             </button>
           </div>
         </div>
+
+        {loadError && (
+          <div role="alert" style={{ background: 'var(--danger-soft)', borderRadius: '8px', padding: '10px 12px', color: 'var(--danger)', fontSize: '13px', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertCircle size={14} /> {loadError}
+          </div>
+        )}
 
         {/* Summary stats */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '28px' }}>

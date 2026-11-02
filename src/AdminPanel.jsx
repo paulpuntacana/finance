@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
-import { createClient } from '@supabase/supabase-js'
-import { supabase, isSupabaseConfigured, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase'
+import { supabase, isSupabaseConfigured } from './supabase'
+import { inviteUser, generateInviteCode } from './manageUsers'
 import {
   Users, Shield, CheckCircle, XCircle, RefreshCw,
   Building2, Copy, Check, Plus, Trash2, Search,
@@ -188,7 +188,7 @@ function EditUserModal({ profile, orgs, onClose, onSaved }) {
 
 // ── MODAL: Tijdelijke toegangscode ─────────────────────────────────────────────
 function TempCodeModal({ profile, onClose }) {
-  const [code] = useState(() => Math.random().toString(36).slice(2, 10).toUpperCase())
+  const [code] = useState(() => generateInviteCode())
   const [copied, setCopied] = useState(false)
   const link = `${window.location.origin}/?invite=${code}&email=${encodeURIComponent(profile.email || '')}`
   const copy = () => { navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000) }
@@ -219,33 +219,26 @@ function TempCodeModal({ profile, onClose }) {
 
 // ── MODAL: Nieuwe gebruiker aanmaken ──────────────────────────────────────────
 function CreateUserModal({ onClose, onCreated, orgs }) {
-  const [form, setForm] = useState({ email: '', full_name: '', password: '', role: 'org_owner', organization_id: '' })
+  const [form, setForm] = useState({ email: '', full_name: '', role: 'org_owner', organization_id: '' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [showPass, setShowPass] = useState(false)
 
+  // Via edge function `manage-users` (service role server-side): stuurt een uitnodigingsmail
+  // en zet rol + organisatie in het profiel.
   const handleCreate = async (e) => {
     e.preventDefault()
-    if (!form.email || !form.full_name || form.password.length < 8) { setError('Vul alle velden in (wachtwoord minimaal 8 tekens)'); return }
+    if (!form.email.trim() || !form.full_name.trim()) { setError('Vul naam en e-mailadres in.'); return }
     setLoading(true); setError('')
-    // Gebruik aparte client zodat admin-sessie intact blijft
-    const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false }
+    const { error: err } = await inviteUser({
+      email: form.email,
+      fullName: form.full_name,
+      organizationId: form.organization_id || null,
+      role: form.role,
+      accessType: 'owner',
     })
-    const { data, error: err } = await tempClient.auth.signUp({
-      email: form.email, password: form.password,
-      options: { data: { full_name: form.full_name } }
-    })
-    if (err) { setError(err.message); setLoading(false); return }
-    if (data?.user) {
-      // Wacht even zodat de DB-trigger de profile heeft aangemaakt
-      await new Promise(r => setTimeout(r, 500))
-      await supabase.from('profiles').upsert({
-        id: data.user.id, email: form.email, full_name: form.full_name,
-        role: form.role, organization_id: form.organization_id || null, is_active: true,
-      })
-    }
-    setLoading(false); onCreated(); onClose()
+    setLoading(false)
+    if (err) { setError(err); return }
+    onCreated(); onClose()
   }
 
   return (
@@ -273,13 +266,9 @@ function CreateUserModal({ onClose, onCreated, orgs }) {
             <label style={{ display: 'block', color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>E-mail</label>
             <input style={inp} type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="jan@bedrijf.nl" required />
           </div>
-          <div>
-            <label style={{ display: 'block', color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>Wachtwoord</label>
-            <div style={{ position: 'relative' }}>
-              <input style={{ ...inp, paddingRight: '38px' }} type={showPass ? 'text' : 'password'} value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Minimaal 8 tekens" required />
-              <button type="button" onClick={() => setShowPass(v => !v)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', padding: 0, display: 'flex' }}>{showPass ? <EyeOff size={14} /> : <Eye size={14} />}</button>
-            </div>
-          </div>
+          <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-3)' }}>
+            De gebruiker krijgt een uitnodigingsmail en kiest zelf een wachtwoord.
+          </p>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
               <label style={{ display: 'block', color: 'var(--text-2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>Rol</label>
@@ -517,26 +506,35 @@ function OrgsTab({ orgs, setOrgs, profiles, onReload }) {
   const [linking, setLinking]       = useState(false)
 
   const copyCode = (code) => { navigator.clipboard.writeText(code); setCopied(code); setTimeout(() => setCopied(null), 2000) }
+  const [orgError, setOrgError] = useState('')
   const regenCode = async (id) => {
-    const c = Math.random().toString(36).slice(2, 8).toUpperCase()
-    await supabase.from('organizations').update({ invite_code: c }).eq('id', id)
+    setOrgError('')
+    const c = generateInviteCode()
+    const { error } = await supabase.from('organizations').update({ invite_code: c }).eq('id', id)
+    if (error) { setOrgError(`Nieuwe code opslaan mislukt: ${error.message}`); return }
     setOrgs(os => os.map(o => o.id === id ? { ...o, invite_code: c } : o))
   }
   const deleteOrg = async (id, orgName) => {
     if (!confirm(`Organisatie "${orgName}" verwijderen?`)) return
-    await supabase.from('organizations').delete().eq('id', id)
+    setOrgError('')
+    const { data, error } = await supabase.from('organizations').delete().eq('id', id).select('id')
+    if (error || !data?.length) { setOrgError(`Verwijderen mislukt: ${error?.message || 'geen rechten'}`); return }
     setOrgs(os => os.filter(o => o.id !== id))
   }
   const createOrg = async (e) => {
-    e.preventDefault(); setCreating(true)
-    await supabase.from('organizations').insert({ name: name.trim(), plan, invite_code: Math.random().toString(36).slice(2, 8).toUpperCase() })
-    setCreating(false); setShowCreate(false); setName(''); setPlan('starter'); onReload()
+    e.preventDefault(); setCreating(true); setOrgError('')
+    const { error } = await supabase.from('organizations').insert({ name: name.trim(), plan, invite_code: generateInviteCode() })
+    setCreating(false)
+    if (error) { setOrgError(`Aanmaken mislukt: ${error.message}`); return }
+    setShowCreate(false); setName(''); setPlan('starter'); onReload()
   }
   const linkUser = async (e) => {
     e.preventDefault(); if (!linkUserId || !linkOrgId) return
-    setLinking(true)
-    await supabase.from('profiles').update({ organization_id: linkOrgId }).eq('id', linkUserId)
-    setLinking(false); setLinkUserId(''); setLinkOrgId(''); onReload()
+    setLinking(true); setOrgError('')
+    const { error } = await supabase.from('profiles').update({ organization_id: linkOrgId }).eq('id', linkUserId)
+    setLinking(false)
+    if (error) { setOrgError(`Koppelen mislukt: ${error.message}`); return }
+    setLinkUserId(''); setLinkOrgId(''); onReload()
   }
 
   // Unlinked users (no org yet)
@@ -550,6 +548,12 @@ function OrgsTab({ orgs, setOrgs, profiles, onReload }) {
           <Plus size={14} /> Nieuwe organisatie
         </button>
       </div>
+
+      {orgError && (
+        <div role="alert" style={{ background: 'var(--danger-soft)', borderRadius: '8px', padding: '10px 12px', color: 'var(--danger)', fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <AlertCircle size={14} /> {orgError}
+        </div>
+      )}
 
       {/* Nieuwe org aanmaken */}
       {showCreate && (

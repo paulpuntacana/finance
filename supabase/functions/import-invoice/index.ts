@@ -1,101 +1,146 @@
+// import-invoice — Make.com (of andere tool) plaatst een inkoopfactuur in het juiste account.
+//
+// Authenticatie: persoonlijk API-token (Authorization: Bearer <token>).
+// Alleen de SHA-256-hash van het token staat in user_settings.api_token_hash (migratie v7).
+// De organisatie wordt NIET uit user_settings.org_id gehaald, maar uit het actieve profiel
+// van de token-eigenaar (profiles.organization_id, is_active = true).
+//
+// Response (ongewijzigd): 201 { success: true, id }  |  4xx/5xx { error }
+
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
+// Server-naar-server endpoint: geen cookies/credentials, alleen POST.
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'authorization, content-type',
 }
 
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...corsHeaders },
+  })
+
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  { auth: { persistSession: false, autoRefreshToken: false } },
 )
 
-Deno.serve(async (req) => {
-  // CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders })
-  }
+const sha256Hex = async (text: string) => {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('')
+}
 
-  if (req.method !== 'POST') {
-    return new Response(
-      JSON.stringify({ error: 'Method Not Allowed' }),
-      { status: 405, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-    )
-  }
+// Getal uit body: accepteert 12.5 / "12.5" / "12,50". Geeft null bij ongeldig.
+const toNumber = (v: unknown): number | null => {
+  if (v === undefined || v === null || v === '') return null
+  const n = typeof v === 'number' ? v : Number(String(v).trim().replace(',', '.'))
+  return Number.isFinite(n) ? n : null
+}
+const round2 = (n: number) => Math.round(n * 100) / 100
+const str = (v: unknown, max = 500) => (v === undefined || v === null || v === '' ? null : String(v).slice(0, max))
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+const MAX_AMOUNT = 100_000_000
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
+  if (req.method !== 'POST') return json(405, { error: 'Method Not Allowed' })
 
   // Token uit Authorization header
   const authHeader = req.headers.get('Authorization') || ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim()
-
-  if (!token) {
-    return new Response(
-      JSON.stringify({ error: 'Missing Authorization header' }),
-      { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-    )
+  if (!token || token.length < 32 || token.length > 200) {
+    return json(401, { error: 'Missing Authorization header' })
   }
 
-  // Zoek gebruiker op via token
+  // Token → gebruiker (via hash)
+  const tokenHash = await sha256Hex(token)
   const { data: settings, error: settingsError } = await supabaseAdmin
     .from('user_settings')
-    .select('user_id, org_id')
-    .eq('api_token', token)
+    .select('user_id')
+    .eq('api_token_hash', tokenHash)
     .maybeSingle()
+  if (settingsError || !settings?.user_id) return json(401, { error: 'Ongeldig token' })
 
-  if (settingsError || !settings) {
-    return new Response(
-      JSON.stringify({ error: 'Ongeldig token' }),
-      { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-    )
+  // Gebruiker → organisatie (alleen actief profiel met schrijfrechten op financiële data)
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from('profiles')
+    .select('organization_id, role, access_type, is_active')
+    .eq('id', settings.user_id)
+    .eq('is_active', true)
+    .maybeSingle()
+  if (profileError || !profile?.organization_id) {
+    return json(403, { error: 'Account is niet actief of niet gekoppeld aan een organisatie' })
   }
+  const canWrite = profile.role === 'platform_admin' ||
+    (['org_owner', 'accountant'].includes(profile.role) && (profile.access_type ?? 'owner') !== 'meekijk')
+  if (!canWrite) return json(403, { error: 'Dit account mag geen inkoopfacturen toevoegen' })
+  const org_id = profile.organization_id
 
-  const { org_id } = settings
-
-  // Parse request body
+  // Body parsen
   let body: Record<string, unknown>
   try {
     body = await req.json()
   } catch {
-    return new Response(
-      JSON.stringify({ error: 'Ongeldige JSON in request body' }),
-      { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-    )
+    return json(400, { error: 'Ongeldige JSON in request body' })
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return json(400, { error: 'Ongeldige JSON in request body' })
   }
 
   // Verplichte velden
   const { supplier, date, amount_excl } = body
   if (!supplier || !date || amount_excl === undefined || amount_excl === null) {
-    return new Response(
-      JSON.stringify({ error: 'Verplichte velden ontbreken: supplier, date, amount_excl' }),
-      { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-    )
+    return json(400, { error: 'Verplichte velden ontbreken: supplier, date, amount_excl' })
+  }
+  if (!ISO_DATE.test(String(date))) return json(400, { error: 'date moet het formaat JJJJ-MM-DD hebben' })
+  if (body.due_date && !ISO_DATE.test(String(body.due_date))) {
+    return json(400, { error: 'due_date moet het formaat JJJJ-MM-DD hebben' })
   }
 
-  const btwRate   = parseFloat(String(body.btw_rate ?? 0))
-  const amountExcl = parseFloat(String(amount_excl))
-  const btwAmount  = body.btw_amount !== undefined
-    ? parseFloat(String(body.btw_amount))
-    : parseFloat((amountExcl * btwRate / 100).toFixed(2))
-  const totalAmount = body.total_amount !== undefined
-    ? parseFloat(String(body.total_amount))
-    : parseFloat((amountExcl + btwAmount).toFixed(2))
+  // Getallen valideren
+  const amountExcl = toNumber(amount_excl)
+  if (amountExcl === null || Math.abs(amountExcl) > MAX_AMOUNT) return json(400, { error: 'amount_excl is geen geldig bedrag' })
+
+  const btwRate = body.btw_rate === undefined || body.btw_rate === null || body.btw_rate === '' ? 0 : toNumber(body.btw_rate)
+  if (btwRate === null || btwRate < 0 || btwRate > 100) return json(400, { error: 'btw_rate moet tussen 0 en 100 liggen' })
+
+  let btwAmount = round2(amountExcl * btwRate / 100)
+  if (body.btw_amount !== undefined && body.btw_amount !== null && body.btw_amount !== '') {
+    const v = toNumber(body.btw_amount)
+    if (v === null || Math.abs(v) > MAX_AMOUNT) return json(400, { error: 'btw_amount is geen geldig bedrag' })
+    btwAmount = round2(v)
+  }
+
+  let totalAmount = round2(amountExcl + btwAmount)
+  if (body.total_amount !== undefined && body.total_amount !== null && body.total_amount !== '') {
+    const v = toNumber(body.total_amount)
+    if (v === null || Math.abs(v) > MAX_AMOUNT) return json(400, { error: 'total_amount is geen geldig bedrag' })
+    totalAmount = round2(v)
+  }
+
+  const currency = body.currency ? String(body.currency).trim().toUpperCase() : 'EUR'
+  if (!/^[A-Z]{3}$/.test(currency)) return json(400, { error: 'currency moet een ISO-code zijn (bijv. EUR)' })
 
   const { data: inserted, error: insertError } = await supabaseAdmin
     .from('purchase_invoices')
     .insert({
       org_id,
-      supplier:        String(supplier),
-      invoice_number:  body.invoice_number ? String(body.invoice_number) : null,
+      supplier:        String(supplier).slice(0, 200),
+      invoice_number:  str(body.invoice_number, 100),
       date:            String(date),
-      due_date:        body.due_date ? String(body.due_date) : null,
-      amount_excl:     amountExcl,
+      due_date:        str(body.due_date, 10),
+      amount_excl:     round2(amountExcl),
       btw_rate:        btwRate,
       btw_amount:      btwAmount,
       total_amount:    totalAmount,
-      currency:        body.currency ? String(body.currency) : 'EUR',
-      category:        body.category ? String(body.category) : 'Software & Abonnementen',
-      notes:           body.notes ? String(body.notes) : null,
-      attachment_url:  body.attachment_url ? String(body.attachment_url) : null,
-      attachment_name: body.attachment_name ? String(body.attachment_name) : null,
+      currency,
+      category:        str(body.category, 100) ?? 'Software & Abonnementen',
+      notes:           str(body.notes, 2000),
+      attachment_url:  str(body.attachment_url, 2000),
+      attachment_name: str(body.attachment_name, 300),
       status:          'unpaid',
       extra:           {},
     })
@@ -104,14 +149,8 @@ Deno.serve(async (req) => {
 
   if (insertError) {
     console.error('Insert error:', insertError)
-    return new Response(
-      JSON.stringify({ error: insertError.message }),
-      { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-    )
+    return json(500, { error: 'Opslaan mislukt' })
   }
 
-  return new Response(
-    JSON.stringify({ success: true, id: inserted.id }),
-    { status: 201, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-  )
+  return json(201, { success: true, id: inserted.id })
 })
