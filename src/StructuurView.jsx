@@ -139,8 +139,8 @@ export default function StructuurView() {
               <thead><tr>{DATA.calc.columns.map(c => <th key={c} className={c === DATA.calc.columns[0] ? '' : 'r'}>{c}</th>)}</tr></thead>
               <tbody>
                 {DATA.calc.rows.map(r => (
-                  <tr key={r[0]} style={r.total ? { fontWeight: 600 } : undefined}>
-                    {r.cells.map((c, i) => <td key={i} className={i === 0 ? '' : 'r'}>{i === 0 ? c : <span className="money">{c}</span>}</td>)}
+                  <tr key={r.cells[0]} style={r.total ? { fontWeight: 600 } : undefined}>
+                    {r.cells.map((c, i) => <td key={i} className={i === 0 ? '' : 'r'}>{i === 0 || i === r.cells.length - 1 ? c : <span className="money">{c}</span>}</td>)}
                   </tr>
                 ))}
               </tbody>
